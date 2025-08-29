@@ -404,7 +404,7 @@ public class FacturaService {
                 .xmlContent(xml)
                 .fechaGeneracion(LocalDateTime.now())
                 .fechaTimbrado(LocalDateTime.now())
-                .estado("TIMBRADA")
+                .estado("VIGENTE")
                 .serie("A")
                 .folio("1")
                 .cadenaOriginal("Simulada para ambiente de pruebas")
@@ -485,7 +485,7 @@ public class FacturaService {
                 .xmlContent(xml)
                 .fechaGeneracion(LocalDateTime.now())
                 .fechaTimbrado(LocalDateTime.now())
-                .estado("TIMBRADA")
+                .estado("VIGENTE")
                 .serie("A")
                 .folio("1")
                 .cadenaOriginal("Simulada para ambiente de pruebas")
@@ -523,7 +523,7 @@ public class FacturaService {
                 .xmlContent(xml)
                 .fechaGeneracion(LocalDateTime.now())
                 .fechaTimbrado(LocalDateTime.now())
-                .estado("TIMBRADA")
+                .estado("VIGENTE")
                 .serie("A")
                 .folio("1")
                 .cadenaOriginal("Simulada para ambiente de pruebas")
@@ -608,7 +608,7 @@ public class FacturaService {
                 .xmlContent(xml)
                 .fechaGeneracion(LocalDateTime.now())
                 .fechaTimbrado(LocalDateTime.now())
-                .estado("TIMBRADA")
+                .estado("VIGENTE")
                 .serie("A")
                 .folio("1")
                 .cadenaOriginal("Simulada para ambiente de pruebas")
@@ -675,7 +675,7 @@ public class FacturaService {
             factura1.put("razonSocial", "Empresa Ejemplo S.A. de C.V.");
             factura1.put("rfc", rfcEmpresa != null ? rfcEmpresa : "EEJ920629TE3");
             factura1.put("total", 1250.50);
-            factura1.put("estado", "TIMBRADA");
+            factura1.put("estado", "VIGENTE");
             factura1.put("medioPago", "Efectivo");
             factura1.put("formaPago", "Pago en una sola exhibición");
 
@@ -689,7 +689,7 @@ public class FacturaService {
             factura2.put("razonSocial", "Cliente General");
             factura2.put("rfc", "XAXX010101000");
             factura2.put("total", 3450.75);
-            factura2.put("estado", "TIMBRADA");
+            factura2.put("estado", "VIGENTE");
             factura2.put("medioPago", "Tarjeta de crédito");
             factura2.put("formaPago", "Pago en una sola exhibición");
 
@@ -703,7 +703,7 @@ public class FacturaService {
             factura3.put("razonSocial", "María Rodríguez");
             factura3.put("rfc", "ROMA800101ABC");
             factura3.put("total", 5678.90);
-            factura3.put("estado", "TIMBRADA");
+            factura3.put("estado", "VIGENTE");
             factura3.put("medioPago", "Transferencia");
             factura3.put("formaPago", "Pago en una sola exhibición");
 
