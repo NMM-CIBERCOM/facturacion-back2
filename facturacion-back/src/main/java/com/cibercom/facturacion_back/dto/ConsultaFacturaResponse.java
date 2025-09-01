@@ -121,3 +121,4 @@ public class ConsultaFacturaResponse {
         public void setMotivoNoCancelacion(String motivoNoCancelacion) { this.motivoNoCancelacion = motivoNoCancelacion; }
     }
 }
+

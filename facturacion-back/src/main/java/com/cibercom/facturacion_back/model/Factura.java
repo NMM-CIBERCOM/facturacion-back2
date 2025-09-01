@@ -129,7 +129,10 @@ public class Factura {
     
     // Estado y Control
     @Column(name = "ESTADO", length = 20)
-    private String estado; // GENERADA, TIMBRADA, CANCELADA
+    private String estado; // Código del estado según SAT (66, 0, 1, 2, 3, 4, 99, 67)
+    
+    @Column(name = "ESTADO_DESCRIPCION", length = 100)
+    private String estadoDescripcion; // Descripción del estado
     
     @Column(name = "SERIE", length = 10)
     private String serie;

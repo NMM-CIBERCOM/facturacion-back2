@@ -1,5 +1,7 @@
 package com.cibercom.facturacion_back.integration;
 
+import com.cibercom.facturacion_back.dto.PacTimbradoRequest;
+import com.cibercom.facturacion_back.dto.PacTimbradoResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpEntity;
@@ -33,6 +35,24 @@ public class PacClient {
             r.setOk(false);
             r.setStatus("ERROR");
             r.setMessage("PAC no disponible: " + e.getMessage());
+            return r;
+        }
+    }
+
+    public PacTimbradoResponse solicitarTimbrado(PacTimbradoRequest req) {
+        try {
+            String url = baseUrl + "/stamp";
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            HttpEntity<PacTimbradoRequest> entity = new HttpEntity<>(req, headers);
+            ResponseEntity<PacTimbradoResponse> response = restTemplate.postForEntity(url, entity, PacTimbradoResponse.class);
+            return response.getBody();
+        } catch (Exception e) {
+            logger.error("Error llamando PAC para timbrado: {}", e.getMessage());
+            PacTimbradoResponse r = new PacTimbradoResponse();
+            r.setOk(false);
+            r.setStatus("ERROR");
+            r.setMessage("PAC no disponible para timbrado: " + e.getMessage());
             return r;
         }
     }

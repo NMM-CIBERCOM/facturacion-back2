@@ -50,3 +50,7 @@ nbdist/
 # Archivos de sistema
 .DS_Store
 Thumbs.db
+
+.md
+.ps1
+.sql

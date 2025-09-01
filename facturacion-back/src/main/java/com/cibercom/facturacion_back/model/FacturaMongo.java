@@ -82,7 +82,10 @@ public class FacturaMongo {
     
     // Estado y Control
     @Field("estado")
-    private String estado; // GENERADA, TIMBRADA, CANCELADA
+    private String estado; // Código del estado según SAT (66, 0, 1, 2, 3, 4, 99, 67)
+    
+    @Field("estadoDescripcion")
+    private String estadoDescripcion; // Descripción del estado
     
     @Field("serie")
     private String serie;
