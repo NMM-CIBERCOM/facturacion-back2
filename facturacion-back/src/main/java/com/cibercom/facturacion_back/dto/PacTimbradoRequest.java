@@ -10,6 +10,7 @@ import lombok.AllArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class PacTimbradoRequest {
+    private String uuid;  // UUID para identificar la factura
     private String xmlContent;
     private String rfcEmisor;
     private String rfcReceptor;

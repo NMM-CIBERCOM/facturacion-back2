@@ -194,6 +194,7 @@ public class FacturaTimbradoService {
      */
     private PacTimbradoRequest construirPacTimbradoRequest(FacturaRequest request, String xml, BigDecimal total, String uuid) {
         return PacTimbradoRequest.builder()
+                .uuid(uuid) // Incluir el UUID generado por el backend
                 .xmlContent(xml)
                 .rfcEmisor(request.getRfcEmisor())
                 .rfcReceptor(request.getRfcReceptor())
