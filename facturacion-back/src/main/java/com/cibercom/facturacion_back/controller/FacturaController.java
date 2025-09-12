@@ -12,10 +12,16 @@ import com.cibercom.facturacion_back.repository.FacturaMongoRepository;
 import com.cibercom.facturacion_back.service.FacturaService;
 import com.cibercom.facturacion_back.service.ConsultaFacturaService;
 import com.cibercom.facturacion_back.service.FacturaTimbradoService;
+import com.cibercom.facturacion_back.service.ITextPdfService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.Environment;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
+import java.util.HashMap;
 
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -46,6 +52,84 @@ public class FacturaController {
     @Autowired
     private Environment environment;
     
+    @Autowired
+    private ITextPdfService iTextPdfService;
+    
+    /**
+     * Endpoint para generar PDF de factura usando iText
+     */
+    @PostMapping("/generar-pdf")
+    public ResponseEntity<byte[]> generarPDF(@RequestBody Map<String, Object> request) {
+        logger.info("Recibida solicitud de generación de PDF: {}", request);
+        
+        try {
+            // Extraer datos de la factura y configuración del logo
+            Map<String, Object> facturaData = (Map<String, Object>) request.get("facturaData");
+            Map<String, Object> logoConfig = (Map<String, Object>) request.get("logoConfig");
+            
+            // Generar PDF usando iText
+            byte[] pdfBytes = iTextPdfService.generarPdfConLogo(facturaData, logoConfig);
+            
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_PDF);
+            headers.setContentDispositionFormData("attachment", "factura.pdf");
+            
+            logger.info("PDF generado exitosamente con iText. Tamaño: {} bytes", pdfBytes.length);
+            return ResponseEntity.ok()
+                    .headers(headers)
+                    .body(pdfBytes);
+                    
+        } catch (Exception e) {
+            logger.error("Error generando PDF con iText", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+    
+    /**
+     * Método auxiliar para generar HTML de la factura
+     */
+    private String generarHTMLFactura(Map<String, Object> facturaData, Map<String, Object> logoConfig) {
+        String logoBase64 = (String) logoConfig.get("logoBase64");
+        String logoUrl = (String) logoConfig.get("logoUrl");
+        
+        StringBuilder html = new StringBuilder();
+        html.append("<!DOCTYPE html>\n");
+        html.append("<html>\n<head>\n");
+        html.append("<meta charset='UTF-8'>\n");
+        html.append("<title>Factura</title>\n");
+        html.append("<style>\n");
+        html.append(".factura-container { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; }\n");
+        html.append(".header { display: flex; justify-content: space-between; margin-bottom: 20px; }\n");
+        html.append(".logo { max-height: 80px; max-width: 200px; }\n");
+        html.append("</style>\n");
+        html.append("</head>\n<body>\n");
+        html.append("<div class='factura-container'>\n");
+        html.append("<div class='header'>\n");
+        html.append("<div class='logo-section'>\n");
+        
+        // Usar logoBase64 si está disponible, sino usar logoUrl
+        if (logoBase64 != null && !logoBase64.isEmpty()) {
+            html.append("<img src='data:image/svg+xml;base64,").append(logoBase64).append("' alt='Logo' class='logo' />\n");
+        } else if (logoUrl != null && !logoUrl.isEmpty()) {
+            html.append("<img src='").append(logoUrl).append("' alt='Logo' class='logo' />\n");
+        }
+        
+        html.append("</div>\n");
+        html.append("<div class='factura-info'>\n");
+        html.append("<h1>FACTURA ELECTRÓNICA</h1>\n");
+        html.append("<p>Serie-Folio: ").append(facturaData.get("serie")).append("-").append(facturaData.get("folio")).append("</p>\n");
+        html.append("<p>UUID: ").append(facturaData.get("uuid")).append("</p>\n");
+        html.append("</div>\n");
+        html.append("</div>\n");
+        html.append("<p>Emisor: ").append(facturaData.get("nombreEmisor")).append("</p>\n");
+        html.append("<p>Receptor: ").append(facturaData.get("nombreReceptor")).append("</p>\n");
+        html.append("<p>Total: $").append(facturaData.get("importe")).append("</p>\n");
+        html.append("</div>\n");
+        html.append("</body>\n</html>");
+        
+        return html.toString();
+    }
+    
     /**
      * Endpoint para generar y timbrar una factura (asíncrono)
      */
@@ -75,6 +159,77 @@ public class FacturaController {
                 .timestamp(java.time.LocalDateTime.now())
                 .build();
             return ResponseEntity.internalServerError().body(errorResponse);
+        }
+    }
+    
+    /**
+     * Endpoint para generar solo el XML de una factura (sin timbrar) - Acepta JSON
+     */
+    @PostMapping("/generar/xml")
+    public ResponseEntity<FacturaResponse> generarXmlFactura(
+            @Valid @RequestBody FacturaRequest request) {
+        
+        logger.info("Recibida solicitud de generación de XML: {}", request);
+        
+        try {
+            FacturaResponse response = facturaService.procesarFactura(request);
+            
+            logger.info("Respuesta del servicio XML: exitoso={}, mensaje={}", response.isExitoso(), response.getMensaje());
+            
+            if (response.isExitoso()) {
+                return ResponseEntity.ok(response);
+            } else {
+                logger.warn("Generación de XML fallida: {}", response.getMensaje());
+                return ResponseEntity.badRequest().body(response);
+            }
+            
+        } catch (Exception e) {
+            logger.error("Error interno del servidor al generar XML", e);
+            FacturaResponse errorResponse = FacturaResponse.builder()
+                .exitoso(false)
+                .mensaje("Error interno del servidor: " + e.getMessage())
+                .timestamp(java.time.LocalDateTime.now())
+                .build();
+            return ResponseEntity.internalServerError().body(errorResponse);
+        }
+    }
+    
+    /**
+     * Endpoint para generar XML desde XML - Acepta XML y devuelve XML
+     */
+    @PostMapping(value = "/generar/xml-to-xml", consumes = {"application/xml", "text/xml", "text/xml;charset=UTF-8", "application/xml;charset=UTF-8"}, produces = "application/xml")
+    public ResponseEntity<String> generarXmlDesdeXml(@RequestBody String xmlRequest) {
+        
+        logger.info("Recibida solicitud XML: {}", xmlRequest);
+        
+        try {
+            FacturaRequest request = facturaService.convertirXmlAFacturaRequest(xmlRequest);
+            FacturaResponse response = facturaService.procesarFactura(request);
+            
+            if (response.isExitoso()) {
+                return ResponseEntity.ok()
+                    .contentType(org.springframework.http.MediaType.APPLICATION_XML)
+                    .body(response.getXmlTimbrado());
+            } else {
+                String errorXml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
+                    "<error>\n" +
+                    "  <mensaje>" + response.getMensaje() + "</mensaje>\n" +
+                    "  <errores>" + (response.getErrores() != null ? response.getErrores() : "") + "</errores>\n" +
+                    "</error>";
+                return ResponseEntity.badRequest()
+                    .contentType(org.springframework.http.MediaType.APPLICATION_XML)
+                    .body(errorXml);
+            }
+            
+        } catch (Exception e) {
+            logger.error("Error procesando XML", e);
+            String errorXml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
+                "<error>\n" +
+                "  <mensaje>Error interno del servidor: " + e.getMessage() + "</mensaje>\n" +
+                "</error>";
+            return ResponseEntity.internalServerError()
+                .contentType(org.springframework.http.MediaType.APPLICATION_XML)
+                .body(errorXml);
         }
     }
     
@@ -286,6 +441,61 @@ public class FacturaController {
                 return "Factura temporal - Error en comunicación";
             default:
                 return "Estado: " + estado;
+        }
+    }
+    
+    /**
+     * Endpoint para descargar el XML de una factura
+     */
+    @GetMapping("/descargar-xml/{uuid}")
+    public ResponseEntity<byte[]> descargarXml(@PathVariable String uuid) {
+        logger.info("Solicitud de descarga de XML para UUID: {}", uuid);
+        
+        try {
+            String activeProfile = environment.getActiveProfiles().length > 0 ? 
+                environment.getActiveProfiles()[0] : "oracle";
+            
+            String xmlContent = null;
+            
+            if ("mongo".equals(activeProfile)) {
+                // Buscar en MongoDB
+                FacturaMongo facturaMongo = facturaMongoRepository.findByUuid(uuid);
+                if (facturaMongo == null) {
+                    logger.warn("Factura no encontrada en MongoDB para UUID: {}", uuid);
+                    return ResponseEntity.notFound().build();
+                }
+                xmlContent = facturaMongo.getXmlContent();
+            } else {
+                // Buscar en Oracle
+                java.util.Optional<Factura> facturaOpt = facturaRepository.findByUuid(uuid);
+                if (!facturaOpt.isPresent()) {
+                    logger.warn("Factura no encontrada en Oracle para UUID: {}", uuid);
+                    return ResponseEntity.notFound().build();
+                }
+                Factura factura = facturaOpt.get();
+                xmlContent = factura.getXmlContent();
+            }
+            
+            if (xmlContent == null || xmlContent.isEmpty()) {
+                logger.warn("XML no disponible para UUID: {} en perfil: {}", uuid, activeProfile);
+                return ResponseEntity.notFound().build();
+            }
+            
+            byte[] xmlBytes = xmlContent.getBytes("UTF-8");
+            
+            org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+            headers.setContentType(org.springframework.http.MediaType.APPLICATION_XML);
+            headers.setContentDispositionFormData("attachment", "FACTURA_" + uuid + ".xml");
+            headers.setContentLength(xmlBytes.length);
+            
+            logger.info("XML descargado exitosamente para UUID: {} desde perfil: {}", uuid, activeProfile);
+            return ResponseEntity.ok()
+                    .headers(headers)
+                    .body(xmlBytes);
+                    
+        } catch (Exception e) {
+            logger.error("Error al descargar XML para UUID: {}", uuid, e);
+            return ResponseEntity.status(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
     }
     

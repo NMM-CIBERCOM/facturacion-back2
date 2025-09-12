@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400" width="800" height="400">
+  <!-- Fondo del logo -->
+  <defs>
+    <linearGradient id="sharkGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#2C5F7C;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#1E4A5F;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0F2A3A;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="textGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#2E86AB;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#A23B72;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#F18F01;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Cuerpo principal del tiburón -->
+  <ellipse cx="400" cy="200" rx="350" ry="120" fill="url(#sharkGradient)" stroke="#1A3A4A" stroke-width="3"/>
+  
+  <!-- Cabeza del tiburón -->
+  <ellipse cx="650" cy="200" rx="120" ry="80" fill="url(#sharkGradient)" stroke="#1A3A4A" stroke-width="2"/>
+  
+  <!-- Hocico puntiagudo -->
+  <path d="M 750 200 Q 780 190 790 200 Q 780 210 750 200" fill="#1E4A5F" stroke="#1A3A4A" stroke-width="2"/>
+  
+  <!-- Ojo del tiburón -->
+  <circle cx="680" cy="180" r="12" fill="white"/>
+  <circle cx="682" cy="178" r="8" fill="#0F2A3A"/>
+  <circle cx="684" cy="176" r="3" fill="white"/>
+  
+  <!-- Aletas dorsales -->
+  <path d="M 300 120 Q 320 80 350 90 Q 380 100 400 120 Q 370 130 340 125 Q 310 130 300 120" fill="#2E86AB" stroke="#1A3A4A" stroke-width="2"/>
+  <path d="M 450 125 Q 470 90 500 95 Q 530 105 550 125 Q 520 135 490 130 Q 460 135 450 125" fill="#2E86AB" stroke="#1A3A4A" stroke-width="2"/>
+  
+  <!-- Aleta caudal (cola) -->
+  <path d="M 50 200 Q 20 150 10 120 Q 30 110 60 140 Q 80 170 100 180 Q 80 190 60 220 Q 30 250 10 280 Q 20 290 50 260 Q 80 230 100 220 Q 80 210 50 200" fill="#2E86AB" stroke="#1A3A4A" stroke-width="2"/>
+  
+  <!-- Aletas pectorales -->
+  <path d="M 400 280 Q 420 320 450 330 Q 480 325 500 300 Q 480 290 450 295 Q 420 290 400 280" fill="#2E86AB" stroke="#1A3A4A" stroke-width="2"/>
+  <path d="M 400 120 Q 420 80 450 70 Q 480 75 500 100 Q 480 110 450 105 Q 420 110 400 120" fill="#2E86AB" stroke="#1A3A4A" stroke-width="2"/>
+  
+  <!-- Detalles decorativos en el cuerpo -->
+  <circle cx="200" cy="160" r="4" fill="white" opacity="0.6"/>
+  <circle cx="250" cy="180" r="3" fill="white" opacity="0.6"/>
+  <circle cx="300" cy="170" r="3" fill="white" opacity="0.6"/>
+  <circle cx="350" cy="190" r="4" fill="white" opacity="0.6"/>
+  <circle cx="400" cy="160" r="3" fill="white" opacity="0.6"/>
+  <circle cx="450" cy="180" r="3" fill="white" opacity="0.6"/>
+  <circle cx="500" cy="170" r="4" fill="white" opacity="0.6"/>
+  
+  <!-- Líneas de flujo de agua -->
+  <path d="M 120 140 Q 140 135 160 140 Q 180 145 200 140" stroke="#2E86AB" stroke-width="3" fill="none" opacity="0.7"/>
+  <path d="M 120 200 Q 140 195 160 200 Q 180 205 200 200" stroke="#2E86AB" stroke-width="3" fill="none" opacity="0.7"/>
+  <path d="M 120 260 Q 140 255 160 260 Q 180 265 200 260" stroke="#2E86AB" stroke-width="3" fill="none" opacity="0.7"/>
+  
+  <!-- Texto CIBERCOM -->
+  <text x="400" y="340" font-family="Arial, sans-serif" font-size="48" font-weight="bold" text-anchor="middle" fill="url(#textGradient)" stroke="#1A3A4A" stroke-width="1">CIBERCOM</text>
+  
+  <!-- Sombra del texto -->
+  <text x="402" y="342" font-family="Arial, sans-serif" font-size="48" font-weight="bold" text-anchor="middle" fill="#0F2A3A" opacity="0.3">CIBERCOM</text>
+</svg>

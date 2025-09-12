@@ -13,9 +13,9 @@ spring:
     activate:
       on-profile: oracle
   datasource:
-    url: jdbc:oracle:thin:@//DESKTOP-EI05NSQ:1521/xepdb1
-    username: luisch
-    password: adminroot1
+    url: jdbc:oracle:thin:@//localhost:1521/xepdb1
+    username: nick
+    password: N1C0LASm
     driver-class-name: oracle.jdbc.OracleDriver
   jpa:
     properties:

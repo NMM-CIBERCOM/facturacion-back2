@@ -6,6 +6,7 @@ package com.cibercom.facturacion_back.mapper;
 
 import com.cibercom.facturacion_back.dto.FacturaFrontendRequest;
 import com.cibercom.facturacion_back.model.FacturaMongo;
+import com.cibercom.facturacion_back.model.EstadoFactura;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -50,7 +51,7 @@ public class FacturaMapper {
                 .xmlContent("") // Se llenará después
                 .fechaGeneracion(LocalDateTime.now())
                 .fechaTimbrado(LocalDateTime.now())
-                .estado("GENERADA")
+                .estado(EstadoFactura.POR_TIMBRAR.getCodigo())
                 .serie("A")
                 .folio("1")
                 .cadenaOriginal("")
@@ -93,7 +94,7 @@ public class FacturaMapper {
         
         return FacturaMongo.builder()
                 .uuid(java.util.UUID.randomUUID().toString().toUpperCase())
-                .estado("GENERADA")
+                .estado(EstadoFactura.POR_TIMBRAR.getCodigo())
                 .emisor(emisor)
                 .receptor(receptor)
                 .codigoFacturacion(request.getCodigoFacturacion())
