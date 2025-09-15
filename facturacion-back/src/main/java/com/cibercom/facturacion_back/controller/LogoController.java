@@ -17,45 +17,40 @@ import java.util.Map;
 @RequestMapping("/api/logos")
 @CrossOrigin(origins = "*")
 public class LogoController {
-    
+
     private static final Logger logger = LoggerFactory.getLogger(LogoController.class);
-    
-    /**
-     * Endpoint para obtener la configuración de logos
-     */
+
     @GetMapping("/configuracion")
     public ResponseEntity<Map<String, Object>> obtenerConfiguracionLogos() {
         logger.info("Obteniendo configuración de logos");
-        
+
         try {
             Map<String, Object> response = new HashMap<>();
-            
-            // URL del logo (ruta relativa desde el frontend)
+
             String logoUrl = "/images/cibercom-logo.svg";
-            
-            // Intentar leer el archivo SVG para generar base64
+
             String logoBase64 = null;
             try {
-                // Ruta al archivo SVG en el frontend (ruta absoluta)
-                Path logoPath = Paths.get("C:\\workspace\\Repositories\\FacturacionCibercom\\facturacion-cibercom\\public\\images\\cibercom-logo.svg");
+                Path logoPath = Paths.get(
+                        "C:\\workspace\\Repositories\\FacturacionCibercom\\facturacion-cibercom\\public\\images\\cibercom-logo.svg");
                 if (Files.exists(logoPath)) {
                     byte[] logoBytes = Files.readAllBytes(logoPath);
                     logoBase64 = Base64.getEncoder().encodeToString(logoBytes);
                     logger.info("Logo SVG leído exitosamente, tamaño: {} bytes", logoBytes.length);
                 } else {
                     logger.warn("Archivo de logo no encontrado en: {}", logoPath.toAbsolutePath());
-                    // Intentar rutas alternativas
                     Path[] rutasAlternativas = {
-                        Paths.get("../facturacion-cibercom/public/images/cibercom-logo.svg"),
-                        Paths.get("../../facturacion-cibercom/public/images/cibercom-logo.svg"),
-                        Paths.get("../../../facturacion-cibercom/public/images/cibercom-logo.svg")
+                            Paths.get("../facturacion-cibercom/public/images/cibercom-logo.svg"),
+                            Paths.get("../../facturacion-cibercom/public/images/cibercom-logo.svg"),
+                            Paths.get("../../../facturacion-cibercom/public/images/cibercom-logo.svg")
                     };
-                    
+
                     for (Path rutaAlternativa : rutasAlternativas) {
                         if (Files.exists(rutaAlternativa)) {
                             byte[] logoBytes = Files.readAllBytes(rutaAlternativa);
                             logoBase64 = Base64.getEncoder().encodeToString(logoBytes);
-                            logger.info("Logo SVG leído desde ruta alternativa: {}, tamaño: {} bytes", rutaAlternativa.toAbsolutePath(), logoBytes.length);
+                            logger.info("Logo SVG leído desde ruta alternativa: {}, tamaño: {} bytes",
+                                    rutaAlternativa.toAbsolutePath(), logoBytes.length);
                             break;
                         }
                     }
@@ -63,36 +58,31 @@ public class LogoController {
             } catch (IOException e) {
                 logger.error("Error leyendo archivo de logo: {}", e.getMessage());
             }
-            
-            // Configurar colores personalizados
+
             Map<String, String> customColors = new HashMap<>();
             customColors.put("primary", "#2563eb");
             customColors.put("secondary", "#64748b");
             customColors.put("accent", "#059669");
-            
-            // Construir respuesta
+
             response.put("exitoso", true);
             response.put("logoUrl", logoUrl);
             response.put("logoBase64", logoBase64);
             response.put("customColors", customColors);
-            
+
             logger.info("Configuración de logos enviada exitosamente");
             return ResponseEntity.ok(response);
-            
+
         } catch (Exception e) {
             logger.error("Error obteniendo configuración de logos", e);
-            
+
             Map<String, Object> errorResponse = new HashMap<>();
             errorResponse.put("exitoso", false);
             errorResponse.put("error", "Error interno del servidor: " + e.getMessage());
-            
+
             return ResponseEntity.internalServerError().body(errorResponse);
         }
     }
-    
-    /**
-     * Endpoint de salud para verificar que el servicio esté funcionando
-     */
+
     @GetMapping("/health")
     public ResponseEntity<String> healthCheck() {
         logger.info("Health check solicitado para LogoController");

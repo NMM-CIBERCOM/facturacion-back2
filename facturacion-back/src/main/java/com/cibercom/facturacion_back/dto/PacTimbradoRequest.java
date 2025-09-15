@@ -10,13 +10,13 @@ import lombok.AllArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class PacTimbradoRequest {
-    private String uuid;  // UUID para identificar la factura
+    private String uuid;
     private String xmlContent;
     private String rfcEmisor;
     private String rfcReceptor;
     private Double total;
-    private String tipo; // INGRESO, EGRESO, NOMINA, TRASLADO
-    private String fechaFactura; // ISO-8601
+    private String tipo;
+    private String fechaFactura;
     private Boolean publicoGeneral;
     private String serie;
     private String folio;

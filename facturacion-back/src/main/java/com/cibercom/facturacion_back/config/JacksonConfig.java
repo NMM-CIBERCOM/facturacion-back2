@@ -20,19 +20,16 @@ public class JacksonConfig {
     @Primary
     public ObjectMapper objectMapper() {
         ObjectMapper objectMapper = new ObjectMapper();
-        
-        // Configurar el módulo de Java Time
+
         JavaTimeModule javaTimeModule = new JavaTimeModule();
-        
-        // Configurar el serializador para LocalDateTime con milisegundos
-        javaTimeModule.addSerializer(LocalDateTime.class, 
-            new LocalDateTimeSerializer(DateTimeFormatter.ofPattern(DATETIME_FORMAT)));
-        
+
+        javaTimeModule.addSerializer(LocalDateTime.class,
+                new LocalDateTimeSerializer(DateTimeFormatter.ofPattern(DATETIME_FORMAT)));
+
         objectMapper.registerModule(javaTimeModule);
-        
-        // Deshabilitar la escritura de fechas como timestamps
+
         objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
-        
+
         return objectMapper;
     }
 }

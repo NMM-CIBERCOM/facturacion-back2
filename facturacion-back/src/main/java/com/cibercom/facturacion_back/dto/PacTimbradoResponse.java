@@ -13,7 +13,7 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 public class PacTimbradoResponse {
     private Boolean ok;
-    private String status; // TIMBRADA, EN_PROCESO, RECHAZADA, ERROR
+    private String status;
     private String uuid;
     private String xmlTimbrado;
     private String cadenaOriginal;

@@ -37,10 +37,10 @@ public class FacturaService {
 
     @Autowired
     private SatValidationService satValidationService;
-    
+
     @Autowired
     private FacturaRepository facturaRepository;
-    
+
     @Autowired
     private FacturaMongoRepository facturaMongoRepository;
 
@@ -55,7 +55,7 @@ public class FacturaService {
             emisorRequest.setRfc(request.getRfcEmisor());
             emisorRequest.setCodigoPostal(request.getCodigoPostalEmisor());
             emisorRequest.setRegimenFiscal(request.getRegimenFiscalEmisor());
-            
+
             SatValidationResponse validacionEmisor = satValidationService.validarDatosSat(emisorRequest);
             if (!validacionEmisor.isValido()) {
                 return FacturaResponse.builder()
@@ -65,14 +65,14 @@ public class FacturaService {
                         .errores("Errores en emisor: " + String.join(", ", validacionEmisor.getErrores()))
                         .build();
             }
-            
+
             // 2. Validar datos del receptor
             SatValidationRequest receptorRequest = new SatValidationRequest();
             receptorRequest.setNombre(request.getNombreReceptor());
             receptorRequest.setRfc(request.getRfcReceptor());
             receptorRequest.setCodigoPostal(request.getCodigoPostalReceptor());
             receptorRequest.setRegimenFiscal(request.getRegimenFiscalReceptor());
-            
+
             SatValidationResponse validacionReceptor = satValidationService.validarDatosSat(receptorRequest);
             if (!validacionReceptor.isValido()) {
                 return FacturaResponse.builder()
@@ -82,35 +82,35 @@ public class FacturaService {
                         .errores("Errores en receptor: " + String.join(", ", validacionReceptor.getErrores()))
                         .build();
             }
-            
+
             // 3. Calcular totales
             BigDecimal subtotal = BigDecimal.ZERO;
             for (FacturaRequest.Concepto concepto : request.getConceptos()) {
                 subtotal = subtotal.add(concepto.getImporte());
             }
-            
+
             BigDecimal iva = subtotal.multiply(new BigDecimal("0.16")); // 16% IVA
             BigDecimal total = subtotal.add(iva);
-            
+
             // 4. Generar UUID temporal para el XML
             String uuid = UUID.randomUUID().toString();
-            
+
             // 5. Generar XML según lineamientos del SAT
             String xml = generarXMLFactura(request, subtotal, iva, total, uuid);
-            
+
             // 6. Guardar en base de datos
             guardarFacturaEnBD(request, xml, uuid, subtotal, iva, total);
-            
+
             // 7. Construir respuesta con XML generado
-             return FacturaResponse.builder()
-                     .exitoso(true)
-                     .mensaje("XML de factura generado y guardado exitosamente")
-                     .timestamp(LocalDateTime.now())
-                     .uuid(uuid)
-                     .xmlTimbrado(xml)
-                     .datosFactura(construirDatosFactura(request, subtotal, iva, total, uuid))
-                     .build();
-                    
+            return FacturaResponse.builder()
+                    .exitoso(true)
+                    .mensaje("XML de factura generado y guardado exitosamente")
+                    .timestamp(LocalDateTime.now())
+                    .uuid(uuid)
+                    .xmlTimbrado(xml)
+                    .datosFactura(construirDatosFactura(request, subtotal, iva, total, uuid))
+                    .build();
+
         } catch (Exception e) {
             return FacturaResponse.builder()
                     .exitoso(false)
@@ -119,7 +119,7 @@ public class FacturaService {
                     .build();
         }
     }
-    
+
     /**
      * Genera y timbra una factura según los lineamientos del SAT
      * AHORA TAMBIÉN GUARDA EN BASE DE DATOS
@@ -132,7 +132,7 @@ public class FacturaService {
             emisorRequest.setRfc(request.getRfcEmisor());
             emisorRequest.setCodigoPostal(request.getCodigoPostalEmisor());
             emisorRequest.setRegimenFiscal(request.getRegimenFiscalEmisor());
-            
+
             SatValidationResponse validacionEmisor = satValidationService.validarDatosSat(emisorRequest);
             if (!validacionEmisor.isValido()) {
                 return FacturaResponse.builder()
@@ -142,14 +142,14 @@ public class FacturaService {
                         .errores("Errores en emisor: " + String.join(", ", validacionEmisor.getErrores()))
                         .build();
             }
-            
+
             // 2. Validar datos del receptor
             SatValidationRequest receptorRequest = new SatValidationRequest();
             receptorRequest.setNombre(request.getNombreReceptor());
             receptorRequest.setRfc(request.getRfcReceptor());
             receptorRequest.setCodigoPostal(request.getCodigoPostalReceptor());
             receptorRequest.setRegimenFiscal(request.getRegimenFiscalReceptor());
-            
+
             SatValidationResponse validacionReceptor = satValidationService.validarDatosSat(receptorRequest);
             if (!validacionReceptor.isValido()) {
                 return FacturaResponse.builder()
@@ -159,25 +159,25 @@ public class FacturaService {
                         .errores("Errores en receptor: " + String.join(", ", validacionReceptor.getErrores()))
                         .build();
             }
-            
+
             // 3. Calcular totales
             BigDecimal subtotal = BigDecimal.ZERO;
             for (FacturaRequest.Concepto concepto : request.getConceptos()) {
                 subtotal = subtotal.add(concepto.getImporte());
             }
-            
+
             BigDecimal iva = subtotal.multiply(new BigDecimal("0.16")); // 16% IVA
             BigDecimal total = subtotal.add(iva);
-            
+
             // 4. Simular timbrado (en ambiente real se conectaría con PAC)
             String uuid = simularTimbrado();
-            
+
             // 5. Generar XML según lineamientos del SAT
             String xml = generarXMLFactura(request, subtotal, iva, total, uuid);
-            
+
             // 6. GUARDAR EN BASE DE DATOS (NUEVO)
             guardarFacturaEnBD(request, xml, uuid, subtotal, iva, total);
-            
+
             // 7. Construir respuesta
             return FacturaResponse.builder()
                     .exitoso(true)
@@ -187,7 +187,7 @@ public class FacturaService {
                     .xmlTimbrado(xml)
                     .datosFactura(construirDatosFactura(request, subtotal, iva, total, uuid))
                     .build();
-                    
+
         } catch (Exception e) {
             return FacturaResponse.builder()
                     .exitoso(false)
@@ -197,14 +197,14 @@ public class FacturaService {
                     .build();
         }
     }
-    
+
     /**
      * Procesa el formulario del frontend y genera factura
      */
     @Transactional
     public Map<String, Object> procesarFormularioFrontend(FacturaFrontendRequest request) {
         Map<String, Object> response = new HashMap<>();
-        
+
         try {
             // 1. Validar datos del emisor con SAT
             SatValidationRequest emisorRequest = new SatValidationRequest();
@@ -212,7 +212,7 @@ public class FacturaService {
             emisorRequest.setRfc(request.getRfc());
             emisorRequest.setCodigoPostal(extraerCodigoPostal(request.getDomicilioFiscal()));
             emisorRequest.setRegimenFiscal(request.getRegimenFiscal());
-            
+
             SatValidationResponse validacionEmisor = satValidationService.validarDatosSat(emisorRequest);
             if (!validacionEmisor.isValido()) {
                 response.put("exitoso", false);
@@ -220,51 +220,53 @@ public class FacturaService {
                 response.put("errores", validacionEmisor.getErrores());
                 return response;
             }
-            
+
             // 2. Generar XML de la factura
             String xml = generarXMLDesdeFrontend(request);
-            
+
             // 3. Generar UUID único
             String uuid = UUID.randomUUID().toString().toUpperCase();
-            
+
             // 4. Calcular totales (ejemplo básico)
             BigDecimal subtotal = new BigDecimal("1000.00"); // Valor por defecto
             BigDecimal iva = subtotal.multiply(new BigDecimal("0.16"));
             BigDecimal total = subtotal.add(iva);
-            
+
             // 5. Guardar en Oracle (siempre)
             Factura facturaOracle = guardarEnOracle(request, xml, uuid, subtotal, iva, total);
-            
+
             // 6. Guardar en MongoDB (siempre)
             guardarEnMongo(request, xml, uuid, subtotal, iva, total);
-            
+
             // 7. Construir respuesta exitosa
             response.put("exitoso", true);
             response.put("mensaje", "Factura procesada y guardada exitosamente");
             response.put("uuid", uuid);
             response.put("xmlGenerado", xml);
             response.put("datosFactura", construirDatosFacturaFrontend(request, subtotal, iva, total, uuid));
-            
+
         } catch (Exception e) {
             response.put("exitoso", false);
             response.put("mensaje", "Error al procesar la factura");
             response.put("error", e.getMessage());
         }
-        
+
         return response;
     }
-    
+
     /**
      * Genera el XML de la factura según los lineamientos del SAT
      */
-    private String generarXMLFactura(FacturaRequest request, BigDecimal subtotal, BigDecimal iva, BigDecimal total, String uuid) {
+    private String generarXMLFactura(FacturaRequest request, BigDecimal subtotal, BigDecimal iva, BigDecimal total,
+            String uuid) {
         StringBuilder xml = new StringBuilder();
         String fechaActual = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss"));
-        
+
         xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
         xml.append("<cfdi:Comprobante xmlns:cfdi=\"http://www.sat.gob.mx/cfd/4\" ");
         xml.append("xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" ");
-        xml.append("xsi:schemaLocation=\"http://www.sat.gob.mx/cfd/4 http://www.sat.gob.mx/sitio_internet/cfd/4/cfdv40.xsd\" ");
+        xml.append(
+                "xsi:schemaLocation=\"http://www.sat.gob.mx/cfd/4 http://www.sat.gob.mx/sitio_internet/cfd/4/cfdv40.xsd\" ");
         xml.append("Version=\"4.0\" ");
         xml.append("Fecha=\"").append(fechaActual).append("\" ");
         xml.append("Folio=\"1\" ");
@@ -282,19 +284,19 @@ public class FacturaService {
         xml.append("Exportacion=\"01\" ");
         xml.append("MetodoPago=\"").append(request.getMetodoPago()).append("\" ");
         xml.append("LugarExpedicion=\"").append(request.getCodigoPostalEmisor()).append("\">\n");
-        
+
         // Agregar comentario con información adicional
         xml.append("<!-- UUID: ").append(uuid).append(" -->");
         xml.append("<!-- Timestamp: ").append(fechaActual).append(" -->");
         xml.append("<!-- Estado: EN_PROCESO_EMISION -->");
         xml.append("\n");
-        
+
         // Emisor
         xml.append("  <cfdi:Emisor ");
         xml.append("Rfc=\"").append(request.getRfcEmisor()).append("\" ");
         xml.append("Nombre=\"").append(request.getNombreEmisor()).append("\" ");
         xml.append("RegimenFiscal=\"").append(request.getRegimenFiscalEmisor()).append("\"/>\n");
-        
+
         // Receptor
         xml.append("  <cfdi:Receptor ");
         xml.append("Rfc=\"").append(request.getRfcReceptor()).append("\" ");
@@ -302,7 +304,7 @@ public class FacturaService {
         xml.append("DomicilioFiscalReceptor=\"").append(request.getCodigoPostalReceptor()).append("\" ");
         xml.append("RegimenFiscalReceptor=\"").append(request.getRegimenFiscalReceptor()).append("\" ");
         xml.append("UsoCFDI=\"").append(request.getUsoCFDI()).append("\"/>\n");
-        
+
         // Conceptos
         xml.append("  <cfdi:Conceptos>\n");
         for (FacturaRequest.Concepto concepto : request.getConceptos()) {
@@ -317,7 +319,7 @@ public class FacturaService {
             xml.append("Importe=\"").append(concepto.getImporte()).append("\" ");
             xml.append("Descuento=\"0.00\" ");
             xml.append("ObjetoImp=\"02\">\n");
-            
+
             // Impuestos del concepto
             BigDecimal ivaConcepto = concepto.getImporte().multiply(new BigDecimal("0.16"));
             xml.append("      <cfdi:Impuestos>\n");
@@ -333,7 +335,7 @@ public class FacturaService {
             xml.append("    </cfdi:Concepto>\n");
         }
         xml.append("  </cfdi:Conceptos>\n");
-        
+
         // Impuestos
         xml.append("  <cfdi:Impuestos ");
         xml.append("TotalImpuestosTrasladados=\"").append(iva).append("\">\n");
@@ -346,11 +348,12 @@ public class FacturaService {
         xml.append("Importe=\"").append(iva).append("\"/>\n");
         xml.append("    </cfdi:Traslados>\n");
         xml.append("  </cfdi:Impuestos>\n");
-        
+
         // Complemento con TimbreFiscalDigital
         xml.append("  <cfdi:Complemento>\n");
         xml.append("    <tfd:TimbreFiscalDigital xmlns:tfd=\"http://www.sat.gob.mx/TimbreFiscalDigital\" ");
-        xml.append("xsi:schemaLocation=\"http://www.sat.gob.mx/TimbreFiscalDigital http://www.sat.gob.mx/sitio_internet/cfd/TimbreFiscalDigital/TimbreFiscalDigitalv11.xsd\" ");
+        xml.append(
+                "xsi:schemaLocation=\"http://www.sat.gob.mx/TimbreFiscalDigital http://www.sat.gob.mx/sitio_internet/cfd/TimbreFiscalDigital/TimbreFiscalDigitalv11.xsd\" ");
         xml.append("Version=\"1.1\" ");
         xml.append("UUID=\"").append(uuid).append("\" ");
         xml.append("FechaTimbrado=\"").append(fechaActual).append("\" ");
@@ -359,12 +362,12 @@ public class FacturaService {
         xml.append("NoCertificadoSAT=\"00001000000504465028\" ");
         xml.append("SelloSAT=\"En proceso de timbrado\"/>\n");
         xml.append("  </cfdi:Complemento>\n");
-        
+
         xml.append("</cfdi:Comprobante>");
-        
+
         return xml.toString();
     }
-    
+
     /**
      * Simula el timbrado de la factura (en ambiente real se conectaría con PAC)
      */
@@ -375,19 +378,19 @@ public class FacturaService {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
-        
+
         // Generar UUID único para simular folio fiscal
         return UUID.randomUUID().toString().toUpperCase();
     }
-    
+
     /**
      * Construye los datos de la factura para la respuesta
      */
-    private FacturaResponse.DatosFactura construirDatosFactura(FacturaRequest request, 
-                                                             BigDecimal subtotal, 
-                                                             BigDecimal iva, 
-                                                             BigDecimal total, 
-                                                             String uuid) {
+    private FacturaResponse.DatosFactura construirDatosFactura(FacturaRequest request,
+            BigDecimal subtotal,
+            BigDecimal iva,
+            BigDecimal total,
+            String uuid) {
         return FacturaResponse.DatosFactura.builder()
                 .folioFiscal(uuid)
                 .serie("A")
@@ -401,7 +404,7 @@ public class FacturaService {
                 .certificado("Simulado para ambiente de pruebas")
                 .build();
     }
-    
+
     /**
      * Extrae código postal del domicilio fiscal
      */
@@ -409,7 +412,7 @@ public class FacturaService {
         if (domicilioFiscal == null || domicilioFiscal.trim().isEmpty()) {
             return "00000";
         }
-        
+
         // Buscar 5 dígitos consecutivos (código postal)
         String[] palabras = domicilioFiscal.split("\\s+");
         for (String palabra : palabras) {
@@ -417,21 +420,22 @@ public class FacturaService {
                 return palabra;
             }
         }
-        
+
         return "00000"; // Código postal por defecto
     }
-    
+
     /**
      * Genera XML desde el formulario del frontend
      */
     private String generarXMLDesdeFrontend(FacturaFrontendRequest request) {
         StringBuilder xml = new StringBuilder();
         String fechaActual = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss"));
-        
+
         xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
         xml.append("<cfdi:Comprobante xmlns:cfdi=\"http://www.sat.gob.mx/cfd/3\" ");
         xml.append("xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" ");
-        xml.append("xsi:schemaLocation=\"http://www.sat.gob.mx/cfd/3 http://www.sat.gob.mx/sitio_internet/cfd/3/cfdv33.xsd\" ");
+        xml.append(
+                "xsi:schemaLocation=\"http://www.sat.gob.mx/cfd/3 http://www.sat.gob.mx/sitio_internet/cfd/3/cfdv33.xsd\" ");
         xml.append("Version=\"3.3\" ");
         xml.append("Fecha=\"").append(fechaActual).append("\" ");
         xml.append("Sello=\"\" ");
@@ -447,13 +451,13 @@ public class FacturaService {
         xml.append("Exportacion=\"01\" ");
         xml.append("MetodoPago=\"").append(request.getMedioPago()).append("\" ");
         xml.append("LugarExpedicion=\"00000\">\n");
-        
+
         // Emisor
         xml.append("  <cfdi:Emisor ");
         xml.append("Rfc=\"").append(request.getRfc()).append("\" ");
         xml.append("Nombre=\"").append(request.getRazonSocial()).append("\" ");
         xml.append("RegimenFiscal=\"").append(request.getRegimenFiscal()).append("\"/>\n");
-        
+
         // Receptor
         xml.append("  <cfdi:Receptor ");
         xml.append("Rfc=\"").append(request.getRfc()).append("\" ");
@@ -461,7 +465,7 @@ public class FacturaService {
         xml.append("DomicilioFiscalReceptor=\"00000\" ");
         xml.append("RegimenFiscalReceptor=\"").append(request.getRegimenFiscal()).append("\" ");
         xml.append("UsoCFDI=\"").append(request.getUsoCfdi()).append("\"/>\n");
-        
+
         // Conceptos
         xml.append("  <cfdi:Conceptos>\n");
         xml.append("    <cfdi:Concepto ");
@@ -474,7 +478,7 @@ public class FacturaService {
         xml.append("ValorUnitario=\"1000.00\" ");
         xml.append("Importe=\"1000.00\" ");
         xml.append("Descuento=\"0.00\">\n");
-        
+
         xml.append("      <cfdi:Impuestos>\n");
         xml.append("        <cfdi:Traslados>\n");
         xml.append("          <cfdi:Traslado ");
@@ -487,7 +491,7 @@ public class FacturaService {
         xml.append("      </cfdi:Impuestos>\n");
         xml.append("    </cfdi:Concepto>\n");
         xml.append("  </cfdi:Conceptos>\n");
-        
+
         // Impuestos
         xml.append("  <cfdi:Impuestos ");
         xml.append("TotalImpuestosTrasladados=\"160.00\">\n");
@@ -498,18 +502,18 @@ public class FacturaService {
         xml.append("Importe=\"160.00\"/>\n");
         xml.append("    </cfdi:Traslados>\n");
         xml.append("  </cfdi:Impuestos>\n");
-        
+
         xml.append("</cfdi:Comprobante>");
-        
+
         return xml.toString();
     }
-    
+
     /**
      * Guarda la factura en Oracle
      */
-    private Factura guardarEnOracle(FacturaFrontendRequest request, String xml, String uuid, 
-                                   BigDecimal subtotal, BigDecimal iva, BigDecimal total) {
-        
+    private Factura guardarEnOracle(FacturaFrontendRequest request, String xml, String uuid,
+            BigDecimal subtotal, BigDecimal iva, BigDecimal total) {
+
         Factura factura = Factura.builder()
                 .uuid(uuid)
                 .xmlContent(xml)
@@ -557,16 +561,16 @@ public class FacturaService {
                 .ieps(BigDecimal.ZERO)
                 .total(total)
                 .build();
-        
+
         return facturaRepository.save(factura);
     }
-    
+
     /**
      * Guarda la factura en MongoDB
      */
-    private void guardarEnMongo(FacturaFrontendRequest request, String xml, String uuid, 
-                               BigDecimal subtotal, BigDecimal iva, BigDecimal total) {
-        
+    private void guardarEnMongo(FacturaFrontendRequest request, String xml, String uuid,
+            BigDecimal subtotal, BigDecimal iva, BigDecimal total) {
+
         // Crear mapas para emisor y receptor
         Map<String, Object> emisor = new HashMap<>();
         emisor.put("rfc", request.getRfc());
@@ -578,7 +582,7 @@ public class FacturaService {
         emisor.put("pais", request.getPais());
         emisor.put("domicilioFiscal", request.getDomicilioFiscal());
         emisor.put("regimenFiscal", request.getRegimenFiscal());
-        
+
         Map<String, Object> receptor = new HashMap<>();
         receptor.put("rfc", request.getRfc());
         receptor.put("razonSocial", request.getRazonSocial());
@@ -590,7 +594,7 @@ public class FacturaService {
         receptor.put("domicilioFiscal", request.getDomicilioFiscal());
         receptor.put("regimenFiscal", request.getRegimenFiscal());
         receptor.put("usoCfdi", request.getUsoCfdi());
-        
+
         FacturaMongo facturaMongo = FacturaMongo.builder()
                 .uuid(uuid)
                 .xmlContent(xml)
@@ -602,7 +606,7 @@ public class FacturaService {
                 .cadenaOriginal("Simulada para ambiente de pruebas")
                 .selloDigital("Simulado para ambiente de pruebas")
                 .certificado("Simulado para ambiente de pruebas")
-             
+
                 .emisor(emisor)
                 .receptor(receptor)
                 .codigoFacturacion(request.getCodigoFacturacion())
@@ -618,16 +622,16 @@ public class FacturaService {
                 .ieps(BigDecimal.ZERO)
                 .total(total)
                 .build();
-        
+
         facturaMongoRepository.save(facturaMongo);
     }
-    
+
     /**
      * Guarda la factura en base de datos desde FacturaRequest
      */
-    private void guardarFacturaEnBD(FacturaRequest request, String xml, String uuid, 
-                                   BigDecimal subtotal, BigDecimal iva, BigDecimal total) {
-        
+    private void guardarFacturaEnBD(FacturaRequest request, String xml, String uuid,
+            BigDecimal subtotal, BigDecimal iva, BigDecimal total) {
+
         // Crear entidad Factura para Oracle
         Factura facturaOracle = Factura.builder()
                 .uuid(uuid)
@@ -676,20 +680,20 @@ public class FacturaService {
                 .ieps(BigDecimal.ZERO)
                 .total(total)
                 .build();
-        
+
         // Guardar en Oracle
         facturaRepository.save(facturaOracle);
-        
+
         // Guardar en MongoDB también
         guardarEnMongoDesdeFacturaRequest(request, xml, uuid, subtotal, iva, total);
     }
-    
+
     /**
      * Guarda la factura en MongoDB desde FacturaRequest
      */
-    private void guardarEnMongoDesdeFacturaRequest(FacturaRequest request, String xml, String uuid, 
-                                                  BigDecimal subtotal, BigDecimal iva, BigDecimal total) {
-        
+    private void guardarEnMongoDesdeFacturaRequest(FacturaRequest request, String xml, String uuid,
+            BigDecimal subtotal, BigDecimal iva, BigDecimal total) {
+
         // Crear mapas para emisor y receptor
         Map<String, Object> emisor = new HashMap<>();
         emisor.put("rfc", request.getRfcEmisor());
@@ -701,7 +705,7 @@ public class FacturaService {
         emisor.put("pais", "MEX");
         emisor.put("domicilioFiscal", "CP " + request.getCodigoPostalEmisor());
         emisor.put("regimenFiscal", request.getRegimenFiscalEmisor());
-        
+
         Map<String, Object> receptor = new HashMap<>();
         receptor.put("rfc", request.getRfcReceptor());
         receptor.put("razonSocial", request.getNombreReceptor());
@@ -713,7 +717,7 @@ public class FacturaService {
         receptor.put("domicilioFiscal", "CP " + request.getCodigoPostalReceptor());
         receptor.put("regimenFiscal", request.getRegimenFiscalReceptor());
         receptor.put("usoCfdi", request.getUsoCFDI());
-        
+
         FacturaMongo facturaMongo = FacturaMongo.builder()
                 .uuid(uuid)
                 .xmlContent(xml)
@@ -725,7 +729,7 @@ public class FacturaService {
                 .cadenaOriginal("Simulada para ambiente de pruebas")
                 .selloDigital("Simulado para ambiente de pruebas")
                 .certificado("Simulado para ambiente de pruebas")
-               
+
                 .emisor(emisor)
                 .receptor(receptor)
                 .codigoFacturacion("FAC-" + uuid.substring(0, 8))
@@ -741,18 +745,15 @@ public class FacturaService {
                 .ieps(BigDecimal.ZERO)
                 .total(total)
                 .build();
-        
+
         facturaMongoRepository.save(facturaMongo);
     }
-    
-    /**
-     * Construye los datos de la factura para la respuesta del frontend
-     */
-    private Map<String, Object> construirDatosFacturaFrontend(FacturaFrontendRequest request, 
-                                                             BigDecimal subtotal, 
-                                                             BigDecimal iva, 
-                                                             BigDecimal total, 
-                                                             String uuid) {
+
+    private Map<String, Object> construirDatosFacturaFrontend(FacturaFrontendRequest request,
+            BigDecimal subtotal,
+            BigDecimal iva,
+            BigDecimal total,
+            String uuid) {
         Map<String, Object> datos = new HashMap<>();
         datos.put("folioFiscal", uuid);
         datos.put("serie", "A");
@@ -767,15 +768,12 @@ public class FacturaService {
         return datos;
     }
 
-    /**
-     * Consulta facturas por empresa/perfil con filtros opcionales
-     */
-    public Map<String, Object> consultarFacturasPorEmpresa(String rfcEmpresa, String tienda, String fechaInicio, String fechaFin) {
+    public Map<String, Object> consultarFacturasPorEmpresa(String rfcEmpresa, String tienda, String fechaInicio,
+            String fechaFin) {
         Map<String, Object> response = new HashMap<>();
-        
+
         try {
-            // Por ahora, simulamos datos de facturas
-            // En implementación real, se consultaría la base de datos
+
             Map<String, Object> factura1 = new HashMap<>();
             factura1.put("uuid", "550e8400-e29b-41d4-a716-446655440001");
             factura1.put("codigoFacturacion", "FAC-550e8400");
@@ -827,103 +825,92 @@ public class FacturaService {
             response.put("mensaje", "Facturas consultadas exitosamente");
             response.put("facturas", facturas);
             response.put("totalFacturas", facturas.size());
-            
+
         } catch (Exception e) {
             response.put("exitoso", false);
             response.put("error", "Error al consultar facturas: " + e.getMessage());
         }
-        
+
         return response;
     }
-    
-    /**
-     * Convierte XML de solicitud a FacturaRequest
-     */
+
     public FacturaRequest convertirXmlAFacturaRequest(String xmlContent) throws Exception {
         logger.info("XML recibido para conversión: {}", xmlContent);
-        
+
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         DocumentBuilder builder = factory.newDocumentBuilder();
         Document document = builder.parse(new ByteArrayInputStream(xmlContent.getBytes("UTF-8")));
-        
+
         Element root = document.getDocumentElement();
         logger.info("Elemento raíz del XML: {}", root.getTagName());
-        
+
         FacturaRequest request = new FacturaRequest();
-        
-        // Datos del emisor
+
         String rfcEmisor = getElementText(root, "emisor_rfc");
         String nombreEmisor = getElementText(root, "emisor_nombre");
         String regimenEmisor = getElementText(root, "emisor_regimen");
         String cpEmisor = getElementText(root, "emisor_cp");
-        
-        logger.info("Datos emisor extraídos - RFC: {}, Nombre: {}, Régimen: {}, CP: {}", 
-                   rfcEmisor, nombreEmisor, regimenEmisor, cpEmisor);
-        
+
+        logger.info("Datos emisor extraídos - RFC: {}, Nombre: {}, Régimen: {}, CP: {}",
+                rfcEmisor, nombreEmisor, regimenEmisor, cpEmisor);
+
         request.setRfcEmisor(rfcEmisor);
         request.setNombreEmisor(nombreEmisor);
         request.setRegimenFiscalEmisor(regimenEmisor);
         request.setCodigoPostalEmisor(cpEmisor);
-        
-        // Datos del receptor
+
         String rfcReceptor = getElementText(root, "receptor_rfc");
         String nombreReceptor = getElementText(root, "receptor_nombre");
         String regimenReceptor = getElementText(root, "receptor_regimen");
         String cpReceptor = getElementText(root, "receptor_cp");
-        
-        logger.info("Datos receptor extraídos - RFC: {}, Nombre: {}, Régimen: {}, CP: {}", 
-                   rfcReceptor, nombreReceptor, regimenReceptor, cpReceptor);
-        
+
+        logger.info("Datos receptor extraídos - RFC: {}, Nombre: {}, Régimen: {}, CP: {}",
+                rfcReceptor, nombreReceptor, regimenReceptor, cpReceptor);
+
         request.setRfcReceptor(rfcReceptor);
         request.setNombreReceptor(nombreReceptor);
         request.setRegimenFiscalReceptor(regimenReceptor);
         request.setCodigoPostalReceptor(cpReceptor);
-        
-        // Datos de la factura
+
         String usoCfdi = getElementText(root, "uso_cfdi");
         String formaPago = getElementText(root, "forma_pago");
         String metodoPago = getElementText(root, "metodo_pago");
-        
-        logger.info("Datos factura extraídos - Uso CFDI: {}, Forma Pago: {}, Método Pago: {}", 
-                   usoCfdi, formaPago, metodoPago);
-        
+
+        logger.info("Datos factura extraídos - Uso CFDI: {}, Forma Pago: {}, Método Pago: {}",
+                usoCfdi, formaPago, metodoPago);
+
         request.setUsoCFDI(usoCfdi);
         request.setFormaPago(formaPago);
         request.setMetodoPago(metodoPago);
-        
-        // Conceptos
+
         NodeList conceptosNode = root.getElementsByTagName("conceptos");
         if (conceptosNode.getLength() > 0) {
             Element conceptosElement = (Element) conceptosNode.item(0);
             NodeList conceptosList = conceptosElement.getElementsByTagName("concepto");
-            
+
             ArrayList<FacturaRequest.Concepto> conceptos = new ArrayList<>();
-            
+
             for (int i = 0; i < conceptosList.getLength(); i++) {
                 Element conceptoElement = (Element) conceptosList.item(i);
-                
+
                 FacturaRequest.Concepto concepto = new FacturaRequest.Concepto();
                 concepto.setDescripcion(getElementText(conceptoElement, "descripcion"));
                 concepto.setCantidad(new BigDecimal(getElementText(conceptoElement, "cantidad")));
                 concepto.setUnidad(getElementText(conceptoElement, "unidad"));
                 concepto.setPrecioUnitario(new BigDecimal(getElementText(conceptoElement, "precio_unitario")));
-                
-                // Calcular importe
+
                 BigDecimal importe = concepto.getCantidad().multiply(concepto.getPrecioUnitario());
                 concepto.setImporte(importe);
-                
+
                 conceptos.add(concepto);
             }
-            
+
             request.setConceptos(conceptos);
         }
-        
+
         return request;
     }
-    
-    /**
-     * Método auxiliar para obtener texto de un elemento XML
-     */
+
     private String getElementText(Element parent, String tagName) {
         NodeList nodeList = parent.getElementsByTagName(tagName);
         if (nodeList.getLength() > 0) {

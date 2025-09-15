@@ -17,11 +17,7 @@ import java.util.Map;
 @Component
 public class FacturaMapper {
 
-    /**
-     * Mapea FacturaFrontendRequest a FacturaMongo
-     */
     public FacturaMongo toMongo(FacturaFrontendRequest request) {
-        // Crear mapas para emisor y receptor
         Map<String, Object> emisor = new HashMap<>();
         emisor.put("rfc", request.getRfc());
         emisor.put("razonSocial", request.getRazonSocial());
@@ -32,7 +28,7 @@ public class FacturaMapper {
         emisor.put("pais", request.getPais());
         emisor.put("domicilioFiscal", request.getDomicilioFiscal());
         emisor.put("regimenFiscal", request.getRegimenFiscal());
-        
+
         Map<String, Object> receptor = new HashMap<>();
         receptor.put("rfc", request.getRfc());
         receptor.put("razonSocial", request.getRazonSocial());
@@ -44,11 +40,10 @@ public class FacturaMapper {
         receptor.put("domicilioFiscal", request.getDomicilioFiscal());
         receptor.put("regimenFiscal", request.getRegimenFiscal());
         receptor.put("usoCfdi", request.getUsoCfdi());
-        
-        // Crear FacturaMongo usando el builder
+
         return FacturaMongo.builder()
                 .uuid(java.util.UUID.randomUUID().toString().toUpperCase())
-                .xmlContent("") // Se llenará después
+                .xmlContent("")
                 .fechaGeneracion(LocalDateTime.now())
                 .fechaTimbrado(LocalDateTime.now())
                 .estado(EstadoFactura.POR_TIMBRAR.getCodigo())
@@ -67,31 +62,27 @@ public class FacturaMapper {
                 .medioPago(request.getMedioPago())
                 .formaPago(request.getFormaPago())
                 .iepsDesglosado(request.getIepsDesglosado())
-                .subtotal(BigDecimal.ZERO) // Se calculará después
-                .iva(BigDecimal.ZERO) // Se calculará después
+                .subtotal(BigDecimal.ZERO)
+                .iva(BigDecimal.ZERO)
                 .ieps(BigDecimal.ZERO)
-                .total(BigDecimal.ZERO) // Se calculará después
+                .total(BigDecimal.ZERO)
                 .build();
     }
-    
-    /**
-     * Mapea datos básicos del frontend a FacturaMongo
-     * Versión simplificada para casos básicos
-     */
+
     public FacturaMongo toMongoSimple(FacturaFrontendRequest request) {
         Map<String, Object> emisor = new HashMap<>();
         emisor.put("rfc", request.getRfc());
         emisor.put("razonSocial", request.getRazonSocial());
         emisor.put("domicilioFiscal", request.getDomicilioFiscal());
         emisor.put("regimenFiscal", request.getRegimenFiscal());
-        
+
         Map<String, Object> receptor = new HashMap<>();
         receptor.put("rfc", request.getRfc());
         receptor.put("razonSocial", request.getRazonSocial());
         receptor.put("domicilioFiscal", request.getDomicilioFiscal());
         receptor.put("regimenFiscal", request.getRegimenFiscal());
         receptor.put("usoCfdi", request.getUsoCfdi());
-        
+
         return FacturaMongo.builder()
                 .uuid(java.util.UUID.randomUUID().toString().toUpperCase())
                 .estado(EstadoFactura.POR_TIMBRAR.getCodigo())

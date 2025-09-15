@@ -28,31 +28,27 @@ public class FacturaTimbradoService {
 
     @Autowired
     private SatValidationService satValidationService;
-    
+
     @Autowired
     private FacturaRepository facturaRepository;
-    
+
     @Autowired
     private FacturaMongoRepository facturaMongoRepository;
-    
+
     @Autowired
     private PacClient pacClient;
-    
+
     @Autowired
     private Environment environment;
 
-    /**
-     * Inicia el proceso de timbrado asíncrono
-     */
     public FacturaResponse iniciarTimbrado(FacturaRequest request) {
         try {
-            // 1. Validar datos del emisor
             SatValidationRequest emisorRequest = new SatValidationRequest();
             emisorRequest.setNombre(request.getNombreEmisor());
             emisorRequest.setRfc(request.getRfcEmisor());
             emisorRequest.setCodigoPostal(request.getCodigoPostalEmisor());
             emisorRequest.setRegimenFiscal(request.getRegimenFiscalEmisor());
-            
+
             SatValidationResponse validacionEmisor = satValidationService.validarDatosSat(emisorRequest);
             if (!validacionEmisor.isValido()) {
                 return FacturaResponse.builder()
@@ -62,14 +58,13 @@ public class FacturaTimbradoService {
                         .errores("Errores en emisor: " + String.join(", ", validacionEmisor.getErrores()))
                         .build();
             }
-            
-            // 2. Validar datos del receptor
+
             SatValidationRequest receptorRequest = new SatValidationRequest();
             receptorRequest.setNombre(request.getNombreReceptor());
             receptorRequest.setRfc(request.getRfcReceptor());
             receptorRequest.setCodigoPostal(request.getCodigoPostalReceptor());
             receptorRequest.setRegimenFiscal(request.getRegimenFiscalReceptor());
-            
+
             SatValidationResponse validacionReceptor = satValidationService.validarDatosSat(receptorRequest);
             if (!validacionReceptor.isValido()) {
                 return FacturaResponse.builder()
@@ -79,56 +74,56 @@ public class FacturaTimbradoService {
                         .errores("Errores en receptor: " + String.join(", ", validacionReceptor.getErrores()))
                         .build();
             }
-            
+
             // 3. Calcular totales
             BigDecimal subtotal = BigDecimal.ZERO;
             for (FacturaRequest.Concepto concepto : request.getConceptos()) {
                 subtotal = subtotal.add(concepto.getImporte());
             }
-            
+
             BigDecimal iva = subtotal.multiply(new BigDecimal("0.16")); // 16% IVA
             BigDecimal total = subtotal.add(iva);
-            
+
             // 4. Generar XML según lineamientos del SAT
             String xml = generarXMLFactura(request, subtotal, iva, total);
-            
+
             // 5. Generar UUID temporal para seguimiento
             String uuidTemporal = UUID.randomUUID().toString().toUpperCase();
-            
-                         // 6. Guardar factura en estado POR_TIMBRAR
-             guardarFacturaEnProceso(request, xml, uuidTemporal, subtotal, iva, total);
-            
+
+            // 6. Guardar factura en estado POR_TIMBRAR
+            guardarFacturaEnProceso(request, xml, uuidTemporal, subtotal, iva, total);
+
             // 7. Enviar solicitud de timbrado al PAC
             PacTimbradoRequest pacRequest = construirPacTimbradoRequest(request, xml, total, uuidTemporal);
             PacTimbradoResponse pacResponse = pacClient.solicitarTimbrado(pacRequest);
-            
-                         // 8. Procesar respuesta del PAC
-             if (pacResponse != null && Boolean.TRUE.equals(pacResponse.getOk())) {
-                 if ("0".equals(pacResponse.getStatus())) {
-                     // Timbrado inmediato exitoso (EMITIDA)
-                     actualizarFacturaTimbrada(uuidTemporal, pacResponse);
-                     return construirRespuestaExitosa(request, subtotal, iva, total, pacResponse);
-                 } else if ("4".equals(pacResponse.getStatus())) {
-                     // Timbrado en proceso (asíncrono) - EN_PROCESO_EMISION
-                     actualizarFacturaEnProcesoEmision(uuidTemporal);
-                     return FacturaResponse.builder()
-                             .exitoso(true)
-                             .mensaje("Factura enviada a timbrado. Estado: EN_PROCESO_EMISION")
-                             .timestamp(LocalDateTime.now())
-                             .uuid(uuidTemporal)
-                             .xmlTimbrado("En proceso de timbrado")
-                             .datosFactura(construirDatosFacturaEnProceso(request, subtotal, iva, total, uuidTemporal))
-                             .build();
-                 } else {
-                     // Timbrado rechazado
-                     actualizarFacturaRechazada(uuidTemporal, pacResponse);
-                     return FacturaResponse.builder()
-                             .exitoso(false)
-                             .mensaje("Timbrado rechazado por PAC")
-                             .timestamp(LocalDateTime.now())
-                             .errores(pacResponse.getMessage())
-                             .build();
-                 }
+
+            // 8. Procesar respuesta del PAC
+            if (pacResponse != null && Boolean.TRUE.equals(pacResponse.getOk())) {
+                if ("0".equals(pacResponse.getStatus())) {
+                    // Timbrado inmediato exitoso (EMITIDA)
+                    actualizarFacturaTimbrada(uuidTemporal, pacResponse);
+                    return construirRespuestaExitosa(request, subtotal, iva, total, pacResponse);
+                } else if ("4".equals(pacResponse.getStatus())) {
+                    // Timbrado en proceso (asíncrono) - EN_PROCESO_EMISION
+                    actualizarFacturaEnProcesoEmision(uuidTemporal);
+                    return FacturaResponse.builder()
+                            .exitoso(true)
+                            .mensaje("Factura enviada a timbrado. Estado: EN_PROCESO_EMISION")
+                            .timestamp(LocalDateTime.now())
+                            .uuid(uuidTemporal)
+                            .xmlTimbrado("En proceso de timbrado")
+                            .datosFactura(construirDatosFacturaEnProceso(request, subtotal, iva, total, uuidTemporal))
+                            .build();
+                } else {
+                    // Timbrado rechazado
+                    actualizarFacturaRechazada(uuidTemporal, pacResponse);
+                    return FacturaResponse.builder()
+                            .exitoso(false)
+                            .mensaje("Timbrado rechazado por PAC")
+                            .timestamp(LocalDateTime.now())
+                            .errores(pacResponse.getMessage())
+                            .build();
+                }
             } else {
                 // Error en comunicación con PAC
                 actualizarFacturaError(uuidTemporal, pacResponse);
@@ -139,7 +134,7 @@ public class FacturaTimbradoService {
                         .errores(pacResponse != null ? pacResponse.getMessage() : "PAC no disponible")
                         .build();
             }
-            
+
         } catch (Exception e) {
             return FacturaResponse.builder()
                     .exitoso(false)
@@ -149,50 +144,51 @@ public class FacturaTimbradoService {
                     .build();
         }
     }
-    
-         /**
-      * Actualiza factura con datos de timbrado exitoso (llamado por callback)
-      */
-     @Transactional
-     public void actualizarFacturaTimbrada(String uuid, PacTimbradoResponse pacResponse) {
-         String activeProfile = environment.getActiveProfiles().length > 0 ? 
-             environment.getActiveProfiles()[0] : "oracle";
-         
-         if ("mongo".equals(activeProfile)) {
-             FacturaMongo facturaMongo = facturaMongoRepository.findByUuid(uuid);
-             if (facturaMongo != null) {
-                 facturaMongo.setEstado(EstadoFactura.EMITIDA.getCodigo());
-                 facturaMongo.setEstadoDescripcion(EstadoFactura.EMITIDA.getDescripcion());
-                 facturaMongo.setFechaTimbrado(pacResponse.getFechaTimbrado());
-                 facturaMongo.setXmlContent(pacResponse.getXmlTimbrado());
-                 facturaMongo.setCadenaOriginal(pacResponse.getCadenaOriginal());
-                 facturaMongo.setSelloDigital(pacResponse.getSelloDigital());
-                 facturaMongo.setCertificado(pacResponse.getCertificado());
-                 facturaMongo.setSerie(pacResponse.getSerie());
-                 facturaMongo.setFolio(pacResponse.getFolio());
-                 facturaMongoRepository.save(facturaMongo);
-             }
-         } else {
-             Factura factura = facturaRepository.findById(uuid).orElse(null);
-             if (factura != null) {
-                 factura.setEstado(EstadoFactura.EMITIDA.getCodigo());
-                 factura.setEstadoDescripcion(EstadoFactura.EMITIDA.getDescripcion());
-                 factura.setFechaTimbrado(pacResponse.getFechaTimbrado());
-                 factura.setXmlContent(pacResponse.getXmlTimbrado());
-                 factura.setCadenaOriginal(pacResponse.getCadenaOriginal());
-                 factura.setSelloDigital(pacResponse.getSelloDigital());
-                 factura.setCertificado(pacResponse.getCertificado());
-                 factura.setSerie(pacResponse.getSerie());
-                 factura.setFolio(pacResponse.getFolio());
-                 facturaRepository.save(factura);
-             }
-         }
-     }
-    
+
+    /**
+     * Actualiza factura con datos de timbrado exitoso (llamado por callback)
+     */
+    @Transactional
+    public void actualizarFacturaTimbrada(String uuid, PacTimbradoResponse pacResponse) {
+        String activeProfile = environment.getActiveProfiles().length > 0 ? environment.getActiveProfiles()[0]
+                : "oracle";
+
+        if ("mongo".equals(activeProfile)) {
+            FacturaMongo facturaMongo = facturaMongoRepository.findByUuid(uuid);
+            if (facturaMongo != null) {
+                facturaMongo.setEstado(EstadoFactura.EMITIDA.getCodigo());
+                facturaMongo.setEstadoDescripcion(EstadoFactura.EMITIDA.getDescripcion());
+                facturaMongo.setFechaTimbrado(pacResponse.getFechaTimbrado());
+                facturaMongo.setXmlContent(pacResponse.getXmlTimbrado());
+                facturaMongo.setCadenaOriginal(pacResponse.getCadenaOriginal());
+                facturaMongo.setSelloDigital(pacResponse.getSelloDigital());
+                facturaMongo.setCertificado(pacResponse.getCertificado());
+                facturaMongo.setSerie(pacResponse.getSerie());
+                facturaMongo.setFolio(pacResponse.getFolio());
+                facturaMongoRepository.save(facturaMongo);
+            }
+        } else {
+            Factura factura = facturaRepository.findById(uuid).orElse(null);
+            if (factura != null) {
+                factura.setEstado(EstadoFactura.EMITIDA.getCodigo());
+                factura.setEstadoDescripcion(EstadoFactura.EMITIDA.getDescripcion());
+                factura.setFechaTimbrado(pacResponse.getFechaTimbrado());
+                factura.setXmlContent(pacResponse.getXmlTimbrado());
+                factura.setCadenaOriginal(pacResponse.getCadenaOriginal());
+                factura.setSelloDigital(pacResponse.getSelloDigital());
+                factura.setCertificado(pacResponse.getCertificado());
+                factura.setSerie(pacResponse.getSerie());
+                factura.setFolio(pacResponse.getFolio());
+                facturaRepository.save(factura);
+            }
+        }
+    }
+
     /**
      * Construye la solicitud para el PAC
      */
-    private PacTimbradoRequest construirPacTimbradoRequest(FacturaRequest request, String xml, BigDecimal total, String uuid) {
+    private PacTimbradoRequest construirPacTimbradoRequest(FacturaRequest request, String xml, BigDecimal total,
+            String uuid) {
         return PacTimbradoRequest.builder()
                 .uuid(uuid) // Incluir el UUID generado por el backend
                 .xmlContent(xml)
@@ -214,137 +210,137 @@ public class FacturaTimbradoService {
                 .regimenFiscalReceptor(request.getRegimenFiscalReceptor())
                 .build();
     }
-    
-         /**
-      * Guarda la factura en estado POR_TIMBRAR
-      */
-     @Transactional
-     private void guardarFacturaEnProceso(FacturaRequest request, String xml, String uuid, 
-                                        BigDecimal subtotal, BigDecimal iva, BigDecimal total) {
-         String activeProfile = environment.getActiveProfiles().length > 0 ? 
-             environment.getActiveProfiles()[0] : "oracle";
-         
-         if ("mongo".equals(activeProfile)) {
-             FacturaMongo facturaMongo = FacturaMongo.builder()
-                     .uuid(uuid)
-                     .xmlContent(xml)
-                     .fechaGeneracion(LocalDateTime.now())
-                     .subtotal(subtotal)
-                     .iva(iva)
-                     .total(total)
-                     .estado(EstadoFactura.POR_TIMBRAR.getCodigo())
-                     .estadoDescripcion(EstadoFactura.POR_TIMBRAR.getDescripcion())
-                     .serie("A")
-                     .folio("1")
-                     .tienda("TIENDA-001") // Valor por defecto
-                     .medioPago(request.getMetodoPago())
-                     .formaPago(request.getFormaPago())
-                     .build();
-             facturaMongoRepository.save(facturaMongo);
-         } else {
-             Factura factura = Factura.builder()
-                     .uuid(uuid)
-                     .xmlContent(xml)
-                     .fechaGeneracion(LocalDateTime.now())
-                     .emisorRfc(request.getRfcEmisor())
-                     .emisorRazonSocial(request.getNombreEmisor())
-                     .receptorRfc(request.getRfcReceptor())
-                     .receptorRazonSocial(request.getNombreReceptor())
-                     .subtotal(subtotal)
-                     .iva(iva)
-                     .total(total)
-                     .estado(EstadoFactura.POR_TIMBRAR.getCodigo())
-                     .estadoDescripcion(EstadoFactura.POR_TIMBRAR.getDescripcion())
-                     .serie("A")
-                     .folio("1")
-                     .tienda("TIENDA-001") // Valor por defecto
-                     .medioPago(request.getMetodoPago())
-                     .formaPago(request.getFormaPago())
-                     .build();
-             facturaRepository.save(factura);
-         }
-     }
-     
-     /**
-      * Actualiza factura a estado EN_PROCESO_EMISION
-      */
-     @Transactional
-     private void actualizarFacturaEnProcesoEmision(String uuid) {
-         String activeProfile = environment.getActiveProfiles().length > 0 ? 
-             environment.getActiveProfiles()[0] : "oracle";
-         
-         if ("mongo".equals(activeProfile)) {
-             FacturaMongo facturaMongo = facturaMongoRepository.findByUuid(uuid);
-             if (facturaMongo != null) {
-                 facturaMongo.setEstado(EstadoFactura.EN_PROCESO_EMISION.getCodigo());
-                 facturaMongo.setEstadoDescripcion(EstadoFactura.EN_PROCESO_EMISION.getDescripcion());
-                 facturaMongoRepository.save(facturaMongo);
-             }
-         } else {
-             Factura factura = facturaRepository.findById(uuid).orElse(null);
-             if (factura != null) {
-                 factura.setEstado(EstadoFactura.EN_PROCESO_EMISION.getCodigo());
-                 factura.setEstadoDescripcion(EstadoFactura.EN_PROCESO_EMISION.getDescripcion());
-                 facturaRepository.save(factura);
-             }
-         }
-     }
-    
-             /**
+
+    /**
+     * Guarda la factura en estado POR_TIMBRAR
+     */
+    @Transactional
+    private void guardarFacturaEnProceso(FacturaRequest request, String xml, String uuid,
+            BigDecimal subtotal, BigDecimal iva, BigDecimal total) {
+        String activeProfile = environment.getActiveProfiles().length > 0 ? environment.getActiveProfiles()[0]
+                : "oracle";
+
+        if ("mongo".equals(activeProfile)) {
+            FacturaMongo facturaMongo = FacturaMongo.builder()
+                    .uuid(uuid)
+                    .xmlContent(xml)
+                    .fechaGeneracion(LocalDateTime.now())
+                    .subtotal(subtotal)
+                    .iva(iva)
+                    .total(total)
+                    .estado(EstadoFactura.POR_TIMBRAR.getCodigo())
+                    .estadoDescripcion(EstadoFactura.POR_TIMBRAR.getDescripcion())
+                    .serie("A")
+                    .folio("1")
+                    .tienda("TIENDA-001") // Valor por defecto
+                    .medioPago(request.getMetodoPago())
+                    .formaPago(request.getFormaPago())
+                    .build();
+            facturaMongoRepository.save(facturaMongo);
+        } else {
+            Factura factura = Factura.builder()
+                    .uuid(uuid)
+                    .xmlContent(xml)
+                    .fechaGeneracion(LocalDateTime.now())
+                    .emisorRfc(request.getRfcEmisor())
+                    .emisorRazonSocial(request.getNombreEmisor())
+                    .receptorRfc(request.getRfcReceptor())
+                    .receptorRazonSocial(request.getNombreReceptor())
+                    .subtotal(subtotal)
+                    .iva(iva)
+                    .total(total)
+                    .estado(EstadoFactura.POR_TIMBRAR.getCodigo())
+                    .estadoDescripcion(EstadoFactura.POR_TIMBRAR.getDescripcion())
+                    .serie("A")
+                    .folio("1")
+                    .tienda("TIENDA-001") // Valor por defecto
+                    .medioPago(request.getMetodoPago())
+                    .formaPago(request.getFormaPago())
+                    .build();
+            facturaRepository.save(factura);
+        }
+    }
+
+    /**
+     * Actualiza factura a estado EN_PROCESO_EMISION
+     */
+    @Transactional
+    private void actualizarFacturaEnProcesoEmision(String uuid) {
+        String activeProfile = environment.getActiveProfiles().length > 0 ? environment.getActiveProfiles()[0]
+                : "oracle";
+
+        if ("mongo".equals(activeProfile)) {
+            FacturaMongo facturaMongo = facturaMongoRepository.findByUuid(uuid);
+            if (facturaMongo != null) {
+                facturaMongo.setEstado(EstadoFactura.EN_PROCESO_EMISION.getCodigo());
+                facturaMongo.setEstadoDescripcion(EstadoFactura.EN_PROCESO_EMISION.getDescripcion());
+                facturaMongoRepository.save(facturaMongo);
+            }
+        } else {
+            Factura factura = facturaRepository.findById(uuid).orElse(null);
+            if (factura != null) {
+                factura.setEstado(EstadoFactura.EN_PROCESO_EMISION.getCodigo());
+                factura.setEstadoDescripcion(EstadoFactura.EN_PROCESO_EMISION.getDescripcion());
+                facturaRepository.save(factura);
+            }
+        }
+    }
+
+    /**
      * Actualiza factura como rechazada
      */
     @Transactional
     public void actualizarFacturaRechazada(String uuid, PacTimbradoResponse pacResponse) {
-         String activeProfile = environment.getActiveProfiles().length > 0 ? 
-             environment.getActiveProfiles()[0] : "oracle";
-         
-         if ("mongo".equals(activeProfile)) {
-             FacturaMongo facturaMongo = facturaMongoRepository.findByUuid(uuid);
-             if (facturaMongo != null) {
-                 facturaMongo.setEstado(EstadoFactura.CANCELADA_SAT.getCodigo());
-                 facturaMongo.setEstadoDescripcion(EstadoFactura.CANCELADA_SAT.getDescripcion());
-                 facturaMongoRepository.save(facturaMongo);
-             }
-         } else {
-             Factura factura = facturaRepository.findById(uuid).orElse(null);
-             if (factura != null) {
-                 factura.setEstado(EstadoFactura.CANCELADA_SAT.getCodigo());
-                 factura.setEstadoDescripcion(EstadoFactura.CANCELADA_SAT.getDescripcion());
-                 facturaRepository.save(factura);
-             }
-         }
-     }
-    
-         /**
-      * Actualiza factura con error
-      */
-     @Transactional
-     private void actualizarFacturaError(String uuid, PacTimbradoResponse pacResponse) {
-         String activeProfile = environment.getActiveProfiles().length > 0 ? 
-             environment.getActiveProfiles()[0] : "oracle";
-         
-         if ("mongo".equals(activeProfile)) {
-             FacturaMongo facturaMongo = facturaMongoRepository.findByUuid(uuid);
-             if (facturaMongo != null) {
-                 facturaMongo.setEstado(EstadoFactura.FACTURA_TEMPORAL.getCodigo());
-                 facturaMongo.setEstadoDescripcion(EstadoFactura.FACTURA_TEMPORAL.getDescripcion());
-                 facturaMongoRepository.save(facturaMongo);
-             }
-         } else {
-             Factura factura = facturaRepository.findById(uuid).orElse(null);
-             if (factura != null) {
-                 factura.setEstado(EstadoFactura.FACTURA_TEMPORAL.getCodigo());
-                 factura.setEstadoDescripcion(EstadoFactura.FACTURA_TEMPORAL.getDescripcion());
-                 facturaRepository.save(factura);
-             }
-         }
-     }
-    
+        String activeProfile = environment.getActiveProfiles().length > 0 ? environment.getActiveProfiles()[0]
+                : "oracle";
+
+        if ("mongo".equals(activeProfile)) {
+            FacturaMongo facturaMongo = facturaMongoRepository.findByUuid(uuid);
+            if (facturaMongo != null) {
+                facturaMongo.setEstado(EstadoFactura.CANCELADA_SAT.getCodigo());
+                facturaMongo.setEstadoDescripcion(EstadoFactura.CANCELADA_SAT.getDescripcion());
+                facturaMongoRepository.save(facturaMongo);
+            }
+        } else {
+            Factura factura = facturaRepository.findById(uuid).orElse(null);
+            if (factura != null) {
+                factura.setEstado(EstadoFactura.CANCELADA_SAT.getCodigo());
+                factura.setEstadoDescripcion(EstadoFactura.CANCELADA_SAT.getDescripcion());
+                facturaRepository.save(factura);
+            }
+        }
+    }
+
+    /**
+     * Actualiza factura con error
+     */
+    @Transactional
+    private void actualizarFacturaError(String uuid, PacTimbradoResponse pacResponse) {
+        String activeProfile = environment.getActiveProfiles().length > 0 ? environment.getActiveProfiles()[0]
+                : "oracle";
+
+        if ("mongo".equals(activeProfile)) {
+            FacturaMongo facturaMongo = facturaMongoRepository.findByUuid(uuid);
+            if (facturaMongo != null) {
+                facturaMongo.setEstado(EstadoFactura.FACTURA_TEMPORAL.getCodigo());
+                facturaMongo.setEstadoDescripcion(EstadoFactura.FACTURA_TEMPORAL.getDescripcion());
+                facturaMongoRepository.save(facturaMongo);
+            }
+        } else {
+            Factura factura = facturaRepository.findById(uuid).orElse(null);
+            if (factura != null) {
+                factura.setEstado(EstadoFactura.FACTURA_TEMPORAL.getCodigo());
+                factura.setEstadoDescripcion(EstadoFactura.FACTURA_TEMPORAL.getDescripcion());
+                facturaRepository.save(factura);
+            }
+        }
+    }
+
     /**
      * Construye respuesta exitosa para timbrado inmediato
      */
-    private FacturaResponse construirRespuestaExitosa(FacturaRequest request, BigDecimal subtotal, 
-                                                    BigDecimal iva, BigDecimal total, PacTimbradoResponse pacResponse) {
+    private FacturaResponse construirRespuestaExitosa(FacturaRequest request, BigDecimal subtotal,
+            BigDecimal iva, BigDecimal total, PacTimbradoResponse pacResponse) {
         return FacturaResponse.builder()
                 .exitoso(true)
                 .mensaje("Factura timbrada exitosamente")
@@ -365,13 +361,13 @@ public class FacturaTimbradoService {
                         .build())
                 .build();
     }
-    
+
     /**
      * Construye datos de factura en proceso
      */
-    private FacturaResponse.DatosFactura construirDatosFacturaEnProceso(FacturaRequest request, 
-                                                                      BigDecimal subtotal, BigDecimal iva, 
-                                                                      BigDecimal total, String uuid) {
+    private FacturaResponse.DatosFactura construirDatosFacturaEnProceso(FacturaRequest request,
+            BigDecimal subtotal, BigDecimal iva,
+            BigDecimal total, String uuid) {
         return FacturaResponse.DatosFactura.builder()
                 .folioFiscal(uuid)
                 .serie("A")
@@ -385,7 +381,7 @@ public class FacturaTimbradoService {
                 .certificado("En proceso de timbrado")
                 .build();
     }
-    
+
     /**
      * Genera XML de la factura (método copiado de FacturaService)
      */
@@ -405,13 +401,13 @@ public class FacturaTimbradoService {
         xml.append("MetodoPago=\"").append(request.getMetodoPago()).append("\" ");
         xml.append("LugarExpedicion=\"").append(request.getCodigoPostalEmisor()).append("\" ");
         xml.append("xmlns:cfdi=\"http://www.sat.gob.mx/cfd/4\">\n");
-        
+
         // Emisor
         xml.append("  <cfdi:Emisor ");
         xml.append("Rfc=\"").append(request.getRfcEmisor()).append("\" ");
         xml.append("Nombre=\"").append(request.getNombreEmisor()).append("\" ");
         xml.append("RegimenFiscal=\"").append(request.getRegimenFiscalEmisor()).append("\"/>\n");
-        
+
         // Receptor
         xml.append("  <cfdi:Receptor ");
         xml.append("Rfc=\"").append(request.getRfcReceptor()).append("\" ");
@@ -419,7 +415,7 @@ public class FacturaTimbradoService {
         xml.append("DomicilioFiscalReceptor=\"").append(request.getCodigoPostalReceptor()).append("\" ");
         xml.append("RegimenFiscalReceptor=\"").append(request.getRegimenFiscalReceptor()).append("\" ");
         xml.append("UsoCFDI=\"").append(request.getUsoCFDI()).append("\"/>\n");
-        
+
         // Conceptos
         xml.append("  <cfdi:Conceptos>\n");
         for (FacturaRequest.Concepto concepto : request.getConceptos()) {
@@ -433,7 +429,7 @@ public class FacturaTimbradoService {
             xml.append("ValorUnitario=\"").append(concepto.getPrecioUnitario()).append("\" ");
             xml.append("Importe=\"").append(concepto.getImporte()).append("\" ");
             xml.append("Descuento=\"0.00\">\n");
-            
+
             // Impuestos del concepto
             BigDecimal ivaConcepto = concepto.getImporte().multiply(new BigDecimal("0.16"));
             xml.append("      <cfdi:Impuestos>\n");
@@ -449,7 +445,7 @@ public class FacturaTimbradoService {
             xml.append("    </cfdi:Concepto>\n");
         }
         xml.append("  </cfdi:Conceptos>\n");
-        
+
         // Impuestos
         xml.append("  <cfdi:Impuestos ");
         xml.append("TotalImpuestosTrasladados=\"").append(iva).append("\">\n");
@@ -461,9 +457,9 @@ public class FacturaTimbradoService {
         xml.append("Importe=\"").append(iva).append("\"/>\n");
         xml.append("    </cfdi:Traslados>\n");
         xml.append("  </cfdi:Impuestos>\n");
-        
+
         xml.append("</cfdi:Comprobante>");
-        
+
         return xml.toString();
     }
 }

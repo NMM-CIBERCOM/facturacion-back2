@@ -45,7 +45,8 @@ public class PacClient {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             HttpEntity<PacTimbradoRequest> entity = new HttpEntity<>(req, headers);
-            ResponseEntity<PacTimbradoResponse> response = restTemplate.postForEntity(url, entity, PacTimbradoResponse.class);
+            ResponseEntity<PacTimbradoResponse> response = restTemplate.postForEntity(url, entity,
+                    PacTimbradoResponse.class);
             return response.getBody();
         } catch (Exception e) {
             logger.error("Error llamando PAC para timbrado: {}", e.getMessage());
@@ -59,12 +60,12 @@ public class PacClient {
 
     public static class PacRequest {
         public String uuid;
-        public String motivo; // 01..04
+        public String motivo;
         public String rfcEmisor;
         public String rfcReceptor;
         public Double total;
         public String tipo; // INGRESO, EGRESO, NOMINA, TRASLADO
-        public String fechaFactura; // ISO-8601
+        public String fechaFactura;
         public Boolean publicoGeneral;
         public Boolean tieneRelaciones;
         public String uuidSustituto;
@@ -76,15 +77,36 @@ public class PacClient {
         private String receiptId;
         private String message;
 
-        public Boolean getOk() { return ok; }
-        public void setOk(Boolean ok) { this.ok = ok; }
-        public String getStatus() { return status; }
-        public void setStatus(String status) { this.status = status; }
-        public String getReceiptId() { return receiptId; }
-        public void setReceiptId(String receiptId) { this.receiptId = receiptId; }
-        public String getMessage() { return message; }
-        public void setMessage(String message) { this.message = message; }
+        public Boolean getOk() {
+            return ok;
+        }
+
+        public void setOk(Boolean ok) {
+            this.ok = ok;
+        }
+
+        public String getStatus() {
+            return status;
+        }
+
+        public void setStatus(String status) {
+            this.status = status;
+        }
+
+        public String getReceiptId() {
+            return receiptId;
+        }
+
+        public void setReceiptId(String receiptId) {
+            this.receiptId = receiptId;
+        }
+
+        public String getMessage() {
+            return message;
+        }
+
+        public void setMessage(String message) {
+            this.message = message;
+        }
     }
 }
-
-

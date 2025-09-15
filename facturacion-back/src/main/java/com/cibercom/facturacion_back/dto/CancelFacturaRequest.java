@@ -2,7 +2,7 @@ package com.cibercom.facturacion_back.dto;
 
 public class CancelFacturaRequest {
     private String uuid;
-    private String motivo; // 01, 02, 03, 04
+    private String motivo;
     private String usuario;
     private String perfilUsuario;
 
@@ -38,5 +38,3 @@ public class CancelFacturaRequest {
         this.perfilUsuario = perfilUsuario;
     }
 }
-
-

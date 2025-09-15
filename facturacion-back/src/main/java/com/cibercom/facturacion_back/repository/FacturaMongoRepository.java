@@ -15,35 +15,26 @@ import java.util.List;
 
 @Repository
 public interface FacturaMongoRepository extends MongoRepository<FacturaMongo, String> {
-    
-    // Buscar por UUID
+
     FacturaMongo findByUuid(String uuid);
-    
-    // Buscar por emisor RFC
+
     List<FacturaMongo> findByEmisorRfc(String emisorRfc);
-    
-    // Buscar por tienda
+
     List<FacturaMongo> findByTienda(String tienda);
-    
-    // Buscar por estado
+
     List<FacturaMongo> findByEstado(String estado);
-    
-    // Buscar por rango de fechas
+
     List<FacturaMongo> findByFechaGeneracionBetween(LocalDateTime fechaInicio, LocalDateTime fechaFin);
-    
-    // Buscar por emisor RFC y tienda
+
     List<FacturaMongo> findByEmisorRfcAndTienda(String emisorRfc, String tienda);
-    
-    // Buscar por emisor RFC, tienda y rango de fechas
+
     List<FacturaMongo> findByEmisorRfcAndTiendaAndFechaGeneracionBetween(
-        String emisorRfc, String tienda, LocalDateTime fechaInicio, LocalDateTime fechaFin);
-    
-    // Buscar por emisor RFC y rango de fechas
+            String emisorRfc, String tienda, LocalDateTime fechaInicio, LocalDateTime fechaFin);
+
     List<FacturaMongo> findByEmisorRfcAndFechaGeneracionBetween(
-        String emisorRfc, LocalDateTime fechaInicio, LocalDateTime fechaFin);
-    
-    // Consulta personalizada para búsqueda flexible
+            String emisorRfc, LocalDateTime fechaInicio, LocalDateTime fechaFin);
+
     @Query("{'emisor.rfc': ?0, 'tienda': {$regex: ?1, $options: 'i'}, 'fechaGeneracion': {$gte: ?2, $lte: ?3}}")
     List<FacturaMongo> findFacturasByCriterios(
-        String emisorRfc, String tienda, LocalDateTime fechaInicio, LocalDateTime fechaFin);
+            String emisorRfc, String tienda, LocalDateTime fechaInicio, LocalDateTime fechaFin);
 }
