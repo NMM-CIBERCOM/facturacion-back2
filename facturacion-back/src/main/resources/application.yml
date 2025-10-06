@@ -5,6 +5,18 @@ spring:
     serialization:
       write-dates-as-timestamps: false
     date-format: yyyy-MM-dd'T'HH:mm:ss.SSS
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: nm9282672@gmail.com
+    password: kaswbavrfmlqenec
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+          from: nm9282672@gmail.com
 
 ---
 
@@ -41,3 +53,15 @@ spring:
     serialization:
       write-dates-as-timestamps: false
     date-format: yyyy-MM-dd'T'HH:mm:ss.SSS
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: nm9282672@gmail.com
+    password: kaswbavrfmlqenec
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+          from: nm9282672@gmail.com

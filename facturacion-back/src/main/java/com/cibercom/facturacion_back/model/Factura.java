@@ -170,4 +170,9 @@ public class Factura {
     protected void onUpdate() {
         fechaModificacion = LocalDateTime.now();
     }
-} 
+    
+    // Método para obtener la fecha de emisión (requerido por CorreoService)
+    public LocalDateTime getFechaEmision() {
+        return fechaGeneracion;
+    }
+}

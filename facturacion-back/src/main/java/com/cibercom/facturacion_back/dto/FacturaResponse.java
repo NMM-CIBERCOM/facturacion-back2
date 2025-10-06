@@ -22,6 +22,27 @@ public class FacturaResponse {
     private DatosFactura datosFactura;
     private String errores;
     
+    // Métodos explícitos para compatibilidad
+    public static FacturaResponseBuilder builder() {
+        return new FacturaResponseBuilder();
+    }
+    
+    public boolean isExitoso() {
+        return this.exitoso;
+    }
+    
+    public String getMensaje() {
+        return this.mensaje;
+    }
+    
+    public String getXmlTimbrado() {
+        return this.xmlTimbrado;
+    }
+    
+    public String getErrores() {
+        return this.errores;
+    }
+    
     @Data
     @Builder
     @AllArgsConstructor
@@ -38,4 +59,4 @@ public class FacturaResponse {
         private String selloDigital;
         private String certificado;
     }
-} 
+}

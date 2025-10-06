@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonFormat;
 import lombok.Data;
 
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 
 @Data
 public class ConsultaFacturaRequest {
@@ -33,22 +34,30 @@ public class ConsultaFacturaRequest {
     private String codigoFacturacion;
     private String motivoSustitucion;
     private String perfilUsuario;
-
+    
+    /**
+     * Verifica si al menos un campo de búsqueda está lleno
+     */
     public boolean tieneAlMenosUnCampoLleno() {
         return notBlank(rfcReceptor) || notBlank(nombreCliente) || notBlank(apellidoPaterno) ||
-               notBlank(razonSocial) || (notBlank(almacen) && !"todos".equalsIgnoreCase(almacen)) ||
-               notBlank(usuario) || notBlank(serie) || notBlank(folio) || notBlank(uuid) ||
-               (fechaInicio != null && fechaFin != null);
+                notBlank(razonSocial) || (notBlank(almacen) && !"todos".equalsIgnoreCase(almacen)) ||
+                notBlank(usuario) || notBlank(serie) || notBlank(folio) || notBlank(uuid) ||
+                (fechaInicio != null && fechaFin != null);
     }
-
+    
+    /**
+     * Verifica si el rango de fechas es válido (no excede 365 días)
+     */
     public boolean rangoFechasValido() {
         if (fechaInicio == null || fechaFin == null) return true;
         if (fechaInicio.isAfter(fechaFin)) return false;
         long dias = java.time.Duration.between(fechaInicio.atStartOfDay(), fechaFin.atStartOfDay()).toDays();
         return dias <= 365;
     }
-
-    private boolean notBlank(String s) { return s != null && !s.trim().isEmpty(); }
+    
+    private boolean notBlank(String s) { 
+        return s != null && !s.trim().isEmpty(); 
+    }
 
     @Override
     public String toString() {

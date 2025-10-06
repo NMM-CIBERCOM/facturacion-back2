@@ -38,6 +38,11 @@ public class ITextPdfService {
     
     private static final Logger logger = LoggerFactory.getLogger(ITextPdfService.class);
     
+    public byte[] generarPdf(Map<String, Object> facturaData) throws IOException {
+        // Llamamos al método existente con un logoConfig vacío
+        return generarPdfConLogo(facturaData, Map.of());
+    }
+    
     public byte[] generarPdfConLogo(Map<String, Object> facturaData, Map<String, Object> logoConfig) throws IOException {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         
