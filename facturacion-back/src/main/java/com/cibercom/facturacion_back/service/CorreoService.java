@@ -760,6 +760,42 @@ public class CorreoService {
     }
     
     /**
+     * Obtiene un mensaje predefinido del sistema por ID
+     * 
+     * @param mensajeId ID del mensaje predefinido
+     * @return MensajePredefinidoDto con el mensaje predefinido o null si no existe
+     */
+    private MensajePredefinidoDto obtenerMensajePorId(String mensajeId) {
+        switch (mensajeId) {
+            case "completo":
+                return MensajePredefinidoDto.builder()
+                    .id("completo")
+                    .nombre("Mensaje Completo")
+                    .asunto("Factura Electrónica - {SERIE}-{FOLIO}")
+                    .mensaje("Estimado cliente,\n\nSe adjunta su factura electrónica con los siguientes datos:\n" +
+                            "Serie: {SERIE}\nFolio: {FOLIO}\nUUID: {UUID}\nRFC Emisor: {RFC_EMISOR}\n\n" +
+                            "Gracias por su preferencia.")
+                    .build();
+            case "simple":
+                return MensajePredefinidoDto.builder()
+                    .id("simple")
+                    .nombre("Mensaje Simple")
+                    .asunto("Factura {SERIE}-{FOLIO}")
+                    .mensaje("Se adjunta su factura electrónica {SERIE}-{FOLIO}.\n\nGracias.")
+                    .build();
+            case "basico":
+                return MensajePredefinidoDto.builder()
+                    .id("basico")
+                    .nombre("Mensaje Básico")
+                    .asunto("Factura Electrónica")
+                    .mensaje("Adjunto encontrará su factura electrónica.")
+                    .build();
+            default:
+                return null;
+        }
+    }
+    
+    /**
      * Obtiene el mensaje personalizado configurado para envío de facturas
      * 
      * @param serieFactura Serie de la factura
