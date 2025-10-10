@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -526,7 +527,7 @@ public class CorreoController {
             
             Map<String, Object> response = new HashMap<>();
             response.put("asunto", "Factura Electrónica - {facturaInfo}");
-            response.put("mensaje", "Estimado cliente,\n\nSe ha generado su factura electrónica con los siguientes datos:\n\nSerie de la factura: {serie}\nFolio de la factura: {folio}\nUUID de la factura: {uuid}\nRFC del emisor: {rfcEmisor}\n\nPuede descargar su factura desde nuestro portal web.\n\nGracias por su preferencia.\n\nAtentamente,\nSistema de Facturación Cibercom");
+            response.put("mensaje", "Estimado cliente,\n\nSe ha generado su factura electrónica.\n\n{mensajePersonalizado}\n\nGracias por su preferencia.\n\nAtentamente,\nEquipo de Facturación Cibercom");
             
             return ResponseEntity.ok(response);
             
@@ -538,6 +539,51 @@ public class CorreoController {
             errorResponse.put("message", "Ocurrió un error al obtener el mensaje predeterminado");
             
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+    
+    @GetMapping(value = "/preview-html", produces = MediaType.TEXT_HTML_VALUE)
+    public ResponseEntity<String> previewHtmlCorreo(@RequestParam(name = "facturaUuid", required = false) String facturaUuid) {
+        try {
+            Map<String, String> templateVars = new HashMap<>();
+            templateVars.put("saludo", "Estimado(a) cliente,");
+            templateVars.put("mensajePrincipal", "Se ha generado su factura electrónica.");
+            templateVars.put("agradecimiento", "Gracias por su preferencia.");
+            templateVars.put("mensajePersonalizado", "(mensaje personalizado)");
+            templateVars.put("despedida", "Atentamente,");
+            templateVars.put("firma", "Equipo de Facturación Cibercom");
+            // Variables de factura para previsualización (dinámicas si se proporciona facturaUuid)
+            if (facturaUuid != null && !facturaUuid.trim().isEmpty()) {
+                Factura factura = facturaService.buscarPorUuid(facturaUuid);
+                if (factura != null) {
+                    templateVars.put("serie", factura.getSerie() != null ? factura.getSerie() : "");
+                    templateVars.put("folio", factura.getFolio() != null ? factura.getFolio() : "");
+                    templateVars.put("uuid", factura.getUuid() != null ? factura.getUuid() : facturaUuid);
+                    templateVars.put("rfcEmisor", factura.getEmisorRfc() != null ? factura.getEmisorRfc() : "");
+                    templateVars.put("rfcReceptor", factura.getReceptorRfc() != null ? factura.getReceptorRfc() : "");
+                } else {
+                    // Fallback si no se encuentra la factura
+                    templateVars.put("serie", "A");
+                    templateVars.put("folio", "12345");
+                    templateVars.put("uuid", facturaUuid);
+                    templateVars.put("rfcEmisor", "XAXX010101000");
+                    templateVars.put("rfcReceptor", "XEXX010101000");
+                }
+            } else {
+                // Valores de ejemplo si no se proporciona facturaUuid
+                templateVars.put("serie", "A");
+                templateVars.put("folio", "12345");
+                templateVars.put("uuid", "00000000-0000-0000-0000-000000000000");
+                templateVars.put("rfcEmisor", "XAXX010101000");
+                templateVars.put("rfcReceptor", "XEXX010101000");
+            }
+
+            String html = correoService.aplicarFormatoAlMensaje("", templateVars);
+            return ResponseEntity.ok(html);
+        } catch (Exception e) {
+            logger.error("Error al generar previsualización HTML: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("<html><body><p>Error al generar la previsualización: " + e.getMessage() + "</p></body></html>");
         }
     }
 }

@@ -605,11 +605,13 @@ public class FormatoCorreoService {
 
             // Valores por defecto para variables no proporcionadas
             Map<String, String> defaultValues = new HashMap<>();
-            defaultValues.put("saludo", "Estimado cliente,");
-            defaultValues.put("mensajePrincipal", "Se ha generado su factura electrónica. Consulte los detalles abajo.");
-            defaultValues.put("mensajeAdicional", "La factura se encuentra adjunta a este correo en formato PDF.");
+            defaultValues.put("saludo", "Estimado(a) cliente,");
+            defaultValues.put("mensajePrincipal", "Se ha generado su factura electrónica.");
+            defaultValues.put("agradecimiento", "Gracias por su preferencia.");
+            defaultValues.put("mensajePersonalizado", "");
             defaultValues.put("despedida", "Atentamente,");
-
+            defaultValues.put("firma", "Equipo de Facturación Cibercom");
+            
             // Combinar variables proporcionadas con valores por defecto
             Map<String, String> allVariables = new HashMap<>(defaultValues);
             if (variables != null) {

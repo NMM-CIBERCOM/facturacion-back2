@@ -78,13 +78,29 @@ public class CorreoService {
             // Obtener configuración de correo SMTP
             Map<String, String> configCorreo = obtenerConfiguracionCorreo();
             
-            // Obtener mensaje personalizado configurado
-            String[] mensajeYAsunto = obtenerMensajePersonalizado(
-                factura.getSerie(), 
-                factura.getFolio(), 
-                factura.getUuid(), 
-                factura.getEmisorRfc()
-            );
+            // Crear mensaje simple sin datos de factura
+            String asunto = "Factura Electrónica - " + factura.getSerie() + factura.getFolio();
+            
+            // Crear mensaje personalizado desde la configuración
+            ConfiguracionCorreoResponseDto config = obtenerConfiguracionMensajes();
+            String mensajePersonalizado = "";
+            
+            if (config.isExitoso() && "personalizado".equals(config.getMensajeSeleccionado()) 
+                && config.getMensajesPersonalizados() != null && !config.getMensajesPersonalizados().isEmpty()) {
+                mensajePersonalizado = config.getMensajesPersonalizados().get(0).getMensaje();
+                mensajePersonalizado = limpiarMensajePersonalizado(mensajePersonalizado);
+            }
+            
+            // Construir mensaje simple
+            StringBuilder mensaje = new StringBuilder();
+            mensaje.append("Estimado cliente,<br><br>\n\n");
+            mensaje.append("Se ha generado su factura electrónica.<br><br>\n\n");
+            mensaje.append(mensajePersonalizado + "<br><br>\n\n");
+            mensaje.append("Gracias por su preferencia.<br><br>\n\n");
+            mensaje.append("Atentamente,<br>\n");
+            mensaje.append("Equipo de Facturación Cibercom<br><br>\n\n");
+            
+            String[] mensajeYAsunto = new String[]{asunto, mensaje.toString()};
             
             // Enviar correo con mensaje personalizado
             enviarCorreoConMensajePersonalizado(
@@ -227,39 +243,15 @@ public class CorreoService {
             String asuntoFinal = asunto;
             String mensajeFinal = mensaje;
             
-            // Siempre crear un mensaje HTML con los datos de la factura
-            logger.info("Generando mensaje HTML con datos de factura {}{}", 
-                       factura.getSerie(), factura.getFolio());
+            // Preparar variables estrictamente según el diseño de la plantilla y la imagen
+            Map<String, String> templateVars = new HashMap<>();
+            templateVars.put("saludo", "Estimado(a) cliente,");
+            templateVars.put("mensajePrincipal", "Se ha generado su factura electrónica.");
+            templateVars.put("agradecimiento", "Gracias por su preferencia.");
             
-            // Crear un mensaje HTML con los datos de la factura
-            StringBuilder mensajeHtml = new StringBuilder();
-            mensajeHtml.append("<html><body style='font-family: Arial, sans-serif;'>");
-            mensajeHtml.append("<div style='max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 5px;'>");
-            mensajeHtml.append("<h2 style='color: #2563eb; text-align: center;'>Facturación Cibercom</h2>");
-            mensajeHtml.append("<h3 style='color: #2563eb; text-align: center;'>Datos de la Factura</h3>");
-            
-            // Procesar el mensaje para reemplazar variables
-            String mensajeProcesado = mensaje;
-            if (mensaje.contains("{rfcReceptor}")) {
-                mensajeProcesado = mensaje.replace("{rfcReceptor}", factura.getReceptorRfc());
-                logger.info("Variable {rfcReceptor} reemplazada en el mensaje con: {}", factura.getReceptorRfc());
-            }
-            
-            mensajeHtml.append("<table style='width: 100%; border-collapse: collapse; margin-bottom: 20px;' border='1' cellpadding='8' cellspacing='0'>");
-            mensajeHtml.append("<tr style='background-color: #f8fafc;'><td style='font-weight: bold;'>Serie-Folio:</td><td>").append(factura.getSerie()).append(factura.getFolio()).append("</td></tr>");
-            mensajeHtml.append("<tr><td style='font-weight: bold;'>UUID:</td><td>").append(factura.getUuid()).append("</td></tr>");
-            mensajeHtml.append("<tr style='background-color: #f8fafc;'><td style='font-weight: bold;'>RFC Emisor:</td><td>").append(factura.getEmisorRfc()).append("</td></tr>");
-            mensajeHtml.append("<tr><td style='font-weight: bold;'>RFC Receptor:</td><td>").append(factura.getReceptorRfc()).append("</td></tr>");
-            mensajeHtml.append("<tr style='background-color: #f8fafc;'><td style='font-weight: bold;'>Fecha Emisión:</td><td>").append(factura.getFechaTimbrado()).append("</td></tr>");
-            mensajeHtml.append("<tr><td style='font-weight: bold;'>Total:</td><td style='font-weight: bold; color: #2563eb;'>$").append(factura.getTotal()).append("</td></tr>");
-            mensajeHtml.append("</table>");
-            mensajeHtml.append("<p style='margin-top: 20px; line-height: 1.5;'>").append(mensajeProcesado).append("</p>");
-            mensajeHtml.append("<p style='text-align: center; margin-top: 30px; color: #666;'>Gracias por su preferencia</p>");
-            mensajeHtml.append("</div>");
-            mensajeHtml.append("</body></html>");
-            
+            // Obtener configuración personalizada para asunto y mensaje personalizado
             Map<String, String> configuracionPersonalizada = aplicarConfiguracionPersonalizada(
-                asunto, mensajeHtml.toString(), 
+                asunto, mensaje != null ? mensaje : "", 
                 factura.getSerie(), 
                 factura.getFolio(), 
                 uuidFactura, 
@@ -267,17 +259,20 @@ public class CorreoService {
             );
             
             asuntoFinal = configuracionPersonalizada.get("asunto");
-            mensajeFinal = configuracionPersonalizada.get("mensaje");
+            String mensajePersonalizadoFinal = configuracionPersonalizada.getOrDefault("mensaje", "");
+            templateVars.put("mensajePersonalizado", mensajePersonalizadoFinal);
+            templateVars.put("despedida", "Atentamente,");
+            templateVars.put("firma", "Equipo de Facturación Cibercom");
+            // Agregar datos de la factura para mostrarlos en la plantilla
+            templateVars.put("serie", factura.getSerie() != null ? factura.getSerie() : "");
+            templateVars.put("folio", factura.getFolio() != null ? factura.getFolio() : "");
+            templateVars.put("uuid", uuidFactura != null ? uuidFactura : "");
+            templateVars.put("rfcEmisor", factura.getEmisorRfc() != null ? factura.getEmisorRfc() : "");
+            templateVars.put("rfcReceptor", factura.getReceptorRfc() != null ? factura.getReceptorRfc() : "");
             
-            if (!asunto.equals(asuntoFinal) || !mensaje.equals(mensajeFinal)) {
-                logger.info("Configuración personalizada aplicada - Asunto: '{}', Mensaje modificado: {}", 
-                           asuntoFinal, !mensaje.equals(mensajeFinal));
-            } else {
-                logger.info("No hay configuración personalizada activa, usando valores originales");
-                // Si no hay configuración personalizada, usamos el mensaje HTML generado
-                mensajeFinal = mensajeHtml.toString();
-                logger.info("Usando mensaje HTML generado con datos de factura");
-            }
+            // Construir el HTML final usando exclusivamente la plantilla
+            mensajeFinal = aplicarFormatoAlMensaje("", templateVars);
+            logger.info("Mensaje HTML construido con plantilla (longitud: {})", mensajeFinal.length());
             
             // Obtener el PDF como bytes (genera datos de prueba si no encuentra la factura)
             logger.info("Generando PDF...");
@@ -343,10 +338,10 @@ public class CorreoService {
             Map<String, String> configCorreo = obtenerConfiguracionCorreo();
             logger.info("Configuración de correo obtenida");
             
-            // Aplicar formato al mensaje final
-            String mensajeConFormato = aplicarFormatoAlMensaje(mensajeFinal);
-            logger.info("Formato aplicado al mensaje. Longitud original: {}, con formato: {}", 
-                       mensajeFinal.length(), mensajeConFormato.length());
+            // Aplicar formato al mensaje final (ya formateado por la plantilla)
+            String mensajeConFormato = mensajeFinal;
+            logger.info("Formato aplicado al mensaje. Longitud final: {}", 
+                       mensajeConFormato.length());
             
             // VERIFICACIÓN ADICIONAL: Asegurar que el adjunto exista y tenga contenido
             if (adjuntos == null || adjuntos.isEmpty() || adjuntos.get(0).getContenido() == null || adjuntos.get(0).getContenido().length < 100) {
@@ -553,16 +548,20 @@ public class CorreoService {
                 mensajeSeleccionado = config.getMensajeSeleccionado();
             }
             
-            // Obtener todos los mensajes personalizados activos
-            List<ConfiguracionMensaje> mensajesPersonalizadosDB = configuracionMensajeRepository.findActivePersonalizedMessages();
-            for (ConfiguracionMensaje mensaje : mensajesPersonalizadosDB) {
-                MensajePredefinidoDto dto = MensajePredefinidoDto.builder()
-                    .id(mensaje.getIdConfiguracion().toString())
-                    .nombre(mensaje.getTipoMensaje())
-                    .asunto(mensaje.getAsuntoPersonalizado())
-                    .mensaje(mensaje.getMensajePersonalizado())
-                    .build();
-                mensajesPersonalizados.add(dto);
+            // Incluir mensaje personalizado desde la configuración principal (un solo registro)
+            if (configuracionOpt.isPresent()) {
+                ConfiguracionMensaje config = configuracionOpt.get();
+                if ("personalizado".equalsIgnoreCase(config.getMensajeSeleccionado())
+                    && config.getAsuntoPersonalizado() != null
+                    && config.getMensajePersonalizado() != null) {
+                    MensajePredefinidoDto dto = MensajePredefinidoDto.builder()
+                        .id(config.getIdConfiguracion() != null ? config.getIdConfiguracion().toString() : null)
+                        .nombre("Mensaje Personalizado")
+                        .asunto(config.getAsuntoPersonalizado())
+                        .mensaje(config.getMensajePersonalizado())
+                        .build();
+                    mensajesPersonalizados.add(dto);
+                }
             }
             
             logger.info("Configuración obtenida - Mensaje seleccionado: {}, Mensajes personalizados: {}", 
@@ -681,30 +680,24 @@ public class CorreoService {
             
             configuracionMensajeRepository.save(nuevaConfiguracion);
             
-            // Guardar mensajes personalizados si existen
+            // Si se envió un mensaje personalizado, guardarlo dentro del mismo registro principal
             List<MensajePredefinidoDto> mensajesGuardados = new ArrayList<>();
-            if (configuracion.getMensajesPersonalizados() != null) {
-                for (MensajePredefinidoDto mensaje : configuracion.getMensajesPersonalizados()) {
-                    ConfiguracionMensaje mensajePersonalizado = new ConfiguracionMensaje();
-                    mensajePersonalizado.setMensajeSeleccionado("personalizado");
-                    mensajePersonalizado.setTipoMensaje(mensaje.getNombre());
-                    mensajePersonalizado.setAsuntoPersonalizado(mensaje.getAsunto());
-                    mensajePersonalizado.setMensajePersonalizado(mensaje.getMensaje());
-                    mensajePersonalizado.setActivo("S");
-                    mensajePersonalizado.setUsuarioCreacion("SISTEMA");
-                    
-                    ConfiguracionMensaje mensajeGuardado = configuracionMensajeRepository.save(mensajePersonalizado);
-                    
-                    // Crear DTO para la respuesta
-                    MensajePredefinidoDto dtoGuardado = MensajePredefinidoDto.builder()
-                        .id(mensajeGuardado.getIdConfiguracion().toString())
-                        .nombre(mensajeGuardado.getTipoMensaje())
-                        .asunto(mensajeGuardado.getAsuntoPersonalizado())
-                        .mensaje(mensajeGuardado.getMensajePersonalizado())
-                        .build();
-                    mensajesGuardados.add(dtoGuardado);
-                }
+            if (configuracion.getMensajesPersonalizados() != null && !configuracion.getMensajesPersonalizados().isEmpty()) {
+                MensajePredefinidoDto mensaje = configuracion.getMensajesPersonalizados().get(0);
+                nuevaConfiguracion.setAsuntoPersonalizado(mensaje.getAsunto());
+                nuevaConfiguracion.setMensajePersonalizado(mensaje.getMensaje());
+                // Añadir representación DTO para respuesta
+                MensajePredefinidoDto dtoGuardado = MensajePredefinidoDto.builder()
+                    .id(nuevaConfiguracion.getIdConfiguracion() != null ? nuevaConfiguracion.getIdConfiguracion().toString() : null)
+                    .nombre("Mensaje Personalizado")
+                    .asunto(mensaje.getAsunto())
+                    .mensaje(mensaje.getMensaje())
+                    .build();
+                mensajesGuardados.add(dtoGuardado);
             }
+            
+            // Guardar la configuración principal (incluyendo formato y posible personalizado)
+            ConfiguracionMensaje configuracionGuardada = configuracionMensajeRepository.save(nuevaConfiguracion);
             
             logger.info("Configuración de mensajes guardada en BD - Mensaje seleccionado: {}, Mensajes personalizados: {}", 
                 configuracion.getMensajeSeleccionado(), 
@@ -724,97 +717,6 @@ public class CorreoService {
                 .mensaje("Error interno al guardar la configuración")
                 .build();
         }
-    }
-    
-    /**
-     * Obtiene un mensaje predefinido por su ID
-     * 
-     * @param mensajeId ID del mensaje
-     * @return MensajePredefinidoDto con el mensaje
-     */
-    public MensajePredefinidoDto obtenerMensajePorId(String mensajeId) {
-        switch (mensajeId) {
-            case "basico":
-                return MensajePredefinidoDto.builder()
-                    .id("basico")
-                    .nombre("Mensaje Básico")
-                    .asunto("Factura Electrónica - {facturaInfo}")
-                    .mensaje("Estimado cliente,\n\nSe adjunta su factura electrónica.\n\nGracias por su preferencia.")
-                    .build();
-                    
-            case "completo":
-                // Buscar el mensaje predeterminado en la base de datos
-                Optional<ConfiguracionMensaje> mensajePredeterminado = configuracionMensajeRepository
-                    .findByTipoMensajeAndActivo("predefinido", "S");
-                
-                if (mensajePredeterminado.isPresent()) {
-                    ConfiguracionMensaje config = mensajePredeterminado.get();
-                    return MensajePredefinidoDto.builder()
-                        .id("completo")
-                        .nombre("Mensaje Completo")
-                        .asunto(config.getAsuntoPersonalizado())
-                        .mensaje(config.getMensajePersonalizado())
-                        .build();
-                } else {
-                    // Fallback al mensaje por defecto si no se encuentra en BD
-                    return MensajePredefinidoDto.builder()
-                        .id("completo")
-                        .nombre("Mensaje Completo")
-                        .asunto("Factura Electrónica - {numeroFactura}")
-                        .mensaje("Estimado cliente,\n\nSe ha generado su factura electrónica con los siguientes datos:\n\n" +
-                                "UUID de la factura: {uuid}\n" +
-                                "RFC del emisor: {rfcEmisor}\n\n" +
-                                "Adjunto encontrará su factura en formato PDF.\n\n" +
-                                "Puede descargar su factura desde nuestro portal web.\n\n" +
-                                "Gracias por su preferencia.\n\n" +
-                                "Atentamente,\n" +
-                                "Sistema de Facturación Cibercom")
-                        .build();
-                }
-                    
-            case "personalizado":
-                return MensajePredefinidoDto.builder()
-                    .id("personalizado")
-                    .nombre("Mensaje Personalizado")
-                    .asunto("Su factura {facturaInfo} está lista")
-                    .mensaje("Estimado cliente,\n\nNos complace informarle que su factura {facturaInfo} ha sido procesada exitosamente.\n\n" +
-                            "Detalles de la factura:\n" +
-                            "• Serie: {serie}\n" +
-                            "• Folio: {folio}\n" +
-                            "• UUID: {uuid}\n" +
-                            "• RFC Emisor: {rfcEmisor}\n\n" +
-                            "La factura se encuentra adjunta a este correo en formato PDF.\n\n" +
-                            "Si tiene alguna pregunta, no dude en contactarnos.\n\n" +
-                            "Cordialmente,\n" +
-                            "Equipo de Facturación Cibercom")
-                    .build();
-                    
-            default:
-                // Retornar mensaje completo por defecto
-                return obtenerMensajePorId("completo");
-        }
-    }
-    
-    /**
-     * Procesa las variables en un texto
-     * 
-     * @param texto Texto con variables
-     * @param variables Mapa de variables
-     * @return Texto procesado
-     */
-    public String procesarVariables(String texto, Map<String, String> variables) {
-        if (texto == null || variables == null) {
-            return texto;
-        }
-        
-        String resultado = texto;
-        for (Map.Entry<String, String> entry : variables.entrySet()) {
-            String variable = "{" + entry.getKey() + "}";
-            String valor = entry.getValue() != null ? entry.getValue() : "";
-            resultado = resultado.replace(variable, valor);
-        }
-        
-        return resultado;
     }
     
     /**
@@ -879,7 +781,11 @@ public class CorreoService {
                        config.getMensajesPersonalizados() != null ? config.getMensajesPersonalizados().size() : 0);
             
             String asunto = "Factura Electrónica - " + serieFactura + folioFactura;
-            String mensaje = construirMensajePredeterminado(serieFactura, folioFactura, uuidFactura, rfcEmisor);
+            
+            // Crear mensaje sin datos de factura
+            StringBuilder mensaje = new StringBuilder();
+            mensaje.append("Estimado cliente,<br><br>\n\n");
+            mensaje.append("Se ha generado su factura electrónica.<br><br>\n\n");
             
             // Si hay configuración personalizada, usarla
             if (config.isExitoso() && "personalizado".equals(config.getMensajeSeleccionado()) 
@@ -913,8 +819,15 @@ public class CorreoService {
                 // Procesar mensaje personalizado
                 if (mensajePersonalizado.getMensaje() != null && !mensajePersonalizado.getMensaje().trim().isEmpty()) {
                     String mensajeOriginal = mensajePersonalizado.getMensaje();
-                    mensaje = procesarVariables(mensajePersonalizado.getMensaje(), variables);
-                    logger.info("Mensaje procesado: '{}...' -> '{}...'", 
+                    String personalizadoProcesado = procesarVariables(mensajePersonalizado.getMensaje(), variables);
+                    String cuerpoSolo = limpiarMensajePersonalizado(personalizadoProcesado);
+                    
+                    // Agregar el mensaje personalizado al mensaje base
+                    mensaje.append(cuerpoSolo + "<br><br>\n\n");
+                    mensaje.append("Gracias por su preferencia.<br><br>\n\n");
+                    mensaje.append("Atentamente,<br>\n");
+                    mensaje.append("Equipo de Facturación Cibercom<br><br>\n\n");
+                    logger.info("Mensaje procesado: '{}...' -> '{}...'",
                                mensajeOriginal.substring(0, Math.min(50, mensajeOriginal.length())),
                                mensaje.substring(0, Math.min(50, mensaje.length())));
                 }
@@ -926,10 +839,10 @@ public class CorreoService {
             
             logger.info("=== RESULTADO FINAL ===");
             logger.info("Asunto final: '{}'", asunto);
-            logger.info("Mensaje final: '{}'", mensaje.substring(0, Math.min(100, mensaje.length())) + "...");
+            logger.info("Mensaje final: '{}'", mensaje.toString().substring(0, Math.min(100, mensaje.toString().length())) + "...");
             logger.info("=== FIN obtenerMensajePersonalizado ===");
             
-            return new String[]{asunto, mensaje};
+            return new String[]{asunto, mensaje.toString()};
             
         } catch (Exception e) {
             logger.error("Error al obtener mensaje personalizado, usando predeterminado: {}", e.getMessage());
@@ -946,16 +859,12 @@ public class CorreoService {
     private String construirMensajePredeterminado(String serieFactura, String folioFactura, 
                                                 String uuidFactura, String rfcEmisor) {
         StringBuilder mensaje = new StringBuilder();
-        mensaje.append("Estimado cliente,\n\n");
-        mensaje.append("Se ha generado su factura electrónica con los siguientes datos:\n\n");
-        mensaje.append("Serie de la factura: ").append(serieFactura).append("\n");
-        mensaje.append("Folio de la factura: ").append(folioFactura).append("\n");
-        mensaje.append("UUID de la factura: ").append(uuidFactura).append("\n");
-        mensaje.append("RFC del emisor: ").append(rfcEmisor).append("\n\n");
-        mensaje.append("Puede descargar su factura desde nuestro portal web.\n\n");
-        mensaje.append("Gracias por su preferencia.\n\n");
-        mensaje.append("Atentamente,\n");
-        mensaje.append("Sistema de Facturación Cibercom");
+        mensaje.append("Estimado cliente,<br><br>\n\n");
+        mensaje.append("Se ha generado su factura electrónica.<br><br>\n\n");
+        mensaje.append("{mensajePersonalizado}<br><br>\n\n");
+        mensaje.append("Gracias por su preferencia.<br><br>\n\n");
+        mensaje.append("Atentamente,<br>\n");
+        mensaje.append("Equipo de Facturación Cibercom<br><br>\n\n");
         
         return mensaje.toString();
     }
@@ -971,8 +880,32 @@ public class CorreoService {
             CorreoDto correo = new CorreoDto();
             correo = CorreoUtil.generaCorreo(correo, configCorreo);
             
-            // Aplicar formato al mensaje
-            String mensajeConFormato = aplicarFormatoAlMensaje(mensaje);
+            // Construir contenido usando plantilla y mensajePersonalizado
+            String marker = "(Mensaje personalizado)";
+            String cuerpoPersonalizado = mensaje != null ? mensaje : "";
+            
+            // Eliminar completamente el bloque de datos de la factura (todos los patrones posibles)
+            cuerpoPersonalizado = cuerpoPersonalizado.replaceAll("con los siguientes datos:.*?Puede descargar su factura desde nuestro portal web\\.", "");
+            cuerpoPersonalizado = cuerpoPersonalizado.replaceAll("Serie de la factura:.*?Folio de la factura:.*?UUID de la factura:.*?RFC del emisor:.*?Puede descargar su factura desde nuestro portal web\\.", "");
+            cuerpoPersonalizado = cuerpoPersonalizado.replaceAll("Serie de la factura:.*?Folio de la factura:.*?UUID de la factura:.*?RFC del emisor:.*", "");
+            
+            int idx = cuerpoPersonalizado.indexOf(marker);
+            if (idx >= 0) {
+                cuerpoPersonalizado = cuerpoPersonalizado.substring(idx + marker.length());
+            }
+            
+            // Limpiar el mensaje personalizado de cualquier dato de factura
+            cuerpoPersonalizado = limpiarMensajePersonalizado(cuerpoPersonalizado);
+
+            Map<String, String> templateVars = new HashMap<>();
+            templateVars.put("saludo", "Estimado(a) cliente,");
+            templateVars.put("mensajePrincipal", "Se ha generado su factura electrónica.");
+            templateVars.put("agradecimiento", "Gracias por su preferencia.");
+            templateVars.put("mensajePersonalizado", cuerpoPersonalizado);
+            templateVars.put("despedida", "Atentamente,");
+            templateVars.put("firma", "Equipo de Facturación Cibercom");
+
+            String mensajeConFormato = aplicarFormatoAlMensaje("", templateVars);
             
             // Configurar el destinatario
             correo.setTo(correoReceptor);
@@ -995,36 +928,37 @@ public class CorreoService {
      * @param variables Variables adicionales para la plantilla
      * @return Mensaje con formato y plantilla aplicados
      */
-    private String aplicarFormatoAlMensaje(String mensaje, Map<String, String> variables) {
+    public String aplicarFormatoAlMensaje(String mensaje, Map<String, String> variables) {
         try {
             // Obtener configuración de formato desde la configuración de mensajes
             ConfiguracionCorreoResponseDto configResponse = obtenerConfiguracionMensajes();
             FormatoCorreoDto configuracionFormato;
             
             if (configResponse != null && configResponse.isExitoso() && configResponse.getFormatoCorreo() != null) {
-                // Usar la configuración de formato de la configuración de mensajes
                 configuracionFormato = configResponse.getFormatoCorreo();
                 logger.info("Usando configuración de formato desde configuración de mensajes: {}", configuracionFormato);
             } else {
-                // Si no hay configuración en mensajes, obtener la configuración activa del servicio de formato
                 configuracionFormato = formatoCorreoService.obtenerConfiguracionActiva();
                 logger.info("Usando configuración de formato desde servicio de formato: {}", configuracionFormato);
             }
             
-            // Preparar variables para la plantilla
             Map<String, String> templateVars = new HashMap<>();
             if (variables != null) {
                 templateVars.putAll(variables);
             }
             
-            // Agregar el mensaje principal a las variables
-            templateVars.put("mensajePrincipal", mensaje);
+            // Definir valores por defecto para asegurar estructura del mensaje
+            templateVars.putIfAbsent("saludo", "Estimado(a) cliente,");
+            templateVars.putIfAbsent("mensajePrincipal", mensaje);
+            templateVars.putIfAbsent("agradecimiento", "Gracias por su preferencia.");
+            templateVars.putIfAbsent("mensajePersonalizado", "");
+            templateVars.putIfAbsent("despedida", "Atentamente,");
+            templateVars.putIfAbsent("firma", "Equipo de Facturación Cibercom");
             
-            // Cargar y procesar la plantilla HTML con las variables
+            // Procesar plantilla HTML con variables
             String contenidoHTML = formatoCorreoService.cargarYProcesarPlantillaHTML(templateVars, configuracionFormato);
             
-            // Aplicar estilos de formato al contenido HTML
-            return formatoCorreoService.aplicarFormatoHTML(contenidoHTML, configuracionFormato);
+            return contenidoHTML;
             
         } catch (Exception e) {
             logger.warn("Error al aplicar formato al mensaje, enviando sin formato: {}", e.getMessage(), e);
@@ -1111,8 +1045,10 @@ public class CorreoService {
                 // Aplicar mensaje personalizado si está disponible
                 if (mensajePersonalizado.getMensaje() != null && !mensajePersonalizado.getMensaje().trim().isEmpty()) {
                     String mensajePersonalizadoProcesado = procesarVariables(mensajePersonalizado.getMensaje(), variables);
+                    // Limpia saludos, agradecimientos y firmas para evitar duplicados en la plantilla
+                    mensajePersonalizadoProcesado = limpiarMensajePersonalizado(mensajePersonalizadoProcesado);
                     resultado.put("mensaje", mensajePersonalizadoProcesado);
-                    logger.info("Mensaje personalizado aplicado (primeros 50 chars): '{}'", 
+                    logger.info("Mensaje personalizado aplicado (primeros 50 chars): '{}'",
                                mensajePersonalizadoProcesado.substring(0, Math.min(50, mensajePersonalizadoProcesado.length())) + "...");
                 }
                 
@@ -1126,5 +1062,58 @@ public class CorreoService {
         return resultado;
     }
     
+    /**
+     * Limpia el mensaje personalizado para que solo contenga el cuerpo sin
+     * saludos, agradecimientos ni firmas que ya provee la plantilla.
+     */
+    private String limpiarMensajePersonalizado(String texto) {
+        if (texto == null) return "";
+        
+        // Eliminar cualquier texto que contenga datos de la factura
+        String cleaned = texto;
+        
+        // Eliminar el bloque completo de datos de la factura con cualquier formato
+        cleaned = cleaned.replaceAll("(?i)con los siguientes datos:.*?Puede descargar su factura desde nuestro portal web\\.", "");
+        
+        // Eliminar específicamente el patrón que aparece en la imagen
+        cleaned = cleaned.replaceAll("(?i)Serie de la factura:.*?RFC del emisor:.*?Puede descargar su factura desde nuestro portal web\\.", "");
+        
+        // Frases comunes a eliminar (ignorando mayúsculas/minúsculas)
+        String[] frases = new String[]{
+            "Estimado cliente", "Estimado(a) cliente",
+            "Se ha generado su factura electrónica",
+            "Gracias por su preferencia",
+            "Atentamente",
+            "Sistema de Facturación Cibercom",
+            "Equipo de Facturación Cibercom"
+        };
+        for (String frase : frases) {
+            cleaned = cleaned.replaceAll("(?i)" + java.util.regex.Pattern.quote(frase) + "[.,:;]*", "");
+        }
+        // Reducir saltos de línea/BR repetidos
+        cleaned = cleaned.replaceAll("(?i)(<br\\s*/?>\\s*){2,}", "<br>");
+        cleaned = cleaned.replaceAll("\n{2,}", "\n");
+        // Limpiar espacios y separadores sobrantes
+        cleaned = cleaned.replaceAll("^(\\s|,|:|-)+", "");
+        cleaned = cleaned.replaceAll("(\\s|,|:|-)+$", "");
+        return cleaned.trim();
+    }
 
+    /**
+     * Reemplaza las variables en el texto usando el formato {variable}.
+     * Si alguna variable no existe en el mapa, se deja sin reemplazo.
+     */
+    private String procesarVariables(String texto, Map<String, String> variables) {
+        if (texto == null) return "";
+        if (variables == null || variables.isEmpty()) return texto;
+        String resultado = texto;
+        for (Map.Entry<String, String> entry : variables.entrySet()) {
+            String key = entry.getKey();
+            if (key == null || key.trim().isEmpty()) continue;
+            String valor = entry.getValue() != null ? entry.getValue() : "";
+            String placeholder = "{" + key + "}";
+            resultado = resultado.replace(placeholder, valor);
+        }
+        return resultado;
+    }
 }

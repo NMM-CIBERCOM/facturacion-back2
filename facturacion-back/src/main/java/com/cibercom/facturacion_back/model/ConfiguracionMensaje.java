@@ -34,7 +34,7 @@ public class ConfiguracionMensaje {
     @Column(name = "MENSAJE_PERSONALIZADO", columnDefinition = "CLOB")
     private String mensajePersonalizado;
     
-    // Campos de formato de correo
+    // Campos de formato de correo - nombres corregidos según la tabla Oracle
     @Column(name = "TIPO_FUENTE", length = 50)
     private String tipoFuente;
     
@@ -46,8 +46,8 @@ public class ConfiguracionMensaje {
     
     @Column(name = "ES_SUBRAYADO", length = 1)
     private String esSubrayado;
-    
-    @Column(name = "COLOR_TEXTO", length = 20)
+
+    @Column(name = "COLOR_TEXTO", length = 10)
     private String colorTexto;
     
     @Column(name = "ACTIVO", nullable = false, length = 1)

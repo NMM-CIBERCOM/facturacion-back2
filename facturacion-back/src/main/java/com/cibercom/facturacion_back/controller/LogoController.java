@@ -2,6 +2,7 @@ package com.cibercom.facturacion_back.controller;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -80,6 +81,53 @@ public class LogoController {
             errorResponse.put("error", "Error interno del servidor: " + e.getMessage());
 
             return ResponseEntity.internalServerError().body(errorResponse);
+        }
+    }
+
+    // Nuevo endpoint para servir el PNG proporcionado por el usuario
+    @GetMapping(value = "/cibercom-png", produces = MediaType.IMAGE_PNG_VALUE)
+    public ResponseEntity<byte[]> obtenerLogoCibercomPng() {
+        try {
+            // Ruta principal proporcionada por el usuario
+            Path logoPathPrincipal = Paths.get(
+                    "C:/workspace/Repositories/FacturacionCibercom/facturacion-cibercom/public/images/Logo Cibercom.png");
+
+            // Rutas alternativas relativas por si se ejecuta desde otro directorio
+            Path[] rutasAlternativas = new Path[] {
+                    Paths.get("../facturacion-cibercom/public/images/Logo Cibercom.png"),
+                    Paths.get("../../facturacion-cibercom/public/images/Logo Cibercom.png"),
+                    Paths.get("../../../facturacion-cibercom/public/images/Logo Cibercom.png"),
+                    Paths.get("public/images/Logo Cibercom.png"),
+                    Paths.get("src/main/resources/static/images/Logo Cibercom.png")
+            };
+
+            Path rutaEncontrada = null;
+
+            if (Files.exists(logoPathPrincipal)) {
+                rutaEncontrada = logoPathPrincipal;
+                logger.info("Logo PNG encontrado en ruta principal: {}", logoPathPrincipal.toAbsolutePath());
+            } else {
+                for (Path alternativa : rutasAlternativas) {
+                    if (Files.exists(alternativa)) {
+                        rutaEncontrada = alternativa;
+                        logger.info("Logo PNG encontrado en ruta alternativa: {}", alternativa.toAbsolutePath());
+                        break;
+                    }
+                }
+            }
+
+            if (rutaEncontrada != null) {
+                byte[] logoBytes = Files.readAllBytes(rutaEncontrada);
+                return ResponseEntity.ok()
+                        .contentType(MediaType.IMAGE_PNG)
+                        .body(logoBytes);
+            } else {
+                logger.warn("No se encontró el archivo PNG del logo en las rutas configuradas");
+                return ResponseEntity.notFound().build();
+            }
+        } catch (IOException e) {
+            logger.error("Error leyendo el archivo PNG del logo: {}", e.getMessage());
+            return ResponseEntity.internalServerError().build();
         }
     }
 
