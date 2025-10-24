@@ -238,7 +238,7 @@ public class ConsultaFacturaDAOImpl implements ConsultaFacturaDAO {
             return info;
         }
 
-        String sql = "SELECT UUID, EMISOR_RFC, RECEPTOR_RFC, FECHA_FACTURA, TOTAL, SERIE, FOLIO, TIENDA, ESTADO FROM FACTURAS WHERE UUID = ?";
+        String sql = "SELECT UUID, EMISOR_RFC, RFC_R, FECHA_FACTURA, IMPORTE AS TOTAL, SERIE, FOLIO, TIENDA, ESTADO FROM FACTURAS WHERE UUID = ?";
         try (Connection conn = dataSource.getConnection();
                 PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, uuid);
@@ -247,7 +247,7 @@ public class ConsultaFacturaDAOImpl implements ConsultaFacturaDAO {
                     FacturaInfo info = new FacturaInfo();
                     info.uuid = rs.getString("UUID");
                     info.rfcEmisor = rs.getString("EMISOR_RFC");
-                    info.rfcReceptor = rs.getString("RECEPTOR_RFC");
+                    info.rfcReceptor = rs.getString("RFC_R");
                     java.sql.Timestamp ts = rs.getTimestamp("FECHA_FACTURA");
                     if (ts != null)
                         info.fechaFactura = ts.toInstant().atOffset(java.time.ZoneOffset.UTC);

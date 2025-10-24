@@ -26,6 +26,12 @@ public class ConsultaFacturaService {
     private ConsultaFacturaDAO consultaFacturaDAO;
     @Autowired
     private PacClient pacClient;
+    @Autowired(required = false)
+    private com.cibercom.facturacion_back.repository.FacturaMongoRepository facturaMongoRepository;
+    @Autowired(required = false)
+    private com.cibercom.facturacion_back.dao.UuidFacturaOracleDAO uuidFacturaOracleDAO;
+    @Autowired(required = false)
+    private org.springframework.core.env.Environment environment;
 
     @Transactional(readOnly = true)
     public ConsultaFacturaResponse consultarFacturas(ConsultaFacturaRequest request) {
@@ -95,6 +101,15 @@ public class ConsultaFacturaService {
             return ConsultaFacturaResponse.error("Motivo de cancelación inválido");
         }
 
+        // Validación adicional según reglas del PAC
+        boolean relaciones = tieneRelacionesCfdi(request.getUuid());
+        if (relaciones && !"01".equals(request.getMotivo())) {
+            return ConsultaFacturaResponse.error("CFDI con relaciones requiere motivo 01 con sustitución");
+        }
+        if ("01".equals(request.getMotivo()) && (request.getUuidSustituto() == null || request.getUuidSustituto().isBlank())) {
+            return ConsultaFacturaResponse.error("Motivo 01 requiere UUID sustituto");
+        }
+
         var info = consultaFacturaDAO.obtenerFacturaPorUuid(request.getUuid());
         if (info == null) {
             return ConsultaFacturaResponse.error("Factura no encontrada por UUID");
@@ -110,7 +125,8 @@ public class ConsultaFacturaService {
         pacReq.fechaFactura = info.fechaFactura != null ? info.fechaFactura.toString()
                 : java.time.OffsetDateTime.now().toString();
         pacReq.publicoGeneral = Boolean.FALSE;
-        pacReq.tieneRelaciones = Boolean.FALSE;
+        pacReq.tieneRelaciones = relaciones;
+        pacReq.uuidSustituto = request.getUuidSustituto();
 
         var pacResp = pacClient.solicitarCancelacion(pacReq);
         if (pacResp != null && Boolean.TRUE.equals(pacResp.getOk())) {
@@ -219,5 +235,27 @@ public class ConsultaFacturaService {
         }
 
         return "Sin reglas de periodo configuradas";
+    }
+
+    private boolean tieneRelacionesCfdi(String uuid) {
+        try {
+            String activeProfile = (environment != null && environment.getActiveProfiles().length > 0)
+                    ? environment.getActiveProfiles()[0]
+                    : "oracle";
+            String xmlContent = null;
+            if ("mongo".equalsIgnoreCase(activeProfile) && facturaMongoRepository != null) {
+                var facturaMongo = facturaMongoRepository.findByUuid(uuid);
+                xmlContent = facturaMongo != null ? facturaMongo.getXmlContent() : null;
+            } else if (uuidFacturaOracleDAO != null) {
+                var opt = uuidFacturaOracleDAO.obtenerBasicosPorUuid(uuid);
+                xmlContent = opt.isPresent() ? opt.get().xmlContent : null;
+            }
+            if (xmlContent == null || xmlContent.isEmpty()) return false;
+            String lower = xmlContent.toLowerCase();
+            return lower.contains("<cfdi:cfdirelacionados") || lower.contains("<cfdirelacionados");
+        } catch (Exception e) {
+            logger.warn("Error determinando relaciones CFDI para uuid {}: {}", uuid, e.getMessage());
+            return false;
+        }
     }
 }

@@ -59,16 +59,19 @@ public class ITextPdfService {
             agregarEncabezadoModerno(document, facturaData, logoConfig);
             
             // Agregar información de empresa y cliente
-            agregarInformacionEmpresaCliente(document, facturaData);
+            agregarInformacionEmpresaCliente(document, facturaData, logoConfig);
             
             // Agregar conceptos con diseño moderno
-            agregarConceptosModerno(document, facturaData);
+            agregarConceptosModerno(document, facturaData, logoConfig);
+            
+            // Agregar complemento Carta Porte
+            agregarComplementoCartaPorte(document, facturaData, logoConfig);
             
             // Agregar totales modernos
-            agregarTotalesModerno(document, facturaData);
+            agregarTotalesModerno(document, facturaData, logoConfig);
             
             // Agregar información fiscal moderna
-            agregarInformacionFiscalModerna(document, facturaData);
+            agregarInformacionFiscalModerna(document, facturaData, logoConfig);
             
             // Cerrar el documento
             document.close();
@@ -165,23 +168,33 @@ public class ITextPdfService {
     
     private void agregarEncabezadoModerno(Document document, Map<String, Object> facturaData, Map<String, Object> logoConfig) {
         Map<String, Object> factura = facturaData;
-        
         try {
             // Agregar encabezado con fondo
-            agregarEncabezadoConFondo(document, facturaData);
-            
+            agregarEncabezadoConFondo(document, facturaData, logoConfig);
         } catch (Exception e) {
             logger.error("Error agregando encabezado moderno: ", e);
         }
     }
     
-    private void agregarEncabezadoConFondo(Document document, Map<String, Object> factura) {
+    private void agregarEncabezadoConFondo(Document document, Map<String, Object> factura, Map<String, Object> logoConfig) {
         try {
             // Contenedor del encabezado con fondo azul
             Table headerContainer = new Table(2);
             headerContainer.setWidth(UnitValue.createPercentValue(100));
-            headerContainer.setBackgroundColor(new DeviceRgb(30, 64, 175));
+            DeviceRgb headerColor = extraerColorPrimario(logoConfig);
+            headerContainer.setBackgroundColor(headerColor);
             headerContainer.setPadding(8);
+            try {
+                Object cc = logoConfig != null ? logoConfig.get("customColors") : null;
+                if (cc instanceof java.util.Map) {
+                    Object primary = ((java.util.Map<?, ?>) cc).get("primary");
+                    logger.info("Color primario aplicado al encabezado: {}", primary);
+                } else {
+                    logger.info("LogoConfig sin customColors, usando color por defecto");
+                }
+            } catch (Exception logEx) {
+                logger.warn("No se pudo registrar color primario del encabezado: {}", logEx.getMessage());
+            }
             
             // Celda del título
             Cell tituloCell = new Cell()
@@ -202,8 +215,7 @@ public class ITextPdfService {
                 .add(new Text("Folio: " + getString(factura, "folio", "001") + "  ").setFontSize(9))
                 .add(new Text("Fecha: " + getString(factura, "fechaEmision", "2024-01-15")).setFontSize(9))
                 .setFontColor(ColorConstants.WHITE)
-                .setMarginTop(3)
-                .setMarginBottom(0);
+                .setMarginTop(3);
             tituloCell.add(infoFactura);
             
             headerContainer.addCell(tituloCell);
@@ -215,7 +227,8 @@ public class ITextPdfService {
                 .setTextAlignment(TextAlignment.RIGHT)
                 .setWidth(UnitValue.createPercentValue(30));
             
-            agregarLogoCompactoHeader(logoCell);
+            // Usar el logo proporcionado en logoConfig (Base64 o URL)
+            agregarLogoModerno(logoCell, logoConfig);
             headerContainer.addCell(logoCell);
             
             document.add(headerContainer);
@@ -298,12 +311,23 @@ public class ITextPdfService {
                 // Si no hay Base64, intentar cargar desde URL
                 if (logoBytes == null && logoConfig.containsKey("logoUrl")) {
                     String logoUrl = (String) logoConfig.get("logoUrl");
-                    Path logoPath = Paths.get("src/main/resources/static" + logoUrl);
-                    if (Files.exists(logoPath)) {
-                        logoBytes = Files.readAllBytes(logoPath);
-                        logger.info("Logo cargado desde archivo: {}", logoPath);
-                    } else {
-                        logger.warn("Logo no encontrado en: {}", logoPath);
+                    try {
+                        if (logoUrl != null && (logoUrl.startsWith("http://") || logoUrl.startsWith("https://"))) {
+                            try (java.io.InputStream in = new java.net.URL(logoUrl).openStream()) {
+                                logoBytes = in.readAllBytes();
+                                logger.info("Logo cargado desde URL: {}", logoUrl);
+                            }
+                        } else {
+                            java.nio.file.Path logoPath = java.nio.file.Paths.get("src/main/resources/static" + logoUrl);
+                            if (java.nio.file.Files.exists(logoPath)) {
+                                logoBytes = java.nio.file.Files.readAllBytes(logoPath);
+                                logger.info("Logo cargado desde archivo: {}", logoPath);
+                            } else {
+                                logger.warn("Logo no encontrado en: {}", logoPath);
+                            }
+                        }
+                    } catch (Exception e) {
+                        logger.warn("No se pudo cargar el logo desde '{}': {}", logoUrl, e.getMessage());
                     }
                 }
                 
@@ -363,8 +387,9 @@ public class ITextPdfService {
         document.add(lineTable);
     }
     
-    private void agregarInformacionEmpresaCliente(Document document, Map<String, Object> facturaData) {
+    private void agregarInformacionEmpresaCliente(Document document, Map<String, Object> facturaData, Map<String, Object> logoConfig) {
         try {
+            DeviceRgb primaryColor = extraerColorPrimario(logoConfig);
             // Contenedor compacto para datos en una sola línea
             Table datosContainer = new Table(2);
             datosContainer.setWidth(UnitValue.createPercentValue(100));
@@ -379,7 +404,7 @@ public class ITextPdfService {
             Paragraph emisorTitulo = new Paragraph("EMISOR")
                 .setBold()
                 .setFontSize(10)
-                .setFontColor(new DeviceRgb(30, 64, 175))
+                .setFontColor(primaryColor)
                 .setMarginBottom(4);
             emisorCell.add(emisorTitulo);
             
@@ -395,7 +420,7 @@ public class ITextPdfService {
             Paragraph receptorTitulo = new Paragraph("RECEPTOR")
                 .setBold()
                 .setFontSize(10)
-                .setFontColor(new DeviceRgb(30, 64, 175))
+                .setFontColor(primaryColor)
                 .setMarginBottom(4);
             receptorCell.add(receptorTitulo);
             
@@ -492,13 +517,14 @@ public class ITextPdfService {
         table.addCell(new Cell().add(new Paragraph(getString(factura, "folio", "N/A"))));
     }
     
-    private void agregarConceptosModerno(Document document, Map<String, Object> facturaData) {
+    private void agregarConceptosModerno(Document document, Map<String, Object> facturaData, Map<String, Object> logoConfig) {
         try {
+            DeviceRgb primaryColor = extraerColorPrimario(logoConfig);
             // Título de la sección más compacto
             Paragraph conceptosTitulo = new Paragraph("CONCEPTOS")
                 .setBold()
                 .setFontSize(11)
-                .setFontColor(new DeviceRgb(30, 64, 175))
+                .setFontColor(primaryColor)
                 .setMarginBottom(6)
                 .setMarginTop(8)
                 .setCharacterSpacing(0.3f);
@@ -513,7 +539,7 @@ public class ITextPdfService {
             for (String header : headers) {
                 Cell headerCell = new Cell()
                     .add(new Paragraph(header).setBold().setFontSize(8))
-                    .setBackgroundColor(new DeviceRgb(30, 64, 175))
+                    .setBackgroundColor(primaryColor)
                     .setFontColor(ColorConstants.WHITE)
                     .setPadding(6)
                     .setTextAlignment(TextAlignment.CENTER);
@@ -581,8 +607,9 @@ public class ITextPdfService {
         return null;
     }
     
-    private void agregarTotalesModerno(Document document, Map<String, Object> facturaData) {
+    private void agregarTotalesModerno(Document document, Map<String, Object> facturaData, Map<String, Object> logoConfig) {
         try {
+            DeviceRgb primaryColor = extraerColorPrimario(logoConfig);
             // Contenedor del resumen más compacto
             Table resumenContainer = new Table(2);
             resumenContainer.setWidth(UnitValue.createPercentValue(100));
@@ -596,7 +623,7 @@ public class ITextPdfService {
             
             // Celda con los totales más compacta
             Cell totalesCell = new Cell()
-                .setBorder(new SolidBorder(new DeviceRgb(30, 64, 175), 1))
+                .setBorder(new SolidBorder(primaryColor, 1))
                 .setBackgroundColor(new DeviceRgb(248, 250, 252))
                 .setPadding(8)
                 .setWidth(UnitValue.createPercentValue(35));
@@ -619,7 +646,7 @@ public class ITextPdfService {
             Paragraph total = new Paragraph("TOTAL: $" + getString(facturaData, "total", "116.00"))
                 .setBold()
                 .setFontSize(11)
-                .setFontColor(new DeviceRgb(30, 64, 175))
+                .setFontColor(primaryColor)
                 .setTextAlignment(TextAlignment.RIGHT)
                 .setMarginTop(3);
             totalesCell.add(total);
@@ -631,9 +658,140 @@ public class ITextPdfService {
             logger.error("Error agregando totales modernos: ", e);
         }
     }
-    
-    private void agregarInformacionFiscalModerna(Document document, Map<String, Object> facturaData) {
+
+    private void agregarComplementoCartaPorte(Document document, Map<String, Object> facturaData, Map<String, Object> logoConfig) {
         try {
+            DeviceRgb primaryColor = extraerColorPrimario(logoConfig);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> complemento = (Map<String, Object>) facturaData.get("complementoCartaPorte");
+            if (complemento == null) {
+                logger.info("Factura sin complemento Carta Porte, se omite sección.");
+                return;
+            }
+
+            Table container = new Table(1);
+            container.setWidth(UnitValue.createPercentValue(100));
+            container.setMarginTop(8);
+
+            Cell cell = new Cell()
+                .setBorder(new SolidBorder(new DeviceRgb(226, 232, 240), 1))
+                .setBackgroundColor(new DeviceRgb(248, 250, 252))
+                .setPadding(8);
+
+            Paragraph titulo = new Paragraph("CARTA PORTE")
+                .setBold()
+                .setFontSize(9)
+                .setFontColor(primaryColor)
+                .setMarginBottom(4);
+            cell.add(titulo);
+
+            String serie = getString(facturaData, "serie", "CP");
+            String folio = getString(facturaData, "folio", "CP001");
+            Paragraph folioInfo = new Paragraph("Folio: " + serie + "-" + folio)
+                .setFontSize(8)
+                .setFontColor(new DeviceRgb(100, 116, 139))
+                .setMarginBottom(6);
+            cell.add(folioInfo);
+
+            // Sección MERCANCÍAS
+            @SuppressWarnings("unchecked")
+            Map<String, Object> mercancia = (Map<String, Object>) complemento.get("mercancia");
+            java.util.List<java.util.Map<String, Object>> conceptos = getListValue(facturaData, "conceptos");
+            String descripcion = null;
+            String valorStr = null;
+            String numeroSerie = null;
+            String claveProdServ = null;
+            String unidad = null;
+            String cantidad = null;
+            if (conceptos != null && !conceptos.isEmpty()) {
+                java.util.Map<String, Object> c0 = conceptos.get(0);
+                descripcion = getString(c0, "descripcion", "Mercancía");
+                valorStr = getString(c0, "importe", "0.00");
+                numeroSerie = getString(c0, "noIdentificacion", "");
+                claveProdServ = getString(c0, "claveProdServ", "");
+                unidad = getString(c0, "unidad", "PIEZA");
+                cantidad = getString(c0, "cantidad", "1");
+            }
+            if (mercancia != null) {
+                if (descripcion == null) descripcion = getString(mercancia, "descripcion", "Mercancía");
+                if (claveProdServ == null || claveProdServ.isEmpty()) claveProdServ = getString(mercancia, "claveProdServ", "");
+                if (unidad == null || unidad.isEmpty()) unidad = getString(mercancia, "unidad", "PIEZA");
+                if (cantidad == null || cantidad.isEmpty()) cantidad = getString(mercancia, "cantidad", "1");
+                if (valorStr == null || valorStr.isEmpty()) valorStr = getString(mercancia, "valor", "0.00");
+                String numSerieTmp = getString(mercancia, "numeroSerie", "");
+                if (numSerieTmp != null && !numSerieTmp.isEmpty()) numeroSerie = numSerieTmp;
+            }
+
+            Paragraph mercanciasTitulo = new Paragraph("MERCANCÍAS")
+                .setBold()
+                .setFontSize(8)
+                .setFontColor(primaryColor)
+                .setMarginBottom(2);
+            cell.add(mercanciasTitulo);
+            cell.add(new Paragraph("Descripción: " + (descripcion != null ? descripcion : ""))
+                .setFontSize(8));
+            String peso = mercancia != null ? getString(mercancia, "peso", "") : "";
+            cell.add(new Paragraph("ClaveProdServ: " + (claveProdServ != null ? claveProdServ : "")
+                    + "    Cant: " + (cantidad != null ? cantidad : "1")
+                    + "    Unidad: " + (unidad != null ? unidad : "")
+                    + (peso.isEmpty() ? "" : "    Peso: " + peso))
+                .setFontSize(8));
+            cell.add(new Paragraph("Valor: $" + (valorStr != null ? valorStr : "0.00")
+                    + (numeroSerie != null && !numeroSerie.isEmpty() ? "    Núm. Serie: " + numeroSerie : ""))
+                .setFontSize(8));
+
+            // Sección TRANSPORTE
+            Paragraph transporteTitulo = new Paragraph("TRANSPORTE")
+                .setBold()
+                .setFontSize(8)
+                .setFontColor(primaryColor)
+                .setMarginTop(6)
+                .setMarginBottom(2);
+            cell.add(transporteTitulo);
+            String tipoTransporte = getString(complemento, "tipoTransporte", "01");
+            String tipoLabel = "Autotransporte";
+            if ("02".equals(tipoTransporte)) tipoLabel = "Marítimo";
+            else if ("03".equals(tipoTransporte)) tipoLabel = "Aéreo";
+            else if ("04".equals(tipoTransporte)) tipoLabel = "Ferroviario";
+            cell.add(new Paragraph("Tipo: " + tipoLabel
+                    + (getString(complemento, "permisoSCT", "").isEmpty() ? "" : "    Permiso SCT: " + getString(complemento, "permisoSCT", "")))
+                .setFontSize(8));
+            String placas = getString(complemento, "placasVehiculo", "");
+            String operadorNombre = getString(complemento, "operadorNombre", "");
+            String operadorRfc = getString(complemento, "operadorRfc", "");
+            cell.add(new Paragraph("Placas: " + placas + "    Operador: " + operadorNombre
+                    + (operadorRfc.isEmpty() ? "" : "    RFC: " + operadorRfc))
+                .setFontSize(8));
+
+            // Sección UBICACIONES
+            Paragraph ubicacionesTitulo = new Paragraph("UBICACIONES")
+                .setBold()
+                .setFontSize(8)
+                .setFontColor(primaryColor)
+                .setMarginTop(6)
+                .setMarginBottom(2);
+            cell.add(ubicacionesTitulo);
+            String origen = getString(complemento, "origen", "");
+            String destino = getString(complemento, "destino", "");
+            String salida = getString(complemento, "fechaSalida", "");
+            String llegada = getString(complemento, "fechaLlegada", "");
+            String horaSalida = salida.length() >= 16 ? salida.substring(11, 16) : salida;
+            String horaLlegada = llegada.length() >= 16 ? llegada.substring(11, 16) : llegada;
+            cell.add(new Paragraph("Origen: " + origen + (horaSalida.isEmpty() ? "" : " (" + horaSalida + ")"))
+                .setFontSize(8));
+            cell.add(new Paragraph("Destino: " + destino + (horaLlegada.isEmpty() ? "" : " (" + horaLlegada + ")"))
+                .setFontSize(8));
+
+            container.addCell(cell);
+            document.add(container);
+        } catch (Exception e) {
+            logger.error("Error agregando complemento Carta Porte: ", e);
+        }
+    }
+    
+    private void agregarInformacionFiscalModerna(Document document, Map<String, Object> facturaData, Map<String, Object> logoConfig) {
+        try {
+            DeviceRgb primaryColor = extraerColorPrimario(logoConfig);
             // Información fiscal más compacta
             Table fiscalContainer = new Table(1);
             fiscalContainer.setWidth(UnitValue.createPercentValue(100));
@@ -648,7 +806,7 @@ public class ITextPdfService {
             Paragraph tituloFiscal = new Paragraph("INFORMACIÓN FISCAL")
                 .setBold()
                 .setFontSize(9)
-                .setFontColor(new DeviceRgb(30, 64, 175))
+                .setFontColor(primaryColor)
                 .setMarginBottom(4);
             fiscalCell.add(tituloFiscal);
             
@@ -673,15 +831,16 @@ public class ITextPdfService {
             document.add(fiscalContainer);
             
             // Agregar pie de página
-            agregarPiePagina(document);
+            agregarPiePagina(document, logoConfig);
             
         } catch (Exception e) {
             logger.error("Error agregando información fiscal moderna: ", e);
         }
     }
     
-    private void agregarPiePagina(Document document) {
+    private void agregarPiePagina(Document document, Map<String, Object> logoConfig) {
         try {
+            DeviceRgb primaryColor = extraerColorPrimario(logoConfig);
             // Pie de página con diseño moderno
             Table pieContainer = new Table(1);
             pieContainer.setWidth(UnitValue.createPercentValue(100));
@@ -689,7 +848,7 @@ public class ITextPdfService {
             
             Cell pieCell = new Cell()
                 .setBorder(null)
-                .setBackgroundColor(new DeviceRgb(30, 64, 175))
+                .setBackgroundColor(primaryColor)
                 .setPadding(8)
                 .setTextAlignment(TextAlignment.CENTER);
             
@@ -755,4 +914,50 @@ public class ITextPdfService {
             throw new Exception("No se pudo convertir SVG a PNG: " + e.getMessage());
         }
     }
+
+
+private DeviceRgb getColorFromHex(String hex) {
+    try {
+        if (hex == null || !hex.startsWith("#") || (hex.length() != 7 && hex.length() != 9)) {
+            logger.info("Hex inválido o nulo para color primario: {}", hex);
+            return new DeviceRgb(30, 64, 175);
+        }
+        int r = Integer.parseInt(hex.substring(1, 3), 16);
+        int g = Integer.parseInt(hex.substring(3, 5), 16);
+        int b = Integer.parseInt(hex.substring(5, 7), 16);
+        logger.info("Color hex recibido: {} -> rgb({}, {}, {})", hex, r, g, b);
+        return new DeviceRgb(r, g, b);
+    } catch (Exception e) {
+        logger.warn("Fallo convirtiendo hex a color: {}", e.getMessage());
+        return new DeviceRgb(30, 64, 175);
+    }
+}
+
+
+@SuppressWarnings("unchecked")
+private DeviceRgb extraerColorPrimario(Map<String, Object> logoConfig) {
+    try {
+        if (logoConfig == null) {
+            logger.info("LogoConfig nulo; usando color por defecto");
+            return new DeviceRgb(30, 64, 175);
+        }
+        Object customColorsObj = logoConfig.get("customColors");
+        if (customColorsObj instanceof Map) {
+            Map<String, Object> customColors = (Map<String, Object>) customColorsObj;
+            Object primaryObj = customColors.get("primary");
+            String hex = (primaryObj instanceof String) ? (String) primaryObj : null;
+            if (hex != null) {
+                logger.info("extraerColorPrimario: hex recibido {}", hex);
+                return getColorFromHex(hex);
+            } else {
+                logger.info("extraerColorPrimario: sin 'primary' válido; usando por defecto");
+            }
+        } else {
+            logger.info("extraerColorPrimario: sin 'customColors'; usando por defecto");
+        }
+    } catch (Exception e) {
+        logger.warn("extraerColorPrimario: error al leer logoConfig: {}", e.getMessage());
+    }
+    return new DeviceRgb(30, 64, 175);
+}
 }

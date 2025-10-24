@@ -21,6 +21,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.core.env.Environment;
 
 import com.cibercom.facturacion_back.model.Factura;
 import com.cibercom.facturacion_back.model.ConfiguracionMensaje;
@@ -31,6 +32,9 @@ import com.cibercom.facturacion_back.dto.ConfiguracionCorreoDto;
 import com.cibercom.facturacion_back.dto.ConfiguracionCorreoResponseDto;
 import com.cibercom.facturacion_back.dto.MensajePredefinidoDto;
 import com.cibercom.facturacion_back.dto.FormatoCorreoDto;
+import com.cibercom.facturacion_back.repository.FacturaMongoRepository;
+import com.cibercom.facturacion_back.dao.UuidFacturaOracleDAO;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Servicio para el envío de correos electrónicos relacionados con facturas
@@ -63,6 +67,15 @@ public class CorreoService {
     
     @Autowired
     private FormatoCorreoService formatoCorreoService;
+
+    @Autowired
+    private Environment environment;
+
+    @Autowired(required = false)
+    private FacturaMongoRepository facturaMongoRepository;
+
+    @Autowired(required = false)
+    private UuidFacturaOracleDAO uuidFacturaOracleDAO;
     
     /**
      * Envía correo de notificación de factura al receptor
@@ -218,9 +231,10 @@ public class CorreoService {
      * @param correoReceptor Correo electrónico del receptor
      * @param asunto Asunto del correo
      * @param mensaje Mensaje del correo
+     * @param logoBase64 Logo en Base64 para incluirlo en el PDF
      */
     public void enviarCorreoConPdfAdjunto(String uuidFactura, String correoReceptor, 
-                                         String asunto, String mensaje) {
+                                         String asunto, String mensaje, String logoBase64) {
         try {
             logger.info("=== INICIO ENVÍO CORREO CON PDF ===");
             logger.info("UUID Factura: {}", uuidFactura);
@@ -276,7 +290,40 @@ public class CorreoService {
             
             // Obtener el PDF como bytes (genera datos de prueba si no encuentra la factura)
             logger.info("Generando PDF...");
-            byte[] pdfBytes = facturaService.obtenerPdfComoBytes(uuidFactura);
+            // Usar la misma configuración que el mensaje para mantener colores consistentes
+            FormatoCorreoDto configuracionFormato = null;
+            try {
+                ConfiguracionCorreoResponseDto configResponse = obtenerConfiguracionMensajes();
+                if (configResponse != null && configResponse.getFormatoCorreo() != null) {
+                    configuracionFormato = configResponse.getFormatoCorreo();
+                    logger.info("Usando color de formato de configuración de mensajes: {}", configuracionFormato.getColorTexto());
+                } else {
+                    configuracionFormato = formatoCorreoService.obtenerConfiguracionActiva();
+                    logger.info("Usando color de formato activo (archivo): {}", configuracionFormato != null ? configuracionFormato.getColorTexto() : null);
+                }
+            } catch (Exception e) {
+                logger.warn("No se pudo obtener FormatoCorreo: {}", e.getMessage());
+            }
+            Map<String, Object> logoConfig = new HashMap<>();
+            Map<String, Object> customColors = new HashMap<>();
+            String colorPrimario = (configuracionFormato != null && configuracionFormato.getColorTexto() != null && !configuracionFormato.getColorTexto().isEmpty())
+                ? configuracionFormato.getColorTexto().trim()
+                : "#1d4ed8";
+            customColors.put("primary", colorPrimario);
+            logoConfig.put("customColors", customColors);
+            // Incluir logoBase64 si se recibe desde el frontend; en caso contrario usar logoUrl del backend
+            if (logoBase64 != null && !logoBase64.trim().isEmpty()) {
+                String base64 = logoBase64.trim();
+                logoConfig.put("logoBase64", base64);
+                logger.info("Incluyendo logoBase64 en configuración de PDF ({} chars)", base64.length());
+            } else {
+                String port = (environment != null) ? environment.getProperty("local.server.port", environment.getProperty("server.port", "8085")) : "8085";
+                String logoEndpoint = "http://localhost:" + port + "/api/logos/cibercom-png";
+                logoConfig.put("logoUrl", logoEndpoint);
+                logger.info("Incluyendo logoUrl en configuración de PDF: {}", logoEndpoint);
+            }
+            logger.info("Color primario seleccionado para PDF: {}", colorPrimario);
+            byte[] pdfBytes = facturaService.obtenerPdfComoBytes(uuidFactura, logoConfig);
             logger.info("PDF generado. Tamaño: {} bytes", pdfBytes != null ? pdfBytes.length : 0);
             
             // Si el PDF es nulo o vacío, generamos un PDF de prueba
@@ -333,6 +380,38 @@ public class CorreoService {
             
             List<CorreoDto.AdjuntoDto> adjuntos = new ArrayList<>();
             adjuntos.add(adjunto);
+
+            // Nuevo: intentar adjuntar XML automáticamente desde BD según perfil activo
+            try {
+                String activeProfile = (environment != null && environment.getActiveProfiles().length > 0)
+                        ? environment.getActiveProfiles()[0]
+                        : "oracle";
+                String xmlContent = null;
+                if ("mongo".equalsIgnoreCase(activeProfile) && facturaMongoRepository != null) {
+                    var facturaMongo = facturaMongoRepository.findByUuid(uuidFactura);
+                    xmlContent = (facturaMongo != null) ? facturaMongo.getXmlContent() : null;
+                } else if (uuidFacturaOracleDAO != null) {
+                    var opt = uuidFacturaOracleDAO.obtenerBasicosPorUuid(uuidFactura);
+                    xmlContent = (opt.isPresent()) ? opt.get().xmlContent : null;
+                }
+
+                if (xmlContent != null && !xmlContent.trim().isEmpty()) {
+                    byte[] xmlBytes = xmlContent.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                    CorreoDto.AdjuntoDto xmlAdj = new CorreoDto.AdjuntoDto();
+                    String nombreXml = (factura != null)
+                            ? ("Factura_" + factura.getSerie() + factura.getFolio() + ".xml")
+                            : ("Factura_" + uuidFactura + ".xml");
+                    xmlAdj.setNombre(nombreXml);
+                    xmlAdj.setContenido(xmlBytes);
+                    xmlAdj.setTipoMime("application/xml");
+                    adjuntos.add(xmlAdj);
+                    logger.info("XML adjuntado automáticamente: {} ({} bytes)", nombreXml, xmlBytes.length);
+                } else {
+                    logger.info("XML no disponible para UUID {}. Se enviará solo PDF.", uuidFactura);
+                }
+            } catch (Exception eXml) {
+                logger.warn("No se pudo adjuntar XML automáticamente para UUID {}: {}", uuidFactura, eXml.getMessage());
+            }
             
             // Obtener configuración del correo
             Map<String, String> configCorreo = obtenerConfiguracionCorreo();
@@ -347,7 +426,7 @@ public class CorreoService {
             if (adjuntos == null || adjuntos.isEmpty() || adjuntos.get(0).getContenido() == null || adjuntos.get(0).getContenido().length < 100) {
                 logger.warn("Adjunto no válido o vacío. Regenerando PDF...");
                 // Regenerar el PDF directamente
-                byte[] pdfBytesNuevos = facturaService.obtenerPdfComoBytes(uuidFactura);
+                byte[] pdfBytesNuevos = facturaService.obtenerPdfComoBytes(uuidFactura, logoConfig);
                 if (pdfBytesNuevos != null && pdfBytesNuevos.length > 100) {
                     logger.info("PDF regenerado exitosamente: {} bytes", pdfBytesNuevos.length);
                     // Crear nuevo adjunto
@@ -411,6 +490,185 @@ public class CorreoService {
         return factura;
     }
     
+    // Nuevo método: Enviar correo con PDF directo (sin buscar factura por UUID)
+    public void enviarCorreoConPdfDirecto(String correoReceptor, String asunto, String mensaje, byte[] pdfBytes, String nombreAdjunto) {
+        try {
+            logger.info("=== INICIO ENVÍO CORREO CON PDF DIRECTO ===");
+            logger.info("Correo Receptor: {}", correoReceptor);
+            logger.info("Asunto original: {}", asunto);
+            logger.info("Tamaño PDF recibido: {} bytes", pdfBytes != null ? pdfBytes.length : 0);
+
+            // Preparar adjunto
+            CorreoDto.AdjuntoDto adjunto = new CorreoDto.AdjuntoDto();
+            adjunto.setNombre((nombreAdjunto != null && !nombreAdjunto.trim().isEmpty()) ? nombreAdjunto : "Documento.pdf");
+            adjunto.setContenido(pdfBytes != null ? pdfBytes : new byte[0]);
+            adjunto.setTipoMime("application/pdf");
+            List<CorreoDto.AdjuntoDto> adjuntos = new ArrayList<>();
+            adjuntos.add(adjunto);
+
+            // Obtener configuración SMTP
+            Map<String, String> configCorreo = obtenerConfiguracionCorreo();
+
+            // Aplicar formato al mensaje
+            String mensajeConFormato = aplicarFormatoAlMensaje(mensaje != null ? mensaje : "");
+
+            // Construir DTO correo
+            CorreoDto correoDto = new CorreoDto();
+            correoDto.setFrom(fromEmail);
+            correoDto.setTo(correoReceptor);
+            correoDto.setSubject(asunto != null ? asunto : "Documento PDF");
+            correoDto.setMensaje(mensajeConFormato);
+            correoDto.setAdjuntos(adjuntos);
+            correoDto.setSmtpHost(configCorreo.get("SMTPHOST"));
+            correoDto.setPort(configCorreo.get("PORT"));
+            correoDto.setUsername(configCorreo.get("USERNAME"));
+            correoDto.setPassword(configCorreo.get("PASSWORD"));
+
+            // Enviar
+            CorreoUtil.enviaCorreo(correoDto);
+            logger.info("=== CORREO CON PDF DIRECTO ENVIADO EXITOSAMENTE ===");
+        } catch (Exception e) {
+            logger.error("Error enviando correo con PDF directo: {}", e.getMessage(), e);
+            throw new RuntimeException("Error enviando correo con PDF directo: " + e.getMessage(), e);
+        }
+    }
+
+    // Overload que acepta variables de plantilla para aplicar formato en backend
+    public void enviarCorreoConPdfDirecto(String correoReceptor, String asunto, String mensaje, Map<String, String> templateVars, byte[] pdfBytes, String nombreAdjunto) {
+        try {
+            logger.info("=== INICIO ENVÍO CORREO CON PDF DIRECTO (TEMPLATE VARS) ===");
+            logger.info("Correo Receptor: {}", correoReceptor);
+            logger.info("Asunto original: {}", asunto);
+            logger.info("Tamaño PDF recibido: {} bytes", pdfBytes != null ? pdfBytes.length : 0);
+
+            // Preparar adjunto
+            CorreoDto.AdjuntoDto adjunto = new CorreoDto.AdjuntoDto();
+            adjunto.setNombre((nombreAdjunto != null && !nombreAdjunto.trim().isEmpty()) ? nombreAdjunto : "Documento.pdf");
+            adjunto.setContenido(pdfBytes != null ? pdfBytes : new byte[0]);
+            adjunto.setTipoMime("application/pdf");
+            List<CorreoDto.AdjuntoDto> adjuntos = new ArrayList<>();
+            adjuntos.add(adjunto);
+
+            // Obtener configuración SMTP
+            Map<String, String> configCorreo = obtenerConfiguracionCorreo();
+
+            // Variables para la plantilla
+            Map<String, String> variables = new HashMap<>();
+            variables.put("saludo", "Estimado cliente,");
+            variables.put("mensajePrincipal", mensaje != null ? mensaje : "Se ha generado su factura electrónica.");
+            variables.put("agradecimiento", "Gracias por su preferencia.");
+            variables.put("mensajePersonalizado", mensaje != null ? mensaje : "");
+            variables.put("despedida", "Atentamente,");
+            variables.put("firma", "Equipo de Facturación Cibercom");
+
+            if (templateVars != null) {
+                variables.putAll(templateVars);
+            }
+            // Asegurar claves comunes
+            variables.putIfAbsent("serie", "");
+            variables.putIfAbsent("folio", "");
+            variables.putIfAbsent("uuid", "");
+            variables.putIfAbsent("rfcEmisor", "");
+            variables.putIfAbsent("rfcReceptor", "");
+
+            // Aplicar formato al mensaje usando plantilla y variables
+            String mensajeConFormato = aplicarFormatoAlMensaje("", variables);
+
+            // Construir DTO correo
+            CorreoDto correoDto = new CorreoDto();
+            correoDto.setFrom(fromEmail);
+            correoDto.setTo(correoReceptor);
+            correoDto.setSubject(asunto != null ? asunto : "Documento PDF");
+            correoDto.setMensaje(mensajeConFormato);
+            correoDto.setAdjuntos(adjuntos);
+            correoDto.setSmtpHost(configCorreo.get("SMTPHOST"));
+            correoDto.setPort(configCorreo.get("PORT"));
+            correoDto.setUsername(configCorreo.get("USERNAME"));
+            correoDto.setPassword(configCorreo.get("PASSWORD"));
+
+            // Enviar
+            CorreoUtil.enviaCorreo(correoDto);
+            logger.info("=== CORREO CON PDF DIRECTO ENVIADO EXITOSAMENTE (TEMPLATE VARS) ===");
+        } catch (Exception e) {
+            logger.error("Error enviando correo con PDF directo (template vars): {}", e.getMessage(), e);
+            throw new RuntimeException("Error enviando correo con PDF directo: " + e.getMessage(), e);
+        }
+    }
+
+    // Nuevo método: Enviar correo con PDF y XML directo (adjuntos opcionales)
+    public void enviarCorreoConAdjuntosDirecto(String correoReceptor,
+                                               String asunto,
+                                               String mensaje,
+                                               Map<String, String> templateVars,
+                                               byte[] pdfBytes,
+                                               String nombreAdjuntoPdf,
+                                               byte[] xmlBytes,
+                                               String nombreAdjuntoXml) {
+        try {
+            logger.info("=== INICIO ENVÍO CORREO CON ADJUNTOS DIRECTO (PDF + XML opcional) ===");
+            logger.info("Receptor: {}", correoReceptor);
+            logger.info("Asunto: {}", asunto);
+            logger.info("PDF bytes: {}", pdfBytes != null ? pdfBytes.length : 0);
+            logger.info("Incluye XML: {}", (xmlBytes != null && xmlBytes.length > 0));
+
+            List<CorreoDto.AdjuntoDto> adjuntos = new ArrayList<>();
+
+            // Adjuntar PDF
+            CorreoDto.AdjuntoDto adjuntoPdf = new CorreoDto.AdjuntoDto();
+            adjuntoPdf.setNombre((nombreAdjuntoPdf != null && !nombreAdjuntoPdf.trim().isEmpty()) ? nombreAdjuntoPdf : "Documento.pdf");
+            adjuntoPdf.setContenido(pdfBytes != null ? pdfBytes : new byte[0]);
+            adjuntoPdf.setTipoMime("application/pdf");
+            adjuntos.add(adjuntoPdf);
+
+            // Adjuntar XML si viene
+            if (xmlBytes != null && xmlBytes.length > 0) {
+                CorreoDto.AdjuntoDto adjuntoXml = new CorreoDto.AdjuntoDto();
+                adjuntoXml.setNombre((nombreAdjuntoXml != null && !nombreAdjuntoXml.trim().isEmpty()) ? nombreAdjuntoXml : "Documento.xml");
+                adjuntoXml.setContenido(xmlBytes);
+                adjuntoXml.setTipoMime("application/xml");
+                adjuntos.add(adjuntoXml);
+            }
+
+            Map<String, String> configCorreo = obtenerConfiguracionCorreo();
+
+            // Variables para plantilla
+            Map<String, String> variables = new HashMap<>();
+            variables.put("saludo", "Estimado(a) cliente,");
+            variables.put("mensajePrincipal", mensaje != null ? mensaje : "Se ha generado su documento electrónico.");
+            variables.put("agradecimiento", "Gracias por su preferencia.");
+            variables.put("mensajePersonalizado", "");
+            variables.put("despedida", "Atentamente,");
+            variables.put("firma", "Equipo de Facturación Cibercom");
+            if (templateVars != null) {
+                variables.putAll(templateVars);
+            }
+            variables.putIfAbsent("serie", "");
+            variables.putIfAbsent("folio", "");
+            variables.putIfAbsent("uuid", "");
+            variables.putIfAbsent("rfcEmisor", "");
+            variables.putIfAbsent("rfcReceptor", "");
+
+            String mensajeConFormato = aplicarFormatoAlMensaje("", variables);
+
+            CorreoDto correoDto = new CorreoDto();
+            correoDto.setFrom(fromEmail);
+            correoDto.setTo(correoReceptor);
+            correoDto.setSubject(asunto != null ? asunto : "Documentos electrónicos");
+            correoDto.setMensaje(mensajeConFormato);
+            correoDto.setAdjuntos(adjuntos);
+            correoDto.setSmtpHost(configCorreo.get("SMTPHOST"));
+            correoDto.setPort(configCorreo.get("PORT"));
+            correoDto.setUsername(configCorreo.get("USERNAME"));
+            correoDto.setPassword(configCorreo.get("PASSWORD"));
+
+            CorreoUtil.enviaCorreo(correoDto);
+            logger.info("=== CORREO CON ADJUNTOS DIRECTO ENVIADO ===");
+        } catch (Exception e) {
+            logger.error("Error enviando correo con adjuntos directo: {}", e.getMessage(), e);
+            throw new RuntimeException("Error enviando correo con adjuntos directo: " + e.getMessage(), e);
+        }
+    }
+
     /**
      * Envía un correo simple sin adjuntos para pruebas
      * 
@@ -480,7 +738,29 @@ public class CorreoService {
             
             // Paso 2: Generar PDF
             logger.info("Paso 2: Generando PDF...");
-            byte[] pdfBytes = facturaService.obtenerPdfComoBytes(uuidFactura);
+            // Usar la misma configuración que el mensaje para mantener colores consistentes
+            FormatoCorreoDto configuracionFormato = null;
+            try {
+                ConfiguracionCorreoResponseDto configResponse = obtenerConfiguracionMensajes();
+                if (configResponse != null && configResponse.getFormatoCorreo() != null) {
+                    configuracionFormato = configResponse.getFormatoCorreo();
+                    logger.info("Usando color de formato de configuración de mensajes: {}", configuracionFormato.getColorTexto());
+                } else {
+                    configuracionFormato = formatoCorreoService.obtenerConfiguracionActiva();
+                    logger.info("Usando color de formato activo (archivo): {}", configuracionFormato != null ? configuracionFormato.getColorTexto() : null);
+                }
+            } catch (Exception e) {
+                logger.warn("No se pudo obtener FormatoCorreo: {}", e.getMessage());
+            }
+            Map<String, Object> logoConfig = new HashMap<>();
+            Map<String, Object> customColors = new HashMap<>();
+            String colorPrimario = (configuracionFormato != null && configuracionFormato.getColorTexto() != null && !configuracionFormato.getColorTexto().isEmpty())
+                ? configuracionFormato.getColorTexto().trim()
+                : "#1d4ed8";
+            customColors.put("primary", colorPrimario);
+            logoConfig.put("customColors", customColors);
+            logger.info("Color primario seleccionado para PDF: {}", colorPrimario);
+            byte[] pdfBytes = facturaService.obtenerPdfComoBytes(uuidFactura, logoConfig);
             logger.info("✓ PDF generado exitosamente. Tamaño: {} bytes", pdfBytes.length);
             
             // Paso 3: Crear adjunto

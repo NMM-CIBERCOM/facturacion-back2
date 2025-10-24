@@ -10,6 +10,7 @@ import com.cibercom.facturacion_back.model.FacturaMongo;
 import com.cibercom.facturacion_back.model.EstadoFactura;
 import com.cibercom.facturacion_back.repository.FacturaRepository;
 import com.cibercom.facturacion_back.repository.FacturaMongoRepository;
+import com.cibercom.facturacion_back.model.ClienteCatalogo;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -47,6 +48,9 @@ public class FacturaService {
     
     @Autowired
     private ITextPdfService iTextPdfService;
+
+    @Autowired
+    private ClienteCatalogoService clienteCatalogoService;
 
     /**
      * Procesa una factura generando solo el XML (sin timbrar)
@@ -112,7 +116,7 @@ public class FacturaService {
                     .timestamp(LocalDateTime.now())
                     .uuid(uuid)
                     .xmlTimbrado(xml)
-                    .datosFactura(construirDatosFactura(request, subtotal, iva, total, uuid))
+                    .datosFactura(construirDatosFactura(request, subtotal, iva, total, uuid, generarFolioConsecutivo("A")))
                     .build();
 
         } catch (Exception e) {
@@ -189,7 +193,7 @@ public class FacturaService {
                     .timestamp(LocalDateTime.now())
                     .uuid(uuid)
                     .xmlTimbrado(xml)
-                    .datosFactura(construirDatosFactura(request, subtotal, iva, total, uuid))
+                    .datosFactura(construirDatosFactura(request, subtotal, iva, total, uuid, generarFolioConsecutivo("A")))
                     .build();
 
         } catch (Exception e) {
@@ -247,7 +251,7 @@ public class FacturaService {
             response.put("mensaje", "Factura procesada y guardada exitosamente");
             response.put("uuid", uuid);
             response.put("xmlGenerado", xml);
-            response.put("datosFactura", construirDatosFacturaFrontend(request, subtotal, iva, total, uuid));
+            response.put("datosFactura", construirDatosFacturaFrontend(request, subtotal, iva, total, uuid, facturaOracle.getFolio()));
 
         } catch (Exception e) {
             response.put("exitoso", false);
@@ -394,11 +398,12 @@ public class FacturaService {
             BigDecimal subtotal,
             BigDecimal iva,
             BigDecimal total,
-            String uuid) {
+            String uuid,
+            String folio) {
         return FacturaResponse.DatosFactura.builder()
                 .folioFiscal(uuid)
                 .serie("A")
-                .folio("1")
+                .folio(folio)
                 .fechaTimbrado(LocalDateTime.now())
                 .subtotal(subtotal)
                 .iva(iva)
@@ -518,6 +523,11 @@ public class FacturaService {
     private Factura guardarEnOracle(FacturaFrontendRequest request, String xml, String uuid,
             BigDecimal subtotal, BigDecimal iva, BigDecimal total) {
 
+        Long idReceptor = resolverIdReceptorPorRfc(request);
+        if (idReceptor == null) {
+            throw new IllegalStateException("No se pudo resolver ID_RECEPTOR para RFC: " + request.getRfc());
+        }
+
         Factura factura = Factura.builder()
                 .uuid(uuid)
                 .xmlContent(xml)
@@ -525,7 +535,7 @@ public class FacturaService {
                 .fechaTimbrado(LocalDateTime.now())
                 .estado(EstadoFactura.EN_PROCESO_EMISION.getCodigo())
                 .serie("A")
-                .folio("1")
+                .folio(generarFolioConsecutivo("A"))
                 .cadenaOriginal("Simulada para ambiente de pruebas")
                 .selloDigital("Simulado para ambiente de pruebas")
                 .certificado("Simulado para ambiente de pruebas")
@@ -542,6 +552,7 @@ public class FacturaService {
                 // Datos del Receptor (usando datos del emisor como ejemplo)
                 .receptorRfc(request.getRfc())
                 .receptorRazonSocial(request.getRazonSocial())
+                .idReceptor(idReceptor)
                 .receptorNombre(request.getNombre())
                 .receptorPaterno(request.getPaterno())
                 .receptorMaterno(request.getMaterno())
@@ -552,13 +563,13 @@ public class FacturaService {
                 .receptorUsoCfdi(request.getUsoCfdi())
                 // Datos de la Factura
                 .codigoFacturacion(request.getCodigoFacturacion())
-                .tienda(request.getTienda())
-                .fechaFactura(LocalDateTime.now())
-                .terminal(request.getTerminal())
-                .boleta(request.getBoleta())
-                .medioPago(request.getMedioPago())
-                .formaPago(request.getFormaPago())
-                .iepsDesglosado(request.getIepsDesglosado())
+                .tiendaOrigen(toInt(request.getTienda()))
+                 .fechaFactura(LocalDateTime.now())
+                 .terminalBol(toInt(request.getTerminal()))
+                 .boletaBol(toInt(request.getBoleta()))
+                 .medioPago(request.getMedioPago())
+                 .formaPago(request.getFormaPago())
+                 .iepsDesglosado(Boolean.TRUE.equals(request.getIepsDesglosado()))
                 // Totales
                 .subtotal(subtotal)
                 .iva(iva)
@@ -567,6 +578,54 @@ public class FacturaService {
                 .build();
 
         return facturaRepository.save(factura);
+    }
+
+    private Integer toInt(String value) {
+        if (value == null) return null;
+        String digits = value.replaceAll("\\D+", "");
+        if (digits.isEmpty()) return null;
+        try {
+            return Integer.valueOf(digits);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    // Resuelve ID_RECEPTOR en CLIENTES por RFC; crea si no existe
+    private Long resolverIdReceptorPorRfc(FacturaFrontendRequest request) {
+        String rfc = request != null ? request.getRfc() : null;
+        if (rfc == null || rfc.trim().isEmpty()) {
+            throw new IllegalArgumentException("RFC receptor vacío o nulo");
+        }
+        String normalized = rfc.trim().toUpperCase();
+        Optional<ClienteCatalogo> existente = clienteCatalogoService.buscarPorRfc(normalized);
+        if (existente.isPresent()) {
+            return existente.get().getIdCliente();
+        }
+        ClienteCatalogo nuevo = new ClienteCatalogo();
+        nuevo.setRfc(normalized);
+        String razonSocial = request.getRazonSocial();
+        if (razonSocial == null || razonSocial.trim().isEmpty()) {
+            StringBuilder rsb = new StringBuilder();
+            if (request.getNombre() != null) rsb.append(request.getNombre());
+            if (request.getPaterno() != null) rsb.append(" ").append(request.getPaterno());
+            if (request.getMaterno() != null) rsb.append(" ").append(request.getMaterno());
+            razonSocial = rsb.toString().trim();
+            if (razonSocial.isEmpty()) razonSocial = normalized; // fallback
+        }
+        nuevo.setRazonSocial(razonSocial);
+        nuevo.setNombre(request.getNombre());
+        nuevo.setPaterno(request.getPaterno());
+        nuevo.setMaterno(request.getMaterno());
+        nuevo.setCorreoElectronico(request.getCorreoElectronico());
+        nuevo.setDomicilioFiscal(request.getDomicilioFiscal());
+        nuevo.setRegimenFiscal(request.getRegimenFiscal());
+        nuevo.setPais(request.getPais());
+        nuevo.setRegistroTributario(request.getNoRegistroIdentidadTributaria());
+        nuevo.setUsoCfdi(request.getUsoCfdi());
+        nuevo.setFechaAlta(LocalDateTime.now());
+        ClienteCatalogo guardado = clienteCatalogoService.guardar(nuevo);
+        return guardado.getIdCliente();
     }
 
     /**
@@ -606,7 +665,7 @@ public class FacturaService {
                 .fechaTimbrado(LocalDateTime.now())
                 .estado(EstadoFactura.EMITIDA.getCodigo())
                 .serie("A")
-                .folio("1")
+                .folio(generarFolioConsecutivo("A"))
                 .cadenaOriginal("Simulada para ambiente de pruebas")
                 .selloDigital("Simulado para ambiente de pruebas")
                 .certificado("Simulado para ambiente de pruebas")
@@ -620,7 +679,7 @@ public class FacturaService {
                 .boleta(request.getBoleta())
                 .medioPago(request.getMedioPago())
                 .formaPago(request.getFormaPago())
-                .iepsDesglosado(request.getIepsDesglosado())
+                .iepsDesglosado(Boolean.TRUE.equals(request.getIepsDesglosado()))
                 .subtotal(subtotal)
                 .iva(iva)
                 .ieps(BigDecimal.ZERO)
@@ -644,7 +703,7 @@ public class FacturaService {
                 .fechaTimbrado(LocalDateTime.now())
                 .estado(EstadoFactura.EMITIDA.getCodigo())
                 .serie("A")
-                .folio("1")
+                .folio(generarFolioConsecutivo("A"))
                 .cadenaOriginal("Simulada para ambiente de pruebas")
                 .selloDigital("Simulado para ambiente de pruebas")
                 .certificado("Simulado para ambiente de pruebas")
@@ -672,12 +731,12 @@ public class FacturaService {
                 // Datos de la Factura
                 .codigoFacturacion("FAC-" + uuid.substring(0, 8))
                 .tienda("Tienda Central")
-                .fechaFactura(LocalDateTime.now())
+                 .fechaFactura(LocalDateTime.now())
                 .terminal("TERM-001")
                 .boleta("BOL-" + uuid.substring(0, 8))
                 .medioPago(request.getMetodoPago())
-                .formaPago(request.getFormaPago())
-                .iepsDesglosado(false)
+                 .formaPago(request.getFormaPago())
+                 .iepsDesglosado(false)
                 // Totales
                 .subtotal(subtotal)
                 .iva(iva)
@@ -757,11 +816,12 @@ public class FacturaService {
             BigDecimal subtotal,
             BigDecimal iva,
             BigDecimal total,
-            String uuid) {
+            String uuid,
+            String folio) {
         Map<String, Object> datos = new HashMap<>();
         datos.put("folioFiscal", uuid);
         datos.put("serie", "A");
-        datos.put("folio", "1");
+        datos.put("folio", folio);
         datos.put("fechaTimbrado", LocalDateTime.now());
         datos.put("subtotal", subtotal);
         datos.put("iva", iva);
@@ -1000,15 +1060,54 @@ public class FacturaService {
             return generarPdfPrueba(uuid);
         }
     }
+
+    /**
+     * Obtiene el PDF de una factura como bytes, permitiendo pasar logoConfig para colores/branding
+     */
+    public byte[] obtenerPdfComoBytes(String uuid, Map<String, Object> logoConfig) {
+        try {
+            logger.info("Obteniendo PDF para UUID: {} con logoConfig", uuid);
+            Factura factura = buscarPorUuid(uuid);
+            if (factura == null) {
+                logger.warn("No se pudo generar PDF: factura no encontrada con UUID {}", uuid);
+                return generarPdfPrueba(uuid, logoConfig);
+            }
+
+            Map<String, Object> datosFactura = new HashMap<>();
+            datosFactura.put("uuid", factura.getUuid());
+            datosFactura.put("serie", factura.getSerie());
+            datosFactura.put("folio", factura.getFolio());
+            datosFactura.put("fechaTimbrado", factura.getFechaTimbrado());
+            datosFactura.put("rfcEmisor", factura.getEmisorRfc());
+            datosFactura.put("nombreEmisor", factura.getEmisorRazonSocial());
+            datosFactura.put("rfcReceptor", factura.getReceptorRfc());
+            datosFactura.put("nombreReceptor", factura.getReceptorRazonSocial());
+            datosFactura.put("subtotal", factura.getSubtotal());
+            datosFactura.put("iva", factura.getIva());
+            datosFactura.put("total", factura.getTotal());
+
+            byte[] pdfBytes = iTextPdfService.generarPdfConLogo(datosFactura, logoConfig != null ? logoConfig : new HashMap<>());
+            logger.info("PDF generado exitosamente para factura {}: {} bytes", uuid, pdfBytes != null ? pdfBytes.length : 0);
+
+            if (pdfBytes == null || pdfBytes.length < 100) {
+                logger.warn("PDF con logo inválido o demasiado pequeño ({}), generando PDF de prueba", 
+                           pdfBytes != null ? pdfBytes.length : 0);
+                return generarPdfPrueba(uuid, logoConfig);
+            }
+            return pdfBytes;
+        } catch (Exception e) {
+            logger.error("Error al generar PDF con logo para factura {}: {}", uuid, e.getMessage(), e);
+            return generarPdfPrueba(uuid, logoConfig);
+        }
+    }
     
     /**
      * Genera un PDF de prueba con datos simulados
      */
-    private byte[] generarPdfPrueba(String uuid) {
+    private byte[] generarPdfPrueba(String uuid, Map<String, Object> logoConfig) {
         try {
-            logger.info("Generando PDF de prueba para UUID: {}", uuid);
-            
-            // Crear datos simulados para el PDF
+            logger.info("Generando PDF de prueba para UUID: {} con logoConfig", uuid);
+
             Map<String, Object> datosPrueba = new HashMap<>();
             datosPrueba.put("uuid", uuid);
             datosPrueba.put("serie", "A");
@@ -1021,15 +1120,27 @@ public class FacturaService {
             datosPrueba.put("subtotal", new BigDecimal("1000.00"));
             datosPrueba.put("iva", new BigDecimal("160.00"));
             datosPrueba.put("total", new BigDecimal("1160.00"));
-            
-            // Generar PDF con datos de prueba
-            byte[] pdfBytes = iTextPdfService.generarPdf(datosPrueba);
-            logger.info("PDF de prueba generado exitosamente");
+
+            byte[] pdfBytes = iTextPdfService.generarPdfConLogo(datosPrueba, logoConfig != null ? logoConfig : new HashMap<>());
+            logger.info("PDF de prueba con logo generado exitosamente");
             return pdfBytes;
-            
         } catch (Exception e) {
-            logger.error("Error al generar PDF de prueba: {}", e.getMessage(), e);
-            return new byte[0]; // Devolver array vacío en caso de error
+            logger.error("Error al generar PDF de prueba con logo: {}", e.getMessage(), e);
+            return new byte[0];
         }
+    }
+
+    // Overload para compatibilidad con llamadas existentes
+    private byte[] generarPdfPrueba(String uuid) {
+        return generarPdfPrueba(uuid, null);
+    }
+
+    /**
+     * Genera el folio consecutivo por serie desde el sistema (Oracle)
+     */
+    private String generarFolioConsecutivo(String serie) {
+        Integer max = facturaRepository.findMaxFolioBySerie(serie);
+        int next = (max == null ? 0 : max) + 1;
+        return String.valueOf(next);
     }
 }

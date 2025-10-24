@@ -51,6 +51,14 @@ public class FacturaResponseBuilder {
     }
 
     public FacturaResponse build() {
-        return new FacturaResponse(exitoso, mensaje, timestamp, uuid, xmlTimbrado, datosFactura, errores);
+        return FacturaResponse.builder()
+                .exitoso(exitoso)
+                .mensaje(mensaje)
+                .timestamp(timestamp)
+                .uuid(uuid)
+                .xmlTimbrado(xmlTimbrado)
+                .datosFactura(datosFactura)
+                .errores(errores)
+                .build();
     }
 }

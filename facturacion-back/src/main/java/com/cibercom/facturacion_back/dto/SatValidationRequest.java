@@ -21,6 +21,19 @@ public class SatValidationRequest {
     @NotBlank(message = "El régimen fiscal es obligatorio")
     private String regimenFiscal;
 
+    // Getters y setters explícitos para compatibilidad si Lombok falla
+    public String getNombre() { return nombre; }
+    public void setNombre(String nombre) { this.nombre = nombre; }
+
+    public String getRfc() { return rfc; }
+    public void setRfc(String rfc) { this.rfc = rfc; }
+
+    public String getCodigoPostal() { return codigoPostal; }
+    public void setCodigoPostal(String codigoPostal) { this.codigoPostal = codigoPostal; }
+
+    public String getRegimenFiscal() { return regimenFiscal; }
+    public void setRegimenFiscal(String regimenFiscal) { this.regimenFiscal = regimenFiscal; }
+
     // Para persona física, el régimen fiscal debe ser uno de estos valores
     public static final String[] REGIMENES_FISICA = {
             "601", // General de Ley Personas Morales
