@@ -24,11 +24,20 @@ public class PacClient {
     public PacResponse solicitarCancelacion(PacRequest req) {
         try {
             String url = baseUrl + "/cancel";
+            logger.info("HTTP -> PAC cancelacion: url={} uuid={} motivo={} total={} tipo={} fecha={}",
+                    url, req.uuid, req.motivo, req.total, req.tipo, req.fechaFactura);
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             HttpEntity<PacRequest> entity = new HttpEntity<>(req, headers);
             ResponseEntity<PacResponse> response = restTemplate.postForEntity(url, entity, PacResponse.class);
-            return response.getBody();
+            PacResponse body = response.getBody();
+            logger.info("HTTP <- PAC cancelacion: statusCode={} ok={} status={} receiptId={} message={}",
+                    response.getStatusCodeValue(),
+                    body != null ? body.getOk() : null,
+                    body != null ? body.getStatus() : null,
+                    body != null ? body.getReceiptId() : null,
+                    body != null ? body.getMessage() : null);
+            return body;
         } catch (Exception e) {
             logger.error("Error llamando PAC: {}", e.getMessage());
             PacResponse r = new PacResponse();
@@ -42,12 +51,22 @@ public class PacClient {
     public PacTimbradoResponse solicitarTimbrado(PacTimbradoRequest req) {
         try {
             String url = baseUrl + "/stamp";
+            logger.info("HTTP -> PAC timbrado: url={} uuid={} tipo={} total={} relacionados={}",
+                    url, req.getUuid(), req.getTipo(), req.getTotal(), req.getRelacionadosUuids());
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             HttpEntity<PacTimbradoRequest> entity = new HttpEntity<>(req, headers);
             ResponseEntity<PacTimbradoResponse> response = restTemplate.postForEntity(url, entity,
                     PacTimbradoResponse.class);
-            return response.getBody();
+            PacTimbradoResponse body = response.getBody();
+            logger.info("HTTP <- PAC timbrado: statusCode={} ok={} status={} uuid={} receiptId={} message={}",
+                    response.getStatusCodeValue(),
+                    body != null ? body.getOk() : null,
+                    body != null ? body.getStatus() : null,
+                    body != null ? body.getUuid() : null,
+                    body != null ? body.getReceiptId() : null,
+                    body != null ? body.getMessage() : null);
+            return body;
         } catch (Exception e) {
             logger.error("Error llamando PAC para timbrado: {}", e.getMessage());
             PacTimbradoResponse r = new PacTimbradoResponse();

@@ -1,0 +1,15 @@
+{
+  "uuidFactura": null,
+  "idFactura": null,
+  "skuClaveSat": "01010101",
+  "descripcion": "Prueba concepto libre",
+  "unidadMedida": "H87",
+  "valorUnitario": 100.00,
+  "cantidad": 1,
+  "descuento": 0,
+  "tasaIva": 0.16,
+  "iva": 16.00,
+  "tasaIeps": 0,
+  "ieps": 0,
+  "noPedimento": null
+}

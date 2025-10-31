@@ -19,23 +19,16 @@ public interface FacturaRepository extends JpaRepository<Factura, String> {
 
     List<Factura> findByReceptorRfc(String receptorRfc);
 
-    List<Factura> findByFechaGeneracionBetween(LocalDateTime fechaInicio, LocalDateTime fechaFin);
+    // Ajustado a columna real FECHA
+    List<Factura> findByFechaFacturaBetween(LocalDateTime fechaInicio, LocalDateTime fechaFin);
 
-    List<Factura> findByEstado(String estado);
+    // Opcional: filtrar por estatus en SAT
+    @Query("SELECT f FROM Factura f WHERE f.statusSat = 'TIMBRADA'")
+    List<Factura> findTimbradas();
 
-    List<Factura> findByTienda(String tienda);
-
-    Optional<Factura> findByCodigoFacturacion(String codigoFacturacion);
-
-    @Query("SELECT f FROM Factura f WHERE f.estado = 'TIMBRADA'")
-    List<Factura> findFacturasTimbradas();
-
-    @Query("SELECT f.estado, COUNT(f) FROM Factura f GROUP BY f.estado")
-    List<Object[]> countByEstado();
-
-    @Query("SELECT f FROM Factura f WHERE f.emisorRfc = :emisorRfc AND f.fechaGeneracion BETWEEN :fechaInicio AND :fechaFin")
-    List<Factura> findByEmisorRfcAndFechaGeneracionBetween(
-            @Param("emisorRfc") String emisorRfc,
-            @Param("fechaInicio") LocalDateTime fechaInicio,
-            @Param("fechaFin") LocalDateTime fechaFin);
+    // Reemplazo de búsqueda por emisor y rango de fecha
+    @Query("SELECT f FROM Factura f WHERE f.emisorRfc = :rfc AND f.fechaFactura BETWEEN :inicio AND :fin")
+    List<Factura> findByEmisorAndFecha(@Param("rfc") String rfc, @Param("inicio") LocalDateTime inicio, @Param("fin") LocalDateTime fin);
+    @Query(value = "SELECT NVL(MAX(FOLIO), 0) FROM FACTURAS WHERE SERIE = :serie", nativeQuery = true)
+    Integer findMaxFolioBySerie(@Param("serie") String serie);
 }

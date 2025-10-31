@@ -87,8 +87,8 @@ public class FacturaTimbradoService {
             // 4. Generar XML según lineamientos del SAT
             String xml = generarXMLFactura(request, subtotal, iva, total);
 
-            // 5. Generar UUID temporal para seguimiento
-            String uuidTemporal = UUID.randomUUID().toString().toUpperCase();
+            // 5. Generar UUID temporal para seguimiento (formato antiguo sin guiones)
+            String uuidTemporal = UUID.randomUUID().toString().replace("-", "").toUpperCase();
 
             // 6. Guardar factura en estado POR_TIMBRAR
             guardarFacturaEnProceso(request, xml, uuidTemporal, subtotal, iva, total);
@@ -102,7 +102,7 @@ public class FacturaTimbradoService {
                 if ("0".equals(pacResponse.getStatus())) {
                     // Timbrado inmediato exitoso (EMITIDA)
                     actualizarFacturaTimbrada(uuidTemporal, pacResponse);
-                    return construirRespuestaExitosa(request, subtotal, iva, total, pacResponse);
+                    return construirRespuestaExitosa(request, subtotal, iva, total, pacResponse, uuidTemporal);
                 } else if ("4".equals(pacResponse.getStatus())) {
                     // Timbrado en proceso (asíncrono) - EN_PROCESO_EMISION
                     actualizarFacturaEnProcesoEmision(uuidTemporal);
@@ -248,6 +248,7 @@ public class FacturaTimbradoService {
                     .receptorRazonSocial(request.getNombreReceptor())
                     .subtotal(subtotal)
                     .iva(iva)
+                    .iepsDesglosado(false)
                     .total(total)
                     .estado(EstadoFactura.POR_TIMBRAR.getCodigo())
                     .estadoDescripcion(EstadoFactura.POR_TIMBRAR.getDescripcion())
@@ -340,12 +341,12 @@ public class FacturaTimbradoService {
      * Construye respuesta exitosa para timbrado inmediato
      */
     private FacturaResponse construirRespuestaExitosa(FacturaRequest request, BigDecimal subtotal,
-            BigDecimal iva, BigDecimal total, PacTimbradoResponse pacResponse) {
+            BigDecimal iva, BigDecimal total, PacTimbradoResponse pacResponse, String uuidTemporal) {
         return FacturaResponse.builder()
                 .exitoso(true)
                 .mensaje("Factura timbrada exitosamente")
                 .timestamp(LocalDateTime.now())
-                .uuid(pacResponse.getUuid())
+                .uuid(uuidTemporal)
                 .xmlTimbrado(pacResponse.getXmlTimbrado())
                 .datosFactura(FacturaResponse.DatosFactura.builder()
                         .folioFiscal(pacResponse.getFolioFiscal())

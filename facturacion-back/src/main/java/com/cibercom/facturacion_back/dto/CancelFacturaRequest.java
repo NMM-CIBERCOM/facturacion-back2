@@ -5,6 +5,7 @@ public class CancelFacturaRequest {
     private String motivo;
     private String usuario;
     private String perfilUsuario;
+    private String uuidSustituto;
 
     public String getUuid() {
         return uuid;
@@ -36,5 +37,13 @@ public class CancelFacturaRequest {
 
     public void setPerfilUsuario(String perfilUsuario) {
         this.perfilUsuario = perfilUsuario;
+    }
+
+    public String getUuidSustituto() {
+        return uuidSustituto;
+    }
+
+    public void setUuidSustituto(String uuidSustituto) {
+        this.uuidSustituto = uuidSustituto;
     }
 }

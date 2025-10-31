@@ -3,6 +3,7 @@ package com.cibercom.facturacion_back.controller;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -19,6 +20,7 @@ import com.cibercom.facturacion_back.service.FacturaService;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Base64;
 
 /**
  * Controlador para el envío de correos electrónicos
@@ -196,7 +198,7 @@ public class CorreoController {
             
             logger.info("Enviando correo con contenido: {}", contenidoCorreo);
             
-            // Obtener el PDF directamente y verificar que sea válido
+            // Obtener el PDF directamente y verificar que sea válido (validación básica)
             byte[] pdfBytes = facturaService.obtenerPdfComoBytes(request.getUuidFactura());
             if (pdfBytes == null || pdfBytes.length < 100) {
                 logger.error("PDF inválido o demasiado pequeño: {} bytes", pdfBytes != null ? pdfBytes.length : 0);
@@ -210,7 +212,8 @@ public class CorreoController {
                 request.getUuidFactura(),
                 request.getCorreoReceptor(),
                 request.getAsunto(),
-                contenidoCorreo
+                contenidoCorreo,
+                request.getLogoBase64()
             );
             
             response.put("success", true);
@@ -225,6 +228,106 @@ public class CorreoController {
             response.put("success", false);
             response.put("message", "Error interno al enviar el correo: " + e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+        }
+    }
+
+    /**
+     * Envía correo con PDF directo (sin buscar factura por UUID)
+     */
+    @PostMapping("/enviar-pdf-directo")
+    public ResponseEntity<Map<String, Object>> enviarCorreoConPdfDirecto(
+            @RequestBody EnvioPdfDirectoRequest request) {
+        Map<String, Object> response = new HashMap<>();
+        try {
+            // Validar formato del correo
+            if (!correoService.validarEmail(request.getCorreoReceptor())) {
+                response.put("success", false);
+                response.put("message", "El formato del correo electrónico no es válido");
+                return ResponseEntity.badRequest().body(response);
+            }
+
+            // Verificar configuración de correo, permitir envío simulado si incompleta
+            boolean configuracionCompletaPdf = correoService.verificarConfiguracionCorreo();
+            if (!configuracionCompletaPdf) {
+                logger.warn("La configuración de correo no está completa; se continuará con envío simulado (PDF directo).");
+                response.put("success", true);
+                response.put("simulado", true);
+                response.put("message", "Envío de correo con PDF simulado por configuración incompleta");
+                response.put("correoReceptor", request.getCorreoReceptor());
+                return ResponseEntity.ok(response);
+            }
+
+            String contenidoCorreo = request.getCuerpo();
+            if (contenidoCorreo == null || contenidoCorreo.trim().isEmpty()) {
+                contenidoCorreo = request.getMensaje();
+            }
+
+            if (request.getPdfBase64() == null || request.getPdfBase64().trim().isEmpty()) {
+                response.put("success", false);
+                response.put("message", "PDF base64 no proporcionado");
+                return ResponseEntity.badRequest().body(response);
+            }
+
+            // Decodificar PDF
+            byte[] pdfBytes = java.util.Base64.getDecoder().decode(request.getPdfBase64());
+            if (pdfBytes == null || pdfBytes.length < 100) {
+                response.put("success", false);
+                response.put("message", "PDF inválido o demasiado pequeño para adjuntar");
+                return ResponseEntity.status(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+            }
+
+            // Nombre de adjunto por defecto si no se proporciona
+            String nombreAdjunto = request.getNombreAdjunto();
+            if (nombreAdjunto == null || nombreAdjunto.trim().isEmpty()) {
+                nombreAdjunto = "NotaCredito.pdf";
+            }
+
+            // Preparar variables de plantilla si se proporcionan
+            Map<String, String> templateVars = new java.util.HashMap<>();
+            if (request.getTemplateVars() != null) {
+                templateVars.putAll(request.getTemplateVars());
+            }
+            templateVars.putIfAbsent("serie", "");
+            templateVars.putIfAbsent("folio", "");
+            templateVars.putIfAbsent("uuid", "");
+            templateVars.putIfAbsent("rfcEmisor", "");
+            templateVars.putIfAbsent("rfcReceptor", "");
+
+            // Nuevo: XML opcional
+            byte[] xmlBytes = null;
+            String nombreAdjuntoXml = request.getNombreAdjuntoXml();
+            if (request.getXmlBase64() != null && !request.getXmlBase64().trim().isEmpty()) {
+                try {
+                    xmlBytes = java.util.Base64.getDecoder().decode(request.getXmlBase64());
+                } catch (Exception e) {
+                    logger.warn("No se pudo decodificar xmlBase64: {}", e.getMessage());
+                }
+                if (nombreAdjuntoXml == null || nombreAdjuntoXml.trim().isEmpty()) {
+                    nombreAdjuntoXml = "Documento.xml";
+                }
+            }
+
+            // Enviar correo con ambos adjuntos si hay XML, o solo PDF
+            correoService.enviarCorreoConAdjuntosDirecto(
+                request.getCorreoReceptor(),
+                request.getAsunto(),
+                contenidoCorreo,
+                templateVars,
+                pdfBytes,
+                nombreAdjunto,
+                xmlBytes,
+                nombreAdjuntoXml
+            );
+
+            response.put("success", true);
+            response.put("message", "Correo con PDF (y XML si aplica) enviado exitosamente");
+            response.put("correoReceptor", request.getCorreoReceptor());
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Error al enviar correo con PDF directo: {}", e.getMessage(), e);
+            response.put("success", false);
+            response.put("message", "Error interno al enviar el correo: " + e.getMessage());
+            return ResponseEntity.status(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR).body(response);
         }
     }
 
@@ -380,6 +483,8 @@ public class CorreoController {
         private String asunto;
         private String mensaje;
         private String cuerpo;
+        // Nuevo: logo base64 para la generación del PDF con branding
+        private String logoBase64;
         
         // Getters y setters
         public String getUuidFactura() { return uuidFactura; }
@@ -397,8 +502,49 @@ public class CorreoController {
         public String getCuerpo() { return cuerpo != null ? cuerpo : mensaje; }
         public void setCuerpo(String cuerpo) { this.cuerpo = cuerpo; }
         
-        // Getter for mensaje already defined above
-        // Setter for mensaje already defined above
+        public String getLogoBase64() { return logoBase64; }
+        public void setLogoBase64(String logoBase64) { this.logoBase64 = logoBase64; }
+    }
+
+    /**
+     * Clase interna para el request de envío de correo con PDF directo
+     */
+    public static class EnvioPdfDirectoRequest {
+        private String correoReceptor;
+        private String asunto;
+        private String mensaje;
+        private String cuerpo;
+        private String nombreAdjunto;
+        private String pdfBase64;
+        private java.util.Map<String, String> templateVars;
+        // Nuevo: XML opcional
+        private String xmlBase64;
+        private String nombreAdjuntoXml;
+
+        public String getCorreoReceptor() { return correoReceptor; }
+        public void setCorreoReceptor(String correoReceptor) { this.correoReceptor = correoReceptor; }
+
+        public String getAsunto() { return asunto; }
+        public void setAsunto(String asunto) { this.asunto = asunto; }
+
+        public String getMensaje() { return mensaje; }
+        public void setMensaje(String mensaje) { this.mensaje = mensaje; }
+
+        public String getCuerpo() { return cuerpo != null ? cuerpo : mensaje; }
+        public void setCuerpo(String cuerpo) { this.cuerpo = cuerpo; }
+
+        public String getNombreAdjunto() { return nombreAdjunto; }
+        public void setNombreAdjunto(String nombreAdjunto) { this.nombreAdjunto = nombreAdjunto; }
+
+        public String getPdfBase64() { return pdfBase64; }
+        public void setPdfBase64(String pdfBase64) { this.pdfBase64 = pdfBase64; }
+
+        public java.util.Map<String, String> getTemplateVars() { return templateVars; }
+        public void setTemplateVars(java.util.Map<String, String> templateVars) { this.templateVars = templateVars; }
+        public String getXmlBase64() { return xmlBase64; }
+        public void setXmlBase64(String xmlBase64) { this.xmlBase64 = xmlBase64; }
+        public String getNombreAdjuntoXml() { return nombreAdjuntoXml; }
+        public void setNombreAdjuntoXml(String nombreAdjuntoXml) { this.nombreAdjuntoXml = nombreAdjuntoXml; }
     }
     
     /**

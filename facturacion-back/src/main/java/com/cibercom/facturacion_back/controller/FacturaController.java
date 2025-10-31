@@ -5,6 +5,7 @@ import com.cibercom.facturacion_back.dto.FacturaResponse;
 import com.cibercom.facturacion_back.dto.ConsultaFacturaRequest;
 import com.cibercom.facturacion_back.dto.ConsultaFacturaResponse;
 import com.cibercom.facturacion_back.dto.PacTimbradoResponse;
+import com.cibercom.facturacion_back.dto.FacturaFrontendRequest;
 import com.cibercom.facturacion_back.model.Factura;
 import com.cibercom.facturacion_back.model.FacturaMongo;
 import com.cibercom.facturacion_back.repository.FacturaRepository;
@@ -15,6 +16,9 @@ import com.cibercom.facturacion_back.service.FacturaTimbradoService;
 import com.cibercom.facturacion_back.service.ITextPdfService;
 import com.cibercom.facturacion_back.service.PDFParsingService;
 import com.cibercom.facturacion_back.model.FacturaInfo;
+import com.cibercom.facturacion_back.dto.CfdiConsultaResponse;
+import com.cibercom.facturacion_back.service.CfdiXmlParserService;
+import com.cibercom.facturacion_back.dao.UuidFacturaOracleDAO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.Environment;
 import org.springframework.http.ResponseEntity;
@@ -32,8 +36,14 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
+import java.util.Base64;
+import com.cibercom.facturacion_back.service.FormatoCorreoService;
+import com.cibercom.facturacion_back.dto.FormatoCorreoDto;
+import com.cibercom.facturacion_back.service.CorreoService;
+import com.cibercom.facturacion_back.dto.ConfiguracionCorreoResponseDto;
 
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -41,7 +51,7 @@ import org.slf4j.LoggerFactory;
 
 @RestController
 @RequestMapping("/api/factura")
-@CrossOrigin(origins = "http://localhost:5173")
+@CrossOrigin(origins = "*")
 public class FacturaController {
 
     private static final Logger logger = LoggerFactory.getLogger(FacturaController.class);
@@ -69,6 +79,24 @@ public class FacturaController {
 
     @Autowired
     private PDFParsingService pdfParsingService;
+    
+    @Autowired
+    private CfdiXmlParserService cfdiXmlParserService;
+
+    @Autowired
+    private UuidFacturaOracleDAO uuidFacturaOracleDAO;
+
+    @Autowired(required = false)
+    private com.cibercom.facturacion_back.dao.ConsultaXmlOracleDAO consultaXmlOracleDAO;
+
+    @Autowired
+    private FormatoCorreoService formatoCorreoService;
+
+    @Autowired
+    private CorreoService correoService;
+
+    @Autowired(required = false)
+    private com.cibercom.facturacion_back.service.FacturacionGlobalService facturacionGlobalService;
 
     @PostMapping("/generar-pdf")
     public ResponseEntity<byte[]> generarPDF(@RequestBody Map<String, Object> request) {
@@ -93,6 +121,158 @@ public class FacturaController {
         } catch (Exception e) {
             logger.error("Error generando PDF con iText", e);
             return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    // Construcción de XML mínimo cuando no existe el XML almacenado
+    private String construirXmlMinimo(String uuid, com.cibercom.facturacion_back.dao.UuidFacturaOracleDAO.Result r) {
+        try {
+            String serie = safe(r.serie);
+            String folio = safe(r.folio);
+            String total = r.total != null ? r.total.toPlainString() : "0.00";
+            String subtotal = r.subtotal != null ? r.subtotal.toPlainString() : total;
+            String descuento = r.descuento != null ? r.descuento.toPlainString() : null;
+            String iva = r.iva != null ? r.iva.toPlainString() : null;
+            String formaPago = safe(r.formaPago);
+            String metodoPago = safe(r.metodoPago);
+            String usoCfdi = safe(r.usoCfdi);
+            String rfcEmisor = safe(r.rfcEmisor);
+            String rfcReceptor = safe(r.rfcReceptor);
+            String fecha = r.fechaFactura != null ? java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME
+                    .format(r.fechaFactura.atOffset(java.time.ZoneOffset.UTC)) : null;
+            if (fecha == null) {
+                fecha = java.time.OffsetDateTime.now().withOffsetSameInstant(java.time.ZoneOffset.UTC)
+                        .format(java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+            }
+            if (rfcEmisor.isEmpty() || rfcReceptor.isEmpty()) {
+                // Sin RFCs no podemos construir un CFDI válido
+                return null;
+            }
+
+            StringBuilder sb = new StringBuilder();
+            sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
+            sb.append("<cfdi:Comprobante xmlns:cfdi=\"http://www.sat.gob.mx/cfd/4\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"");
+            sb.append(" Version=\"4.0\"");
+            if (!serie.isEmpty()) sb.append(" Serie=\"" + escape(serie) + "\"");
+            if (!folio.isEmpty()) sb.append(" Folio=\"" + escape(folio) + "\"");
+            sb.append(" Fecha=\"" + escape(fecha) + "\"");
+            sb.append(" SubTotal=\"" + escape(subtotal) + "\"");
+            if (descuento != null) sb.append(" Descuento=\"" + escape(descuento) + "\"");
+            sb.append(" Total=\"" + escape(total) + "\"");
+            sb.append(" Moneda=\"MXN\" LugarExpedicion=\"00000\"");
+            if (!formaPago.isEmpty()) sb.append(" FormaPago=\"" + escape(formaPago) + "\"");
+            if (!metodoPago.isEmpty()) sb.append(" MetodoPago=\"" + escape(metodoPago) + "\"");
+            sb.append(">");
+            sb.append("<cfdi:Emisor Rfc=\"" + escape(rfcEmisor) + "\" Nombre=\"Emisor\" RegimenFiscal=\"601\"/>");
+            sb.append("<cfdi:Receptor Rfc=\"" + escape(rfcReceptor) + "\" Nombre=\"Receptor\" UsoCFDI=\"" + (usoCfdi.isEmpty()?"G03":escape(usoCfdi)) + "\"/>");
+            sb.append("<cfdi:Conceptos>");
+            sb.append("<cfdi:Concepto ClaveProdServ=\"01010101\" Cantidad=\"1\" ClaveUnidad=\"ACT\" Descripcion=\"Producto genérico\" ValorUnitario=\"" + escape(total) + "\" Importe=\"" + escape(total) + "\"/>");
+            sb.append("</cfdi:Conceptos>");
+            if (iva != null) {
+                sb.append("<cfdi:Impuestos>");
+                sb.append("<cfdi:Traslados>");
+                sb.append("<cfdi:Traslado Base=\"" + escape(subtotal) + "\" Importe=\"" + escape(iva) + "\" Impuesto=\"002\" TipoFactor=\"Tasa\" TasaOCuota=\"0.160000\"/>");
+                sb.append("</cfdi:Traslados>");
+                sb.append("</cfdi:Impuestos>");
+            }
+            sb.append("</cfdi:Comprobante>");
+            return sb.toString();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String safe(String s) { return s == null ? "" : s.trim(); }
+    private String escape(String s) { return s.replace("\"", "&quot;"); }
+
+    @GetMapping("/descargar-pdf/{uuid}")
+    public ResponseEntity<byte[]> descargarPdfPorUuid(@PathVariable String uuid) {
+        try {
+            // Obtener color primario desde Configuración de Mensajes (consistente con email)
+            String colorPrimario = null;
+            try {
+                ConfiguracionCorreoResponseDto configMensajes = correoService.obtenerConfiguracionMensajes();
+                if (configMensajes != null && configMensajes.getFormatoCorreo() != null &&
+                    configMensajes.getFormatoCorreo().getColorTexto() != null &&
+                    !configMensajes.getFormatoCorreo().getColorTexto().isBlank()) {
+                    colorPrimario = configMensajes.getFormatoCorreo().getColorTexto();
+                }
+            } catch (Exception e) {
+                logger.warn("No se pudo obtener Configuración de Mensajes: {}", e.getMessage());
+            }
+
+            // Fallback al formato activo si no hay color en Configuración de Mensajes
+            if (colorPrimario == null) {
+                try {
+                    FormatoCorreoDto formatoActivo = formatoCorreoService.obtenerConfiguracionActiva();
+                    if (formatoActivo != null && formatoActivo.getColorTexto() != null && !formatoActivo.getColorTexto().isBlank()) {
+                        colorPrimario = formatoActivo.getColorTexto();
+                    }
+                } catch (Exception e) {
+                    logger.warn("No se pudo obtener formato de correo activo: {}", e.getMessage());
+                }
+            }
+
+            Map<String, Object> logoConfig = new HashMap<>();
+            Map<String, Object> customColors = new HashMap<>();
+            if (colorPrimario != null) {
+                customColors.put("primary", colorPrimario.trim());
+            }
+            logoConfig.put("customColors", customColors);
+
+            // Intentar usar logoBase64 activo persistido
+            String logoBase64Activo = leerLogoBase64Activo();
+            if (logoBase64Activo != null && !logoBase64Activo.isBlank()) {
+                logoConfig.put("logoBase64", logoBase64Activo.trim());
+                logger.info("Usando logoBase64 activo para descarga de PDF");
+            } else {
+                // Fallback: usar el mismo endpoint PNG que en el correo
+                String port = environment.getProperty("local.server.port", environment.getProperty("server.port", "8085"));
+                String logoEndpoint = "http://localhost:" + port + "/api/logos/cibercom-png";
+                logoConfig.put("logoUrl", logoEndpoint);
+                logger.info("Logo para descarga de PDF (fallback URL): {}", logoEndpoint);
+            }
+
+            byte[] pdfBytes = facturaService.obtenerPdfComoBytes(uuid, logoConfig);
+
+            // Construir nombre de archivo usando serie-folio si están disponibles
+            String nombreArchivo = "Factura_" + uuid + ".pdf";
+            try {
+                Factura factura = facturaService.buscarPorUuid(uuid);
+                if (factura != null && factura.getSerie() != null && factura.getFolio() != null) {
+                    nombreArchivo = "Factura_" + factura.getSerie() + "-" + factura.getFolio() + ".pdf";
+                }
+            } catch (Exception ignored) {}
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_PDF);
+            headers.setContentDispositionFormData("attachment", nombreArchivo);
+            return ResponseEntity.ok().headers(headers).body(pdfBytes);
+        } catch (Exception e) {
+            logger.error("Error generando PDF por UUID", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    @PostMapping("/generar/frontend")
+    public ResponseEntity<Map<String, Object>> generarDesdeFrontend(
+            @Valid @RequestBody FacturaFrontendRequest request) {
+        logger.info("Recibida solicitud de generación desde frontend: {}", request);
+
+        try {
+            Map<String, Object> result = facturaService.procesarFormularioFrontend(request);
+            boolean exitoso = Boolean.TRUE.equals(result.get("exitoso"));
+            if (exitoso) {
+                return ResponseEntity.ok(result);
+            } else {
+                return ResponseEntity.badRequest().body(result);
+            }
+        } catch (Exception e) {
+            logger.error("Error interno del servidor al procesar formulario frontend", e);
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("exitoso", false);
+            errorResponse.put("mensaje", "Error interno del servidor: " + e.getMessage());
+            return ResponseEntity.internalServerError().body(errorResponse);
         }
     }
 
@@ -137,6 +317,21 @@ public class FacturaController {
         html.append("</body>\n</html>");
 
         return html.toString();
+    }
+
+    private String leerLogoBase64Activo() {
+        try {
+            java.nio.file.Path p = java.nio.file.Paths.get("config/logo-base64.txt");
+            if (java.nio.file.Files.exists(p)) {
+                String content = java.nio.file.Files.readString(p);
+                if (content != null && !content.trim().isEmpty()) {
+                    return content.trim();
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("No se pudo leer logo activo para PDF: {}", e.getMessage());
+        }
+        return null;
     }
 
     @PostMapping("/generar")
@@ -337,113 +532,15 @@ public class FacturaController {
     }
 
     @GetMapping("/timbrado/status/{uuid}")
-    public ResponseEntity<FacturaResponse> consultarEstadoTimbrado(@PathVariable String uuid) {
+    public ResponseEntity<byte[]> consultarEstadoTimbrado(@PathVariable String uuid) {
         logger.info("🔍 Consultando estado de timbrado para UUID: {}", uuid);
 
         try {
             String activeProfile = environment.getActiveProfiles().length > 0 ? environment.getActiveProfiles()[0]
                     : "oracle";
 
-            if ("mongo".equals(activeProfile)) {
-                FacturaMongo facturaMongo = facturaMongoRepository.findByUuid(uuid);
-                if (facturaMongo == null) {
-                    return ResponseEntity.notFound().build();
-                }
-
-                String mensajeEstado = obtenerMensajeEstado(facturaMongo.getEstado());
-
-                return ResponseEntity.ok(FacturaResponse.builder()
-                        .exitoso(true)
-                        .mensaje(mensajeEstado)
-                        .timestamp(java.time.LocalDateTime.now())
-                        .uuid(facturaMongo.getUuid())
-                        .xmlTimbrado(facturaMongo.getXmlContent())
-                        .datosFactura(FacturaResponse.DatosFactura.builder()
-                                .folioFiscal(facturaMongo.getUuid())
-                                .serie(facturaMongo.getSerie())
-                                .folio(facturaMongo.getFolio())
-                                .fechaTimbrado(facturaMongo.getFechaTimbrado())
-                                .subtotal(facturaMongo.getSubtotal())
-                                .iva(facturaMongo.getIva())
-                                .total(facturaMongo.getTotal())
-                                .cadenaOriginal(facturaMongo.getCadenaOriginal())
-                                .selloDigital(facturaMongo.getSelloDigital())
-                                .certificado(facturaMongo.getCertificado())
-                                .build())
-                        .build());
-
-            } else {
-                Factura factura = facturaRepository.findById(uuid).orElse(null);
-                if (factura == null) {
-                    return ResponseEntity.notFound().build();
-                }
-
-                String mensajeEstado = obtenerMensajeEstado(factura.getEstado());
-
-                return ResponseEntity.ok(FacturaResponse.builder()
-                        .exitoso(true)
-                        .mensaje(mensajeEstado)
-                        .timestamp(java.time.LocalDateTime.now())
-                        .uuid(factura.getUuid())
-                        .xmlTimbrado(factura.getXmlContent())
-                        .datosFactura(FacturaResponse.DatosFactura.builder()
-                                .folioFiscal(factura.getUuid())
-                                .serie(factura.getSerie())
-                                .folio(factura.getFolio())
-                                .fechaTimbrado(factura.getFechaTimbrado())
-                                .subtotal(factura.getSubtotal())
-                                .iva(factura.getIva())
-                                .total(factura.getTotal())
-                                .cadenaOriginal(factura.getCadenaOriginal())
-                                .selloDigital(factura.getSelloDigital())
-                                .certificado(factura.getCertificado())
-                                .build())
-                        .build());
-            }
-
-        } catch (Exception e) {
-            logger.error("❌ Error consultando estado de timbrado para UUID: {}", uuid, e);
-            return ResponseEntity.internalServerError().body(FacturaResponse.builder()
-                    .exitoso(false)
-                    .mensaje("Error consultando estado: " + e.getMessage())
-                    .timestamp(java.time.LocalDateTime.now())
-                    .build());
-        }
-    }
-
-    private String obtenerMensajeEstado(String estado) {
-        if (estado == null) {
-            return "Estado no definido";
-        }
-
-        switch (estado) {
-            case "66":
-                return "Factura creada, pendiente de timbrado (POR_TIMBRAR)";
-            case "4":
-                return "Factura en proceso de emisión - El PAC consultará automáticamente al SAT en 60 segundos";
-            case "0":
-                return "Factura timbrada exitosamente (EMITIDA)";
-            case "2":
-                return "Factura cancelada por el SAT (CANCELADA_SAT)";
-            case "99":
-                return "Factura temporal - Error en comunicación";
-            default:
-                return "Estado: " + estado;
-        }
-    }
-
-    @GetMapping("/descargar-xml/{uuid}")
-    public ResponseEntity<byte[]> descargarXml(@PathVariable String uuid) {
-        logger.info("Solicitud de descarga de XML para UUID: {}", uuid);
-
-        try {
-            String activeProfile = environment.getActiveProfiles().length > 0 ? environment.getActiveProfiles()[0]
-                    : "oracle";
-
             String xmlContent = null;
-
             if ("mongo".equals(activeProfile)) {
-
                 FacturaMongo facturaMongo = facturaMongoRepository.findByUuid(uuid);
                 if (facturaMongo == null) {
                     logger.warn("Factura no encontrada en MongoDB para UUID: {}", uuid);
@@ -452,13 +549,35 @@ public class FacturaController {
                 xmlContent = facturaMongo.getXmlContent();
             } else {
 
-                java.util.Optional<Factura> facturaOpt = facturaRepository.findByUuid(uuid);
-                if (!facturaOpt.isPresent()) {
+                java.util.Optional<com.cibercom.facturacion_back.dao.UuidFacturaOracleDAO.Result> opt = uuidFacturaOracleDAO.obtenerBasicosPorUuid(uuid);
+                if (!opt.isPresent()) {
                     logger.warn("Factura no encontrada en Oracle para UUID: {}", uuid);
-                    return ResponseEntity.notFound().build();
+                    // No encontrada en FACTURAS: intentar CONSULTAS
+                    if (consultaXmlOracleDAO != null) {
+                        java.util.Optional<String> xmlOpt = consultaXmlOracleDAO.obtenerXmlPorUuid(uuid);
+                        if (xmlOpt.isPresent()) {
+                            xmlContent = xmlOpt.get();
+                        }
+                    }
+                } else {
+                    xmlContent = opt.get().xmlContent;
+                    // Si FACTURAS no tiene XML, intentar CONSULTAS como fallback
+                    if (xmlContent == null || xmlContent.isEmpty()) {
+                        if (consultaXmlOracleDAO != null) {
+                            java.util.Optional<String> xmlOpt = consultaXmlOracleDAO.obtenerXmlPorUuid(uuid);
+                            if (xmlOpt.isPresent()) {
+                                xmlContent = xmlOpt.get();
+                            }
+                        }
+                        // Fallback final: intentar construir un XML mínimo con datos disponibles
+                        if (xmlContent == null || xmlContent.isEmpty()) {
+                            String generado = construirXmlMinimo(uuid, opt.get());
+                            if (generado != null && !generado.isEmpty()) {
+                                xmlContent = generado;
+                            }
+                        }
+                    }
                 }
-                Factura factura = facturaOpt.get();
-                xmlContent = factura.getXmlContent();
             }
 
             if (xmlContent == null || xmlContent.isEmpty()) {
@@ -557,9 +676,366 @@ public class FacturaController {
         return rutaArchivoTemporal.toString();
     }
 
+    @GetMapping("/oracle/columns/{uuid}")
+    public ResponseEntity<Map<String, Object>> consultarColumnasOracle(@PathVariable String uuid) {
+        try {
+            java.util.Optional<Factura> opt = facturaRepository.findByUuid(uuid);
+            if (!opt.isPresent()) {
+                return ResponseEntity.notFound().build();
+            }
+            Factura f = opt.get();
+            Map<String, Object> r = new HashMap<>();
+            r.put("uuid", f.getUuid());
+            r.put("serie", f.getSerie());
+            r.put("folio", f.getFolio());
+            r.put("tiendaOrigen", f.getTiendaOrigen());
+            r.put("terminalBol", f.getTerminalBol());
+            r.put("boletaBol", f.getBoletaBol());
+            r.put("tienda", f.getTienda());
+            r.put("terminal", f.getTerminal());
+            r.put("boleta", f.getBoleta());
+            return ResponseEntity.ok(r);
+        } catch (Exception e) {
+            logger.error("Error consultando columnas Oracle para UUID {}: {}", uuid, e.getMessage());
+            return ResponseEntity.internalServerError().body(Map.of(
+                "exitoso", false,
+                "mensaje", "Error consultando columnas Oracle",
+                "error", e.getMessage()
+            ));
+        }
+    }
+
     @GetMapping("/health")
     public ResponseEntity<String> healthCheck() {
         logger.info("Health check solicitado para FacturaController");
         return ResponseEntity.ok("FacturaService funcionando correctamente");
+    }
+
+    @PostMapping("/insertar-uuid")
+    public ResponseEntity<Map<String, Object>> insertarUuid(@RequestBody Map<String, Object> req) {
+        String uuid = req.get("uuid") != null ? String.valueOf(req.get("uuid")) : java.util.UUID.randomUUID().toString();
+        String rfcReceptor = req.get("rfcReceptor") != null ? String.valueOf(req.get("rfcReceptor")) : "R";
+        String rfcEmisor = req.get("rfcEmisor") != null ? String.valueOf(req.get("rfcEmisor")) : "R";
+        String serie = req.get("serie") != null ? String.valueOf(req.get("serie")) : "PR";
+        String folio = req.get("folio") != null ? String.valueOf(req.get("folio")) : "1";
+        java.math.BigDecimal subtotal = new java.math.BigDecimal(String.valueOf(req.getOrDefault("subtotal", "100.00")));
+        java.math.BigDecimal iva = new java.math.BigDecimal(String.valueOf(req.getOrDefault("iva", "16.00")));
+        java.math.BigDecimal ieps = new java.math.BigDecimal(String.valueOf(req.getOrDefault("ieps", "0.00")));
+        java.math.BigDecimal total = new java.math.BigDecimal(String.valueOf(req.getOrDefault("total", "116.00")));
+        String formaPago = req.get("formaPago") != null ? String.valueOf(req.get("formaPago")) : "03";
+        String usoCfdi = req.get("usoCfdi") != null ? String.valueOf(req.get("usoCfdi")) : "G03";
+        String estado = req.get("estado") != null ? String.valueOf(req.get("estado")) : "TIMBRADA";
+        String estadoDescripcion = req.get("estadoDescripcion") != null ? String.valueOf(req.get("estadoDescripcion")) : "VIGENTE";
+        String medioPago = req.get("medioPago") != null ? String.valueOf(req.get("medioPago")) : "PUE";
+
+        String xml = "<cfdi:Comprobante Serie='" + serie + "' Folio='" + folio + "' SubTotal='" + subtotal + "' Total='" + total + "' MetodoPago='" + medioPago + "' FormaPago='" + formaPago + "' xmlns:cfdi='http://www.sat.gob.mx/cfd/4'>" +
+                "<cfdi:Receptor Rfc='" + rfcReceptor + "' UsoCFDI='" + usoCfdi + "'/></cfdi:Comprobante>";
+        boolean ok = false;
+        boolean oracleOk = false;
+        try {
+            ok = uuidFacturaOracleDAO.insertarBasico(
+                    uuid,
+                    xml,
+                    serie,
+                    folio,
+                    subtotal,
+                    iva,
+                    ieps,
+                    total,
+                    formaPago,
+                    usoCfdi,
+                    estado,
+                    estadoDescripcion,
+                    medioPago,
+                    rfcReceptor,
+                    rfcEmisor
+            );
+            oracleOk = ok;
+        } catch (Exception e) {
+            logger.warn("Fallo insertando en Oracle para UUID {}: {}", uuid, e.getMessage());
+        }
+
+        if (!ok) {
+            try {
+                com.cibercom.facturacion_back.model.FacturaMongo fm = new com.cibercom.facturacion_back.model.FacturaMongo();
+                fm.setUuid(uuid);
+                fm.setXmlContent(xml);
+                fm.setSerie(serie);
+                fm.setFolio(folio);
+                fm.setSubtotal(subtotal);
+                fm.setIva(iva);
+                fm.setTotal(total);
+                fm.setEstado("0");
+                fm.setEstadoDescripcion(estadoDescripcion);
+                facturaMongoRepository.save(fm);
+                ok = true;
+            } catch (Exception e) {
+                logger.error("Fallo insertando en Mongo para UUID {}: {}", uuid, e.getMessage());
+            }
+        }
+
+        Map<String, Object> resp = new HashMap<>();
+        resp.put("exitoso", ok);
+        resp.put("uuid", uuid);
+        resp.put("origen", oracleOk ? "oracle" : "mongo");
+        resp.put("mensaje", ok ? "Insertado correctamente" : "No fue posible insertar en Oracle ni en Mongo");
+        if (!oracleOk) {
+            resp.put("oracleError", uuidFacturaOracleDAO.getLastInsertError());
+        }
+        return ok ? ResponseEntity.ok(resp) : ResponseEntity.status(500).body(resp);
+    }
+
+// Nuevo endpoint: consulta CFDI por UUID con validaciones y extracción por tipo
+@GetMapping("/consultar-uuid")
+public ResponseEntity<CfdiConsultaResponse> consultarPorUuid(
+        @RequestParam String uuid,
+        @RequestParam(required = false) String rfcReceptor,
+        @RequestParam(defaultValue = "I") String tipo) {
+    logger.info("Consulta CFDI por UUID: {} tipo: {}", uuid, tipo);
+    try {
+        String activeProfile = environment.getActiveProfiles().length > 0 ? environment.getActiveProfiles()[0] : "oracle";
+
+        String xmlContent = null;
+        String estadoCodigo = null;
+        String estadoDescripcion = null;
+        String serie = null;
+        String folio = null;
+        java.math.BigDecimal subtotalDb = null;
+        java.math.BigDecimal ivaDb = null;
+        java.math.BigDecimal totalDb = null;
+        String metodoPagoDb = null;
+        String formaPagoDb = null;
+        String usoCfdiDb = null;
+        java.math.BigDecimal descuentoDb = null;
+        java.math.BigDecimal iepsDb = null;
+        // Desgloses desde BD si existen
+        java.math.BigDecimal iva16Db = null;
+        java.math.BigDecimal iva8Db = null;
+        java.math.BigDecimal iva0Db = null;
+        java.math.BigDecimal ivaExentoDb = null;
+        java.math.BigDecimal ieps26Db = null;
+        java.math.BigDecimal ieps160Db = null;
+        java.math.BigDecimal ieps8Db = null;
+        java.math.BigDecimal ieps30Db = null;
+        java.math.BigDecimal ieps304Db = null;
+        java.math.BigDecimal ieps7Db = null;
+        java.math.BigDecimal ieps53Db = null;
+        java.math.BigDecimal ieps25Db = null;
+        java.math.BigDecimal ieps6Db = null;
+        java.math.BigDecimal ieps50Db = null;
+        java.math.BigDecimal ieps9Db = null;
+        java.math.BigDecimal ieps3Db = null;
+        java.math.BigDecimal ieps43Db = null;
+
+        // Intentar primero en Oracle; si no existe, caer a Mongo
+        java.util.Optional<com.cibercom.facturacion_back.dao.UuidFacturaOracleDAO.Result> opt = java.util.Optional.empty();
+        try {
+            opt = uuidFacturaOracleDAO.obtenerBasicosPorUuid(uuid);
+        } catch (Exception e) {
+            logger.warn("Fallo consultando Oracle por UUID {}: {}", uuid, e.getMessage());
+        }
+        if (opt.isPresent()) {
+            com.cibercom.facturacion_back.dao.UuidFacturaOracleDAO.Result r = opt.get();
+            xmlContent = r.xmlContent;
+            estadoCodigo = r.estadoCodigo;
+            estadoDescripcion = r.estadoDescripcion;
+            serie = r.serie;
+            folio = r.folio;
+            subtotalDb = r.subtotal;
+            ivaDb = r.iva;
+            totalDb = r.total;
+            metodoPagoDb = r.metodoPago;
+            formaPagoDb = r.formaPago;
+            usoCfdiDb = r.usoCfdi;
+            descuentoDb = r.descuento;
+            iepsDb = r.ieps;
+            // Desgloses
+            iva16Db = r.iva16;
+            iva8Db = r.iva8;
+            iva0Db = r.iva0;
+            ivaExentoDb = r.ivaExento;
+            ieps26Db = r.ieps26;
+            ieps160Db = r.ieps160;
+            ieps8Db = r.ieps8;
+            ieps30Db = r.ieps30;
+            ieps304Db = r.ieps304;
+            ieps7Db = r.ieps7;
+            ieps53Db = r.ieps53;
+            ieps25Db = r.ieps25;
+            ieps6Db = r.ieps6;
+            ieps50Db = r.ieps50;
+            ieps9Db = r.ieps9;
+            ieps3Db = r.ieps3;
+            ieps43Db = r.ieps43;
+        } else {
+            com.cibercom.facturacion_back.model.FacturaMongo fm = null;
+            try {
+                fm = facturaMongoRepository.findByUuid(uuid);
+            } catch (Exception e) {
+                logger.warn("Fallo consultando Mongo por UUID {}: {}", uuid, e.getMessage());
+            }
+            if (fm == null) {
+                return ResponseEntity.ok(CfdiConsultaResponse.builder()
+                        .exitoso(false)
+                        .mensaje("UUID no encontrado")
+                        .uuid(uuid)
+                        .estado("DESCONOCIDO")
+                        .build());
+            }
+            xmlContent = fm.getXmlContent();
+            estadoCodigo = fm.getEstado();
+            estadoDescripcion = fm.getEstadoDescripcion();
+            serie = fm.getSerie();
+            folio = fm.getFolio();
+            subtotalDb = fm.getSubtotal();
+            ivaDb = fm.getIva();
+            totalDb = fm.getTotal();
+        }
+
+        if (xmlContent == null || xmlContent.isEmpty()) {
+            return ResponseEntity.ok(CfdiConsultaResponse.builder()
+                    .exitoso(false)
+                    .mensaje("XML no disponible para el UUID")
+                    .uuid(uuid)
+                    .estado("DESCONOCIDO")
+                    .build());
+        }
+
+        String estadoMsg = obtenerMensajeEstado(estadoCodigo);
+        String estado = (estadoDescripcion != null && !estadoDescripcion.isEmpty()) ? estadoDescripcion : estadoMsg;
+        boolean cancelado = estado != null && estado.toUpperCase().contains("CANCEL");
+
+        // RFC Receptor desde XML
+        String rfcXml = cfdiXmlParserService.parseRfcReceptor(xmlContent);
+        if (rfcReceptor != null && !rfcReceptor.isEmpty()) {
+            if (rfcXml == null || !rfcXml.equalsIgnoreCase(rfcReceptor)) {
+                return ResponseEntity.ok(CfdiConsultaResponse.builder()
+                        .exitoso(false)
+                        .mensaje("El RFC receptor no coincide con el CFDI consultado")
+                        .uuid(uuid)
+                        .estado(estado != null ? estado : "DESCONOCIDO")
+                        .rfcReceptor(rfcXml)
+                        .build());
+            }
+        }
+
+        // Datos básicos
+        CfdiConsultaResponse.Basicos basicos = cfdiXmlParserService.parseBasicos(xmlContent);
+        // Fallback serie/folio y totales desde BD si el XML no los trae
+        if (basicos.getSerie() == null) basicos.setSerie(serie);
+        if (basicos.getFolio() == null) basicos.setFolio(folio);
+        if (basicos.getSubtotal() == null) basicos.setSubtotal(subtotalDb);
+        if (basicos.getDescuento() == null) basicos.setDescuento(descuentoDb);
+        if (basicos.getIva() == null) basicos.setIva(ivaDb);
+        if (basicos.getIeps() == null) basicos.setIeps(iepsDb);
+        if (basicos.getTotal() == null) basicos.setTotal(totalDb);
+        if (basicos.getMetodoPago() == null) basicos.setMetodoPago(metodoPagoDb);
+        if (basicos.getFormaPago() == null) basicos.setFormaPago(formaPagoDb);
+        if (basicos.getUsoCfdi() == null) basicos.setUsoCfdi(usoCfdiDb);
+
+        // Relacionados (para I/E y también útil si fue sustituido)
+        CfdiConsultaResponse.Relacionados relacionados = cfdiXmlParserService.parseRelacionados(xmlContent);
+
+        // Complemento de pago (sólo si tipo=P)
+        CfdiConsultaResponse.Pago pago = null;
+        if ("P".equalsIgnoreCase(tipo)) {
+            pago = cfdiXmlParserService.parseComplementoPago(xmlContent);
+        }
+
+        return ResponseEntity.ok(CfdiConsultaResponse.builder()
+                .exitoso(!cancelado)
+                .mensaje(cancelado ? "CFDI cancelado" : "CFDI vigente")
+                .uuid(uuid)
+                .estado(estado != null ? estado : (cancelado ? "CANCELADO" : "VIGENTE"))
+                .rfcReceptor(rfcXml)
+                .basicos(basicos)
+                .relacionados(relacionados)
+                .pago(pago)
+                .build());
+
+    } catch (Exception e) {
+        logger.error("Error consultando CFDI por UUID {}", uuid, e);
+        return ResponseEntity.internalServerError().body(
+                CfdiConsultaResponse.builder()
+                        .exitoso(false)
+                        .mensaje("Error interno: " + e.getMessage())
+                        .uuid(uuid)
+                        .estado("ERROR")
+                        .build()
+        );
+    }
+}
+
+    private String obtenerMensajeEstado(String estadoCodigo) {
+        if (estadoCodigo == null || estadoCodigo.trim().isEmpty()) {
+            return "DESCONOCIDO";
+        }
+        String codigo = estadoCodigo.trim();
+        // Intentar por código numérico
+        try {
+            com.cibercom.facturacion_back.model.EstadoFactura estado = com.cibercom.facturacion_back.model.EstadoFactura.fromCodigo(codigo);
+            return estado.getDescripcion();
+        } catch (IllegalArgumentException ignored) { }
+        // Intentar por descripción exacta
+        try {
+            com.cibercom.facturacion_back.model.EstadoFactura estado = com.cibercom.facturacion_back.model.EstadoFactura.fromDescripcion(codigo);
+            return estado.getDescripcion();
+        } catch (IllegalArgumentException ignored) { }
+        // Normalizar algunas variantes comunes
+        String upper = codigo.toUpperCase();
+        switch (upper) {
+            case "VIGENTE":
+                return "VIGENTE";
+            case "CANCELADA":
+                return "CANCELADA";
+            case "ACTIVA":
+                return "EMITIDA";
+            case "EMITIDA":
+                return "EMITIDA";
+            case "EN PROCESO DE CANCELACION":
+                return "EN PROCESO DE CANCELACION";
+            case "EN PROCESO DE EMISION":
+            case "EN PROCESO EMISION":
+                return "EN PROCESO DE EMISION";
+            case "CANCELADA EN SAT":
+                return "CANCELADA EN SAT";
+            case "EN ESPERA DE CANCELACION BOLETA QUE SUSTITUYE":
+                return "EN ESPERA DE CANCELACION BOLETA QUE SUSTITUYE";
+            default:
+                // Retornar tal cual para que el flujo no falle; el consumo downstream maneja cancelado por substring
+                return codigo;
+    }
+}
+
+    // Preview de factura global por fecha y tienda
+    @PostMapping("/global/preview")
+    public ResponseEntity<com.cibercom.facturacion_back.dto.FacturaGlobalPreviewResponse> previewFacturaGlobal(
+            @RequestBody com.cibercom.facturacion_back.dto.FacturaGlobalPreviewRequest request) {
+        try {
+            if (facturacionGlobalService == null) {
+                return ResponseEntity.badRequest().build();
+            }
+            var resp = facturacionGlobalService.preview(request);
+            return ResponseEntity.ok(resp);
+        } catch (Exception e) {
+            logger.error("Error en preview de factura global: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    // Consulta combinada de facturas, tickets y carta porte por periodo
+    @PostMapping("/global/consulta")
+    public ResponseEntity<com.cibercom.facturacion_back.dto.FacturaGlobalConsultaResponse> consultarFacturaGlobal(
+            @RequestBody com.cibercom.facturacion_back.dto.FacturaGlobalConsultaRequest request) {
+        try {
+            if (facturacionGlobalService == null) {
+                return ResponseEntity.badRequest().build();
+            }
+            var resp = facturacionGlobalService.consulta(request);
+            return ResponseEntity.ok(resp);
+        } catch (Exception e) {
+            logger.error("Error en consulta de factura global: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().build();
+        }
     }
 }

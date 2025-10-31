@@ -389,144 +389,28 @@ public class FormatoCorreoService {
             return contenido;
         }
         
+        // Generar estilos CSS personalizados según la configuración
         String estilos = generarEstilosCSS(configuracion);
         
-        // Si el contenido ya tiene etiquetas HTML completas
-        if (contenido.toLowerCase().contains("<html") && contenido.toLowerCase().contains("<body")) {
-            // Insertar estilos en el body existente
-            return contenido.replaceFirst("(<body[^>]*>)", "$1<div style=\"" + estilos + "\">")
-                           .replaceFirst("(</body>)", "</div>$1");
-        } else if (contenido.toLowerCase().contains("<div") || contenido.toLowerCase().contains("<p") || 
-                   contenido.toLowerCase().contains("<span") || contenido.toLowerCase().contains("<br")) {
-            // Si ya tiene algunas etiquetas HTML, envolver en div con estilos
-            return "<div style=\"" + estilos + "\">" + contenido + "</div>";
-        } else {
-            // Si es texto plano, crear HTML completo con estilos
-            StringBuilder htmlCompleto = new StringBuilder();
-            htmlCompleto.append("<!DOCTYPE html>");
-            htmlCompleto.append("<html>");
-            htmlCompleto.append("<head>");
-            htmlCompleto.append("<meta charset=\"UTF-8\">");
-            htmlCompleto.append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">");
-            htmlCompleto.append("<style>");
-            htmlCompleto.append("body { font-family: Arial, sans-serif; line-height: 1.6; margin: 0; padding: 0; background-color: #f5f5f5; }");
-            htmlCompleto.append(".email-container { max-width: 600px; margin: 0 auto; padding: 0; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }");
-            htmlCompleto.append(".email-header { background-color: #0052cc; color: white; padding: 20px; text-align: center; }");
-            htmlCompleto.append(".email-content { padding: 30px; background-color: #ffffff; }");
-            htmlCompleto.append(".email-content strong { color: #0052cc; }");
-            htmlCompleto.append(".email-content p { margin-bottom: 15px; }");
-            htmlCompleto.append(".email-content br { line-height: 2; }");
-            htmlCompleto.append(".email-footer { text-align: center; font-size: 12px; color: #666; margin-top: 20px; padding: 15px; background-color: #f9f9f9; border-top: 1px solid #eee; }");
-            htmlCompleto.append("</style>");
-            htmlCompleto.append("</head>");
-            htmlCompleto.append("<body>");
-            htmlCompleto.append("<div class=\"email-container\">");
-            htmlCompleto.append("<div class=\"email-header\"><h1>Facturación Cibercom</h1></div>");
-            htmlCompleto.append("<div class=\"email-content\">");
-            htmlCompleto.append("<div style=\"").append(estilos).append("\">");
-            
-            // Formatear el contenido para que coincida exactamente con la segunda imagen de ejemplo
-            String contenidoOriginal = contenido;
-            
-            // Aplicar formato HTML con tabla para separar claramente cada elemento
-            StringBuilder formateado = new StringBuilder();
-            
-            // Iniciar tabla con estilo para separación clara
-            formateado.append("<table style=\"width:100%; border-collapse: separate; border-spacing: 0 15px;\">");
-            
-            // Saludo inicial
-            Pattern saludoPattern = Pattern.compile("Estimado\\(a\\)\\s+cliente,");
-            Matcher saludoMatcher = saludoPattern.matcher(contenidoOriginal);
-            if (saludoMatcher.find()) {
-                formateado.append("<tr><td style=\"padding: 10px 0;\">")
-                         .append(saludoMatcher.group().trim())
-                         .append("</td></tr>");
-            }
-            
-            // Asunto
-            Pattern asuntoPattern = Pattern.compile("Asunto:\\s*[^<\\n]+");
-            Matcher asuntoMatcher = asuntoPattern.matcher(contenidoOriginal);
-            if (asuntoMatcher.find()) {
-                formateado.append("<tr><td style=\"padding: 10px 0;\">")
-                         .append(asuntoMatcher.group().trim())
-                         .append("</td></tr>");
-            }
-            
-            // Introducción
-            Pattern introPattern = Pattern.compile("Estimado\\s+cliente,\\s+Se\\s+ha\\s+generado[^<\\n]*datos:");
-            Matcher introMatcher = introPattern.matcher(contenidoOriginal);
-            if (introMatcher.find()) {
-                formateado.append("<tr><td style=\"padding: 10px 0;\">")
-                         .append(introMatcher.group().trim())
-                         .append("</td></tr>");
-            }
-            
-            // Serie de la factura
-            Pattern seriePattern = Pattern.compile("Serie\\s+de\\s+la\\s+factura:\\s*[^<\\n]+");
-            Matcher serieMatcher = seriePattern.matcher(contenidoOriginal);
-            if (serieMatcher.find()) {
-                formateado.append("<tr><td style=\"padding: 10px 0;\">")
-                         .append(serieMatcher.group().trim())
-                         .append("</td></tr>");
-            }
-            
-            // Folio de la factura
-            Pattern folioPattern = Pattern.compile("Folio\\s+de\\s+la\\s+factura:\\s*[^<\\n]+");
-            Matcher folioMatcher = folioPattern.matcher(contenidoOriginal);
-            if (folioMatcher.find()) {
-                formateado.append("<tr><td style=\"padding: 10px 0;\">")
-                         .append(folioMatcher.group().trim())
-                         .append("</td></tr>");
-            }
-            
-            // UUID de la factura
-            Pattern uuidPattern = Pattern.compile("UUID\\s+de\\s+la\\s+factura:\\s*[^<\\n]+");
-            Matcher uuidMatcher = uuidPattern.matcher(contenidoOriginal);
-            if (uuidMatcher.find()) {
-                formateado.append("<tr><td style=\"padding: 10px 0;\">")
-                         .append(uuidMatcher.group().trim())
-                         .append("</td></tr>");
-            }
-            
-            // RFC del receptor
-            Pattern rfcPattern = Pattern.compile("RFC\\s+del\\s+receptor:\\s*[^<\\n]+");
-            Matcher rfcMatcher = rfcPattern.matcher(contenidoOriginal);
-            if (rfcMatcher.find()) {
-                formateado.append("<tr><td style=\"padding: 10px 0;\">")
-                         .append(rfcMatcher.group().trim())
-                         .append("</td></tr>");
-            }
-            
-            // Patrón para extraer texto adicional (si existe)
-            Pattern adicionalPattern = Pattern.compile("hhhhh[^<\\n]*");
-            Matcher adicionalMatcher = adicionalPattern.matcher(contenidoOriginal);
-            if (adicionalMatcher.find()) {
-                formateado.append("<tr><td style=\"padding: 10px 0;\">")
-                         .append(adicionalMatcher.group().trim())
-                         .append("</td></tr>");
-            }
-            
-            // Agregar la firma al final del mensaje
-            formateado.append("<tr><td style=\"padding: 10px 0; margin-top: 20px;\">")
-                     .append("Atentamente,<br>")
-                     .append("Equipo de Facturación Cibercom")
-                     .append("</td></tr>");
-                     
-            // Cerrar la tabla
-            formateado.append("</table>");
-            
-            // Contenido formateado final
-            String contenidoFormateado = formateado.toString();
-            
-            htmlCompleto.append(contenidoFormateado);
-            htmlCompleto.append("</div>");
-            htmlCompleto.append("</div>"); // Cierre de email-content
-            htmlCompleto.append("<div class=\"email-footer\">Este es un correo automático, por favor no responda a este mensaje.<br>© 2023 Cibercom. Todos los derechos reservados.</div>");
-            htmlCompleto.append("</div>"); // Cierre de email-container
-            htmlCompleto.append("</body>");
-            htmlCompleto.append("</html>");
-            return htmlCompleto.toString();
-        }
+        // Determinar color para el encabezado (fallback al azul por defecto)
+        String headerColor = (configuracion != null && configuracion.getColorTexto() != null && !configuracion.getColorTexto().trim().isEmpty()) 
+            ? configuracion.getColorTexto().trim() 
+            : "#0056b3";
+        
+        // Inyectar un bloque de estilo para sobrescribir el color del header de la plantilla
+        contenido = contenido.replaceFirst(
+            "</head>",
+            "<style>.header { background-color: " + headerColor + "; }</style></head>"
+        );
+        
+        // Insertar estilos en el body principal
+        contenido = contenido.replaceFirst(
+            "<body([^>]*)>",
+            "<body$1 style=\"" + estilos + "\">"
+        );
+        
+        logger.info("Plantilla HTML cargada y procesada exitosamente con estilos personalizados");
+        return contenido;
     }
     
     /**
@@ -628,6 +512,18 @@ public class FormatoCorreoService {
 
             // Generar estilos CSS personalizados según la configuración
             String estilos = generarEstilosCSS(configuracion);
+            
+            // Determinar color para el encabezado (fallback al azul por defecto)
+            String headerColor = (configuracion != null && configuracion.getColorTexto() != null && !configuracion.getColorTexto().trim().isEmpty()) 
+                ? configuracion.getColorTexto().trim() 
+                : "#0056b3";
+            
+            // Inyectar un bloque de estilo para sobrescribir el color del header de la plantilla
+            contenido = contenido.replaceFirst(
+                "</head>",
+                "<style>.header { background-color: " + headerColor + "; }</style></head>"
+            );
+            
             // Insertar estilos en el body principal
             contenido = contenido.replaceFirst(
                 "<body([^>]*)>",

@@ -45,4 +45,26 @@ public class FacturaFrontendRequest {
     private Boolean iepsDesglosado;
 
     private Boolean guardarEnMongo;
+
+    // Getters explícitos para asegurar compilación
+    public String getRfc() { return rfc; }
+    public String getCorreoElectronico() { return correoElectronico; }
+    public String getRazonSocial() { return razonSocial; }
+    public String getNombre() { return nombre; }
+    public String getPaterno() { return paterno; }
+    public String getMaterno() { return materno; }
+    public String getPais() { return pais; }
+    public String getNoRegistroIdentidadTributaria() { return noRegistroIdentidadTributaria; }
+    public String getDomicilioFiscal() { return domicilioFiscal; }
+    public String getRegimenFiscal() { return regimenFiscal; }
+    public String getUsoCfdi() { return usoCfdi; }
+    public String getCodigoFacturacion() { return codigoFacturacion; }
+    public String getTienda() { return tienda; }
+    public LocalDate getFecha() { return fecha; }
+    public String getTerminal() { return terminal; }
+    public String getBoleta() { return boleta; }
+    public String getMedioPago() { return medioPago; }
+    public String getFormaPago() { return formaPago; }
+    public Boolean getIepsDesglosado() { return iepsDesglosado; }
+    public Boolean getGuardarEnMongo() { return guardarEnMongo; }
 }

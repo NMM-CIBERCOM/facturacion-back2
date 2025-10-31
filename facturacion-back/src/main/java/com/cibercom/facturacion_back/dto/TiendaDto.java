@@ -73,4 +73,65 @@ public class TiendaDto {
     private String usuarioModificacion;
 
     private String observaciones;
+
+    // Getters y setters explícitos para compatibilidad si Lombok falla
+    public Long getIdTienda() { return idTienda; }
+    public void setIdTienda(Long idTienda) { this.idTienda = idTienda; }
+
+    public String getCodigoTienda() { return codigoTienda; }
+    public void setCodigoTienda(String codigoTienda) { this.codigoTienda = codigoTienda; }
+
+    public String getNombreTienda() { return nombreTienda; }
+    public void setNombreTienda(String nombreTienda) { this.nombreTienda = nombreTienda; }
+
+    public String getDireccion() { return direccion; }
+    public void setDireccion(String direccion) { this.direccion = direccion; }
+
+    public String getCiudad() { return ciudad; }
+    public void setCiudad(String ciudad) { this.ciudad = ciudad; }
+
+    public String getEstado() { return estado; }
+    public void setEstado(String estado) { this.estado = estado; }
+
+    public String getCodigoPostal() { return codigoPostal; }
+    public void setCodigoPostal(String codigoPostal) { this.codigoPostal = codigoPostal; }
+
+    public String getTelefono() { return telefono; }
+    public void setTelefono(String telefono) { this.telefono = telefono; }
+
+    public String getEmail() { return email; }
+    public void setEmail(String email) { this.email = email; }
+
+    public String getGerente() { return gerente; }
+    public void setGerente(String gerente) { this.gerente = gerente; }
+
+    public String getRegion() { return region; }
+    public void setRegion(String region) { this.region = region; }
+
+    public String getZona() { return zona; }
+    public void setZona(String zona) { this.zona = zona; }
+
+    public String getTipoTienda() { return tipoTienda; }
+    public void setTipoTienda(String tipoTienda) { this.tipoTienda = tipoTienda; }
+
+    public String getEstadoTienda() { return estadoTienda; }
+    public void setEstadoTienda(String estadoTienda) { this.estadoTienda = estadoTienda; }
+
+    public java.time.LocalDate getFechaApertura() { return fechaApertura; }
+    public void setFechaApertura(java.time.LocalDate fechaApertura) { this.fechaApertura = fechaApertura; }
+
+    public java.time.LocalDateTime getFechaCreacion() { return fechaCreacion; }
+    public void setFechaCreacion(java.time.LocalDateTime fechaCreacion) { this.fechaCreacion = fechaCreacion; }
+
+    public java.time.LocalDateTime getFechaModificacion() { return fechaModificacion; }
+    public void setFechaModificacion(java.time.LocalDateTime fechaModificacion) { this.fechaModificacion = fechaModificacion; }
+
+    public String getUsuarioCreacion() { return usuarioCreacion; }
+    public void setUsuarioCreacion(String usuarioCreacion) { this.usuarioCreacion = usuarioCreacion; }
+
+    public String getUsuarioModificacion() { return usuarioModificacion; }
+    public void setUsuarioModificacion(String usuarioModificacion) { this.usuarioModificacion = usuarioModificacion; }
+
+    public String getObservaciones() { return observaciones; }
+    public void setObservaciones(String observaciones) { this.observaciones = observaciones; }
 }

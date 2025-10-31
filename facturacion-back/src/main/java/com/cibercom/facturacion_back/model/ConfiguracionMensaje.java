@@ -95,4 +95,32 @@ public class ConfiguracionMensaje {
     protected void onUpdate() {
         fechaModificacion = new Date();
     }
+
+    // Getters explícitos para compatibilidad si falla Lombok
+    public Long getIdConfiguracion() { return idConfiguracion; }
+    public String getTipoFuente() { return tipoFuente; }
+    public Integer getTamanoFuente() { return tamanoFuente; }
+    public String getEsCursiva() { return esCursiva; }
+    public String getEsSubrayado() { return esSubrayado; }
+    public String getColorTexto() { return colorTexto; }
+    public String getMensajeSeleccionado() { return mensajeSeleccionado; }
+    public String getTipoMensaje() { return tipoMensaje; }
+    public String getAsuntoPersonalizado() { return asuntoPersonalizado; }
+    public String getMensajePersonalizado() { return mensajePersonalizado; }
+    public String getActivo() { return activo; }
+    public String getUsuarioCreacion() { return usuarioCreacion; }
+
+    // Setters explícitos usados por servicios
+    public void setMensajeSeleccionado(String mensajeSeleccionado) { this.mensajeSeleccionado = mensajeSeleccionado; }
+    public void setTipoMensaje(String tipoMensaje) { this.tipoMensaje = tipoMensaje; }
+    public void setActivo(String activo) { this.activo = activo; }
+    public void setUsuarioCreacion(String usuarioCreacion) { this.usuarioCreacion = usuarioCreacion; }
+    public void setAsuntoPersonalizado(String asuntoPersonalizado) { this.asuntoPersonalizado = asuntoPersonalizado; }
+    public void setMensajePersonalizado(String mensajePersonalizado) { this.mensajePersonalizado = mensajePersonalizado; }
+
+    public void setTipoFuente(String tipoFuente) { this.tipoFuente = tipoFuente; }
+    public void setTamanoFuente(Integer tamanoFuente) { this.tamanoFuente = tamanoFuente; }
+    public void setEsCursiva(String esCursiva) { this.esCursiva = esCursiva; }
+    public void setEsSubrayado(String esSubrayado) { this.esSubrayado = esSubrayado; }
+    public void setColorTexto(String colorTexto) { this.colorTexto = colorTexto; }
 }

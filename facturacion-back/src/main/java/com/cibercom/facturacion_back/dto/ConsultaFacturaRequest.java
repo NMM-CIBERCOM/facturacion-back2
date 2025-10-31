@@ -59,6 +59,64 @@ public class ConsultaFacturaRequest {
         return s != null && !s.trim().isEmpty(); 
     }
 
+    // Getters/Setters explícitos para confiabilidad si Lombok no está activo
+    public String getRfcReceptor() { return rfcReceptor; }
+    public void setRfcReceptor(String rfcReceptor) { this.rfcReceptor = rfcReceptor; }
+
+    public String getNombreCliente() { return nombreCliente; }
+    public void setNombreCliente(String nombreCliente) { this.nombreCliente = nombreCliente; }
+
+    public String getApellidoPaterno() { return apellidoPaterno; }
+    public void setApellidoPaterno(String apellidoPaterno) { this.apellidoPaterno = apellidoPaterno; }
+
+    public String getApellidoMaterno() { return apellidoMaterno; }
+    public void setApellidoMaterno(String apellidoMaterno) { this.apellidoMaterno = apellidoMaterno; }
+
+    public String getRazonSocial() { return razonSocial; }
+    public void setRazonSocial(String razonSocial) { this.razonSocial = razonSocial; }
+
+    public String getAlmacen() { return almacen; }
+    public void setAlmacen(String almacen) { this.almacen = almacen; }
+
+    public String getUsuario() { return usuario; }
+    public void setUsuario(String usuario) { this.usuario = usuario; }
+
+    public String getSerie() { return serie; }
+    public void setSerie(String serie) { this.serie = serie; }
+
+    public String getFolio() { return folio; }
+    public void setFolio(String folio) { this.folio = folio; }
+
+    public String getUuid() { return uuid; }
+    public void setUuid(String uuid) { this.uuid = uuid; }
+
+    public LocalDate getFechaInicio() { return fechaInicio; }
+    public void setFechaInicio(LocalDate fechaInicio) { this.fechaInicio = fechaInicio; }
+
+    public LocalDate getFechaFin() { return fechaFin; }
+    public void setFechaFin(LocalDate fechaFin) { this.fechaFin = fechaFin; }
+
+    public String getTienda() { return tienda; }
+    public void setTienda(String tienda) { this.tienda = tienda; }
+
+    public String getTe() { return te; }
+    public void setTe(String te) { this.te = te; }
+
+    public String getTr() { return tr; }
+    public void setTr(String tr) { this.tr = tr; }
+
+    public LocalDate getFechaTienda() { return fechaTienda; }
+    public void setFechaTienda(LocalDate fechaTienda) { this.fechaTienda = fechaTienda; }
+
+    public String getCodigoFacturacion() { return codigoFacturacion; }
+    public void setCodigoFacturacion(String codigoFacturacion) { this.codigoFacturacion = codigoFacturacion; }
+
+    public String getMotivoSustitucion() { return motivoSustitucion; }
+    public void setMotivoSustitucion(String motivoSustitucion) { this.motivoSustitucion = motivoSustitucion; }
+
+    public String getPerfilUsuario() { return perfilUsuario; }
+    public void setPerfilUsuario(String perfilUsuario) { this.perfilUsuario = perfilUsuario; }
+
     @Override
     public String toString() {
         return "ConsultaFacturaRequest{" +

@@ -34,6 +34,9 @@ public interface FacturaMongoRepository extends MongoRepository<FacturaMongo, St
     List<FacturaMongo> findByEmisorRfcAndFechaGeneracionBetween(
             String emisorRfc, LocalDateTime fechaInicio, LocalDateTime fechaFin);
 
+    @Query("{'receptor.rfc': ?0}")
+    List<FacturaMongo> findByReceptorRfc(String receptorRfc);
+
     @Query("{'emisor.rfc': ?0, 'tienda': {$regex: ?1, $options: 'i'}, 'fechaGeneracion': {$gte: ?2, $lte: ?3}}")
     List<FacturaMongo> findFacturasByCriterios(
             String emisorRfc, String tienda, LocalDateTime fechaInicio, LocalDateTime fechaFin);
