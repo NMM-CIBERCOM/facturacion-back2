@@ -1,0 +1,49 @@
+-- Script para configurar y verificar 2FA para cualquier usuario
+-- Ejecutar en Oracle Database
+
+-- ==========================================
+-- CONFIGURAR Y VERIFICAR 2FA
+-- ==========================================
+
+-- 1. Verificar estado actual de 2FA para todos los usuarios
+SELECT 'ESTADO ACTUAL DE 2FA' AS INFO FROM DUAL;
+SELECT 
+    NO_USUARIO,
+    NOMBRE_EMPLEADO,
+    TWO_FACTOR_ENABLED,
+    TWO_FACTOR_SECRET,
+    CASE 
+        WHEN TWO_FACTOR_ENABLED = 'Y' THEN '✅ 2FA ACTIVO'
+        WHEN TWO_FACTOR_ENABLED = 'N' AND TWO_FACTOR_SECRET IS NOT NULL THEN '⚙️ PENDIENTE DE ACTIVAR'
+        ELSE '❌ 2FA NO CONFIGURADO'
+    END AS ESTADO_2FA
+FROM USUARIOS
+WHERE ESTATUS_USUARIO = 'A'
+ORDER BY NO_USUARIO;
+
+-- 2. Deshabilitar 2FA temporalmente para poder configurarlo de nuevo
+UPDATE USUARIOS 
+SET TWO_FACTOR_ENABLED = 'N',
+    TWO_FACTOR_SECRET = NULL
+WHERE NO_USUARIO = 'admin'
+AND ESTATUS_USUARIO = 'A';
+
+COMMIT;
+
+-- 3. Verificar que quedó deshabilitado
+SELECT 'VERIFICACIÓN POST-DESHABILITACIÓN' AS INFO FROM DUAL;
+SELECT 
+    NO_USUARIO,
+    NOMBRE_EMPLEADO,
+    TWO_FACTOR_ENABLED,
+    TWO_FACTOR_SECRET,
+    CASE 
+        WHEN TWO_FACTOR_ENABLED = 'Y' THEN '✅ 2FA ACTIVO'
+        WHEN TWO_FACTOR_ENABLED = 'N' AND TWO_FACTOR_SECRET IS NOT NULL THEN '⚙️ PENDIENTE DE ACTIVAR'
+        ELSE '❌ 2FA NO CONFIGURADO'
+    END AS ESTADO_2FA
+FROM USUARIOS
+WHERE NO_USUARIO = 'admin';
+
+-- Script completado
+SELECT '2FA RESETEADO - LISTO PARA CONFIGURAR DESDE BACKEND' AS RESULTADO FROM DUAL;

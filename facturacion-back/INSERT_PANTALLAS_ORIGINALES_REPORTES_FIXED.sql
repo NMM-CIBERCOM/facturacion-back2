@@ -1,0 +1,139 @@
+-- Script para insertar las 11 pantallas originales de Reportes Facturación Fiscal que faltan
+-- Versión corregida sin PARENT_ID
+
+-- 1. Insertar pantallas originales para Operador de Crédito (ID_PERFIL = 1)
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 1, 'Boletas No Auditadas', 'reportes-boletas-no-auditadas', 1, 1, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 1 AND MENU_LABEL = 'Boletas No Auditadas' AND MENU_PATH = 'reportes-boletas-no-auditadas');
+
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 1, 'Reporte Ingreso-Facturación', 'reportes-ingreso-facturacion', 1, 2, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 1 AND MENU_LABEL = 'Reporte Ingreso-Facturación' AND MENU_PATH = 'reportes-ingreso-facturacion');
+
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 1, 'Integración Factura Global', 'reportes-integracion-factura-global', 1, 3, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 1 AND MENU_LABEL = 'Integración Factura Global' AND MENU_PATH = 'reportes-integracion-factura-global');
+
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 1, 'Integración Clientes', 'reportes-integracion-clientes', 1, 4, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 1 AND MENU_LABEL = 'Integración Clientes' AND MENU_PATH = 'reportes-integracion-clientes');
+
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 1, 'Facturación clientes posterior a Global', 'reportes-facturacion-clientes-global', 1, 5, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 1 AND MENU_LABEL = 'Facturación clientes posterior a Global' AND MENU_PATH = 'reportes-facturacion-clientes-global');
+
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 1, 'Integración Sustitución CFDI', 'reportes-integracion-sustitucion-cfdi', 1, 6, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 1 AND MENU_LABEL = 'Integración Sustitución CFDI' AND MENU_PATH = 'reportes-integracion-sustitucion-cfdi');
+
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 1, 'Control de emisión de REP', 'reportes-control-emision-rep', 1, 7, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 1 AND MENU_LABEL = 'Control de emisión de REP' AND MENU_PATH = 'reportes-control-emision-rep');
+
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 1, 'Reportes REPgcp', 'reportes-repgcp', 1, 8, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 1 AND MENU_LABEL = 'Reportes REPgcp' AND MENU_PATH = 'reportes-repgcp');
+
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 1, 'Control de cambios', 'reportes-control-cambios', 1, 9, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 1 AND MENU_LABEL = 'Control de cambios' AND MENU_PATH = 'reportes-control-cambios');
+
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 1, 'Conciliación', 'reportes-conciliacion', 1, 10, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 1 AND MENU_LABEL = 'Conciliación' AND MENU_PATH = 'reportes-conciliacion');
+
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 1, 'REPs Sustituidos (Fiscal)', 'reportes-fiscales-reps-sustituidos', 1, 11, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 1 AND MENU_LABEL = 'REPs Sustituidos (Fiscal)' AND MENU_PATH = 'reportes-fiscales-reps-sustituidos');
+
+-- 2. Insertar pantallas originales para Jefe de Crédito (ID_PERFIL = 2)
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 2, 'Boletas No Auditadas', 'reportes-boletas-no-auditadas', 1, 1, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 2 AND MENU_LABEL = 'Boletas No Auditadas' AND MENU_PATH = 'reportes-boletas-no-auditadas');
+
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 2, 'Reporte Ingreso-Facturación', 'reportes-ingreso-facturacion', 1, 2, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 2 AND MENU_LABEL = 'Reporte Ingreso-Facturación' AND MENU_PATH = 'reportes-ingreso-facturacion');
+
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 2, 'Integración Factura Global', 'reportes-integracion-factura-global', 1, 3, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 2 AND MENU_LABEL = 'Integración Factura Global' AND MENU_PATH = 'reportes-integracion-factura-global');
+
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 2, 'Integración Clientes', 'reportes-integracion-clientes', 1, 4, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 2 AND MENU_LABEL = 'Integración Clientes' AND MENU_PATH = 'reportes-integracion-clientes');
+
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 2, 'Facturación clientes posterior a Global', 'reportes-facturacion-clientes-global', 1, 5, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 2 AND MENU_LABEL = 'Facturación clientes posterior a Global' AND MENU_PATH = 'reportes-facturacion-clientes-global');
+
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 2, 'Integración Sustitución CFDI', 'reportes-integracion-sustitucion-cfdi', 1, 6, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 2 AND MENU_LABEL = 'Integración Sustitución CFDI' AND MENU_PATH = 'reportes-integracion-sustitucion-cfdi');
+
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 2, 'Control de emisión de REP', 'reportes-control-emision-rep', 1, 7, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 2 AND MENU_LABEL = 'Control de emisión de REP' AND MENU_PATH = 'reportes-control-emision-rep');
+
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 2, 'Reportes REPgcp', 'reportes-repgcp', 1, 8, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 2 AND MENU_LABEL = 'Reportes REPgcp' AND MENU_PATH = 'reportes-repgcp');
+
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 2, 'Control de cambios', 'reportes-control-cambios', 1, 9, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 2 AND MENU_LABEL = 'Control de cambios' AND MENU_PATH = 'reportes-control-cambios');
+
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 2, 'Conciliación', 'reportes-conciliacion', 1, 10, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 2 AND MENU_LABEL = 'Conciliación' AND MENU_PATH = 'reportes-conciliacion');
+
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 2, 'REPs Sustituidos (Fiscal)', 'reportes-fiscales-reps-sustituidos', 1, 11, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 2 AND MENU_LABEL = 'REPs Sustituidos (Fiscal)' AND MENU_PATH = 'reportes-fiscales-reps-sustituidos');
+
+-- 3. Insertar pantallas originales para Administrador (ID_PERFIL = 3)
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 3, 'Boletas No Auditadas', 'reportes-boletas-no-auditadas', 1, 1, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 3 AND MENU_LABEL = 'Boletas No Auditadas' AND MENU_PATH = 'reportes-boletas-no-auditadas');
+
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 3, 'Reporte Ingreso-Facturación', 'reportes-ingreso-facturacion', 1, 2, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 3 AND MENU_LABEL = 'Reporte Ingreso-Facturación' AND MENU_PATH = 'reportes-ingreso-facturacion');
+
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 3, 'Integración Factura Global', 'reportes-integracion-factura-global', 1, 3, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 3 AND MENU_LABEL = 'Integración Factura Global' AND MENU_PATH = 'reportes-integracion-factura-global');
+
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 3, 'Integración Clientes', 'reportes-integracion-clientes', 1, 4, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 3 AND MENU_LABEL = 'Integración Clientes' AND MENU_PATH = 'reportes-integracion-clientes');
+
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 3, 'Facturación clientes posterior a Global', 'reportes-facturacion-clientes-global', 1, 5, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 3 AND MENU_LABEL = 'Facturación clientes posterior a Global' AND MENU_PATH = 'reportes-facturacion-clientes-global');
+
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 3, 'Integración Sustitución CFDI', 'reportes-integracion-sustitucion-cfdi', 1, 6, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 3 AND MENU_LABEL = 'Integración Sustitución CFDI' AND MENU_PATH = 'reportes-integracion-sustitucion-cfdi');
+
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 3, 'Control de emisión de REP', 'reportes-control-emision-rep', 1, 7, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 3 AND MENU_LABEL = 'Control de emisión de REP' AND MENU_PATH = 'reportes-control-emision-rep');
+
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 3, 'Reportes REPgcp', 'reportes-repgcp', 1, 8, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 3 AND MENU_LABEL = 'Reportes REPgcp' AND MENU_PATH = 'reportes-repgcp');
+
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 3, 'Control de cambios', 'reportes-control-cambios', 1, 9, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 3 AND MENU_LABEL = 'Control de cambios' AND MENU_PATH = 'reportes-control-cambios');
+
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 3, 'Conciliación', 'reportes-conciliacion', 1, 10, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 3 AND MENU_LABEL = 'Conciliación' AND MENU_PATH = 'reportes-conciliacion');
+
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION)
+SELECT 3, 'REPs Sustituidos (Fiscal)', 'reportes-fiscales-reps-sustituidos', 1, 11, 'admin'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM MENU_CONFIG WHERE ID_PERFIL = 3 AND MENU_LABEL = 'REPs Sustituidos (Fiscal)' AND MENU_PATH = 'reportes-fiscales-reps-sustituidos');
+
+COMMIT;

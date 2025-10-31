@@ -131,4 +131,61 @@ public class FacturaMongo {
     public String getReceptorNombre() {
         return receptor != null ? (String) receptor.get("nombre") : null;
     }
+    
+    // Métodos explícitos para compatibilidad
+    public String getSerie() {
+        return serie;
+    }
+    
+    public void setSerie(String serie) {
+        this.serie = serie;
+    }
+    
+    public String getFolio() {
+        return folio;
+    }
+    
+    public void setFolio(String folio) {
+        this.folio = folio;
+    }
+    
+    public String getUuid() {
+        return uuid;
+    }
+    
+    public void setUuid(String uuid) {
+        this.uuid = uuid;
+    }
+    
+    public LocalDateTime getFechaTimbrado() {
+        return fechaTimbrado;
+    }
+    
+    public void setFechaTimbrado(LocalDateTime fechaTimbrado) {
+        this.fechaTimbrado = fechaTimbrado;
+    }
+    
+    public BigDecimal getTotal() {
+        return total;
+    }
+    
+    public void setTotal(BigDecimal total) {
+        this.total = total;
+    }
+    
+    public String getEstado() {
+        return estado;
+    }
+    
+    public void setEstado(String estado) {
+        this.estado = estado;
+    }
+    
+    public String getEstadoDescripcion() {
+        return estadoDescripcion;
+    }
+    
+    public void setEstadoDescripcion(String estadoDescripcion) {
+        this.estadoDescripcion = estadoDescripcion;
+    }
 }

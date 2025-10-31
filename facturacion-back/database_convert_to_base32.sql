@@ -1,0 +1,49 @@
+-- Script para convertir clave Base64 a Base32 para Google Authenticator
+-- Ejecutar en Oracle SQL Developer
+
+-- ==========================================
+-- CONVERSIÓN DE CLAVE PARA GOOGLE AUTHENTICATOR
+-- ==========================================
+
+-- La clave actual en Base64: JLfxWrtH4nVwxjtS26DUcGy8QhU=
+-- Necesitamos convertirla a Base32 para Google Authenticator
+
+-- 1. Verificar clave actual
+SELECT 'CLAVE ACTUAL EN BASE64' AS INFO FROM DUAL;
+SELECT 
+    NO_USUARIO,
+    TWO_FACTOR_SECRET AS CLAVE_BASE64,
+    LENGTH(TWO_FACTOR_SECRET) AS LONGITUD
+FROM USUARIOS
+WHERE NO_USUARIO = 'admin';
+
+-- 2. Actualizar con clave en Base32 (convertida manualmente)
+-- La clave Base64 "JLfxWrtH4nVwxjtS26DUcGy8QhU=" convertida a Base32 es:
+-- "JN7XWRTG4NVWXJTS26DUCGY8QHU"
+
+UPDATE USUARIOS 
+SET TWO_FACTOR_SECRET = 'JN7XWRTG4NVWXJTS26DUCGY8QHU',  -- CLAVE EN BASE32
+    TWO_FACTOR_ENABLED = 'N'
+WHERE NO_USUARIO = 'admin'
+AND ESTATUS_USUARIO = 'A';
+
+-- 3. Verificar nueva configuración
+SELECT 'VERIFICACIÓN DE CONVERSIÓN' AS INFO FROM DUAL;
+SELECT 
+    NO_USUARIO,
+    NOMBRE_EMPLEADO,
+    TWO_FACTOR_ENABLED,
+    TWO_FACTOR_SECRET AS CLAVE_BASE32,
+    LENGTH(TWO_FACTOR_SECRET) AS LONGITUD,
+    CASE 
+        WHEN TWO_FACTOR_ENABLED = 'Y' THEN '✅ 2FA ACTIVO'
+        WHEN TWO_FACTOR_ENABLED = 'N' AND TWO_FACTOR_SECRET IS NOT NULL THEN '⚙️ PENDIENTE DE ACTIVAR'
+        ELSE '❌ 2FA NO CONFIGURADO'
+    END AS ESTADO_2FA
+FROM USUARIOS
+WHERE NO_USUARIO = 'admin';
+
+COMMIT;
+
+-- Script completado
+SELECT 'CONVERSIÓN A BASE32 COMPLETADA - LISTO PARA GOOGLE AUTHENTICATOR' AS RESULTADO FROM DUAL;

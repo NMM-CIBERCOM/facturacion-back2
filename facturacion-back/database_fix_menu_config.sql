@@ -1,0 +1,181 @@
+-- Script para corregir configuración de menús
+-- Ejecutar en Oracle Database
+
+-- ==========================================
+-- CORREGIR CONFIGURACIÓN DE MENÚS
+-- ==========================================
+
+-- 1. Verificar estructura de tabla MENU_CONFIG
+SELECT 'ESTRUCTURA DE TABLA MENU_CONFIG' AS INFO FROM DUAL;
+SELECT 
+    COLUMN_NAME,
+    DATA_TYPE,
+    DATA_LENGTH,
+    NULLABLE,
+    DATA_DEFAULT
+FROM USER_TAB_COLUMNS 
+WHERE TABLE_NAME = 'MENU_CONFIG' 
+ORDER BY COLUMN_ID;
+
+-- 2. Crear configuración básica para perfil Super Administrador (ID: 99)
+INSERT INTO MENU_CONFIG (
+    ID_CONFIG,
+    ID_PERFIL,
+    MENU_LABEL,
+    MENU_PATH,
+    IS_VISIBLE,
+    ORDEN,
+    FECHA_CREACION,
+    FECHA_MODIFICACION,
+    USUARIO_CREACION,
+    USUARIO_MODIFICACION
+)
+SELECT 
+    SEQ_MENU_CONFIG.NEXTVAL,
+    99,
+    'Facturación',
+    NULL,
+    1,
+    1,
+    SYSDATE,
+    SYSDATE,
+    'SYSTEM',
+    'SYSTEM'
+FROM DUAL
+WHERE NOT EXISTS (
+    SELECT 1 FROM MENU_CONFIG 
+    WHERE ID_PERFIL = 99 AND MENU_LABEL = 'Facturación'
+);
+
+-- 3. Crear configuración básica para perfil Administrador (ID: 3)
+INSERT INTO MENU_CONFIG (
+    ID_CONFIG,
+    ID_PERFIL,
+    MENU_LABEL,
+    MENU_PATH,
+    IS_VISIBLE,
+    ORDEN,
+    FECHA_CREACION,
+    FECHA_MODIFICACION,
+    USUARIO_CREACION,
+    USUARIO_MODIFICACION
+)
+SELECT 
+    SEQ_MENU_CONFIG.NEXTVAL,
+    3,
+    'Facturación',
+    NULL,
+    1,
+    1,
+    SYSDATE,
+    SYSDATE,
+    'SYSTEM',
+    'SYSTEM'
+FROM DUAL
+WHERE NOT EXISTS (
+    SELECT 1 FROM MENU_CONFIG 
+    WHERE ID_PERFIL = 3 AND MENU_LABEL = 'Facturación'
+);
+
+-- 4. Crear configuración básica para perfil Jefe de Crédito (ID: 2)
+INSERT INTO MENU_CONFIG (
+    ID_CONFIG,
+    ID_PERFIL,
+    MENU_LABEL,
+    MENU_PATH,
+    IS_VISIBLE,
+    ORDEN,
+    FECHA_CREACION,
+    FECHA_MODIFICACION,
+    USUARIO_CREACION,
+    USUARIO_MODIFICACION
+)
+SELECT 
+    SEQ_MENU_CONFIG.NEXTVAL,
+    2,
+    'Facturación',
+    NULL,
+    1,
+    1,
+    SYSDATE,
+    SYSDATE,
+    'SYSTEM',
+    'SYSTEM'
+FROM DUAL
+WHERE NOT EXISTS (
+    SELECT 1 FROM MENU_CONFIG 
+    WHERE ID_PERFIL = 2 AND MENU_LABEL = 'Facturación'
+);
+
+-- 5. Crear configuración básica para perfil Operador de Crédito (ID: 1)
+INSERT INTO MENU_CONFIG (
+    ID_CONFIG,
+    ID_PERFIL,
+    MENU_LABEL,
+    MENU_PATH,
+    IS_VISIBLE,
+    ORDEN,
+    FECHA_CREACION,
+    FECHA_MODIFICACION,
+    USUARIO_CREACION,
+    USUARIO_MODIFICACION
+)
+SELECT 
+    SEQ_MENU_CONFIG.NEXTVAL,
+    1,
+    'Facturación',
+    NULL,
+    1,
+    1,
+    SYSDATE,
+    SYSDATE,
+    'SYSTEM',
+    'SYSTEM'
+FROM DUAL
+WHERE NOT EXISTS (
+    SELECT 1 FROM MENU_CONFIG 
+    WHERE ID_PERFIL = 1 AND MENU_LABEL = 'Facturación'
+);
+
+-- 6. Verificar si existe secuencia SEQ_MENU_CONFIG
+SELECT 'VERIFICAR SECUENCIA SEQ_MENU_CONFIG' AS INFO FROM DUAL;
+SELECT COUNT(*) AS EXISTE_SECUENCIA
+FROM USER_SEQUENCES 
+WHERE SEQUENCE_NAME = 'SEQ_MENU_CONFIG';
+
+-- 7. Crear secuencia si no existe
+CREATE SEQUENCE SEQ_MENU_CONFIG
+START WITH 1000
+INCREMENT BY 1
+NOCACHE
+NOCYCLE;
+
+-- 8. Verificar resultado final
+SELECT 'CONFIGURACIÓN FINAL DE MENÚS' AS INFO FROM DUAL;
+SELECT 
+    mc.ID_CONFIG,
+    mc.ID_PERFIL,
+    p.NOMBRE_PERFIL,
+    mc.MENU_LABEL,
+    mc.MENU_PATH,
+    mc.IS_VISIBLE,
+    mc.ORDEN
+FROM MENU_CONFIG mc
+LEFT JOIN PERFIL p ON mc.ID_PERFIL = p.ID_PERFIL
+ORDER BY mc.ID_PERFIL, mc.ORDEN;
+
+-- 9. Verificar perfiles disponibles para configuración
+SELECT 'PERFILES DISPONIBLES PARA CONFIGURACIÓN' AS INFO FROM DUAL;
+SELECT 
+    p.ID_PERFIL,
+    p.NOMBRE_PERFIL,
+    COUNT(mc.ID_CONFIG) AS TOTAL_CONFIGURACIONES
+FROM PERFIL p
+LEFT JOIN MENU_CONFIG mc ON p.ID_PERFIL = mc.ID_PERFIL
+GROUP BY p.ID_PERFIL, p.NOMBRE_PERFIL
+ORDER BY p.ID_PERFIL;
+
+COMMIT;
+
+-- Script completado
+SELECT 'CONFIGURACIÓN DE MENÚS CORREGIDA' AS RESULTADO FROM DUAL;

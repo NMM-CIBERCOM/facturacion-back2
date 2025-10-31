@@ -1,0 +1,59 @@
+-- Script simple para verificar contraseñas actuales
+-- Ejecutar en Oracle Database
+
+-- ==========================================
+-- VERIFICAR CONTRASEÑAS ACTUALES
+-- ==========================================
+
+-- 1. Verificar usuarios y sus contraseñas
+SELECT 'USUARIOS Y CONTRASEÑAS ACTUALES' AS INFO FROM DUAL;
+SELECT 
+    NO_USUARIO,
+    NOMBRE_EMPLEADO,
+    ESTATUS_USUARIO,
+    ID_PERFIL,
+    PASSWORD,
+    LENGTH(PASSWORD) AS LONGITUD_PASSWORD
+FROM USUARIOS
+WHERE ESTATUS_USUARIO = 'A'
+ORDER BY NO_USUARIO;
+
+-- 2. Verificar perfiles disponibles
+SELECT 'PERFILES DISPONIBLES' AS INFO FROM DUAL;
+SELECT 
+    ID_PERFIL,
+    NOMBRE_PERFIL
+FROM PERFIL
+ORDER BY ID_PERFIL;
+
+-- 3. Verificar relación usuarios-perfiles
+SELECT 'USUARIOS Y SUS PERFILES' AS INFO FROM DUAL;
+SELECT 
+    u.NO_USUARIO,
+    u.NOMBRE_EMPLEADO,
+    u.ESTATUS_USUARIO,
+    u.ID_PERFIL,
+    p.NOMBRE_PERFIL
+FROM USUARIOS u
+LEFT JOIN PERFIL p ON u.ID_PERFIL = p.ID_PERFIL
+WHERE u.ESTATUS_USUARIO = 'A'
+ORDER BY u.NO_USUARIO;
+
+-- 4. Probar contraseñas comunes
+SELECT 'PRUEBA DE CONTRASEÑAS COMUNES' AS INFO FROM DUAL;
+SELECT 
+    NO_USUARIO,
+    CASE 
+        WHEN PASSWORD = 'admin' THEN 'admin'
+        WHEN PASSWORD = '123456' THEN '123456'
+        WHEN PASSWORD = 'password' THEN 'password'
+        WHEN PASSWORD = '123' THEN '123'
+        WHEN PASSWORD = NO_USUARIO THEN NO_USUARIO
+        ELSE '[OTRA]'
+    END AS CONTRASEÑA_PROBABLE
+FROM USUARIOS
+WHERE ESTATUS_USUARIO = 'A'
+ORDER BY NO_USUARIO;
+
+-- Script completado
+SELECT 'VERIFICACIÓN DE CONTRASEÑAS COMPLETADA' AS RESULTADO FROM DUAL;

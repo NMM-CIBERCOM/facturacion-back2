@@ -1,0 +1,110 @@
+-- Script simple para configurar 2FA sin problemas de columna
+-- Ejecutar en Oracle SQL Developer
+
+-- ==========================================
+-- SOLUCIÓN SIMPLE - SIN PROBLEMAS DE COLUMNA
+-- ==========================================
+
+-- 1. Crear tabla dedicada para 2FA
+DROP TABLE USER_2FA_CONFIG;
+CREATE TABLE USER_2FA_CONFIG (
+    USERNAME VARCHAR2(50) PRIMARY KEY,
+    SECRET_KEY VARCHAR2(50) NOT NULL,
+    ENABLED CHAR(1) DEFAULT 'N',
+    CREATED_DATE DATE DEFAULT SYSDATE,
+    LAST_USED DATE
+);
+
+-- 2. Insertar configuración para admin
+INSERT INTO USER_2FA_CONFIG (USERNAME, SECRET_KEY, ENABLED) 
+VALUES ('admin', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567', 'N');
+
+-- 3. Verificar configuración
+SELECT 'CONFIGURACIÓN 2FA CREADA' AS INFO FROM DUAL;
+SELECT 
+    USERNAME,
+    SECRET_KEY,
+    LENGTH(SECRET_KEY) AS LONGITUD,
+    ENABLED,
+    CASE 
+        WHEN LENGTH(SECRET_KEY) = 32 THEN '✅ LONGITUD CORRECTA (32)'
+        ELSE '❌ LONGITUD INCORRECTA (' || LENGTH(SECRET_KEY) || ')'
+    END AS VALIDACION_LONGITUD,
+    CASE 
+        WHEN REGEXP_LIKE(SECRET_KEY, '^[A-Z2-7]{32}$') THEN '✅ FORMATO BASE32 VÁLIDO'
+        ELSE '❌ FORMATO INVÁLIDO'
+    END AS VALIDACION_FORMATO
+FROM USER_2FA_CONFIG
+WHERE USERNAME = 'admin';
+
+-- 4. Mostrar clave para Google Authenticator
+SELECT 'CLAVE PARA GOOGLE AUTHENTICATOR' AS INFO FROM DUAL;
+SELECT 
+    'Usuario: ' || USERNAME AS USUARIO,
+    'Clave: ' || SECRET_KEY AS CLAVE_COMPLETA,
+    'Longitud: ' || LENGTH(SECRET_KEY) AS LONGITUD_INFO,
+    'Estado: ' || CASE WHEN ENABLED = 'Y' THEN 'ACTIVO' ELSE 'PENDIENTE DE ACTIVAR' END AS ESTADO
+FROM USER_2FA_CONFIG
+WHERE USERNAME = 'admin';
+
+-- 5. Crear función para verificar si usuario tiene 2FA
+CREATE OR REPLACE FUNCTION USER_HAS_2FA(p_username VARCHAR2) 
+RETURN NUMBER IS
+    v_count NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO v_count
+    FROM USER_2FA_CONFIG
+    WHERE USERNAME = p_username
+    AND ENABLED = 'Y';
+    
+    RETURN v_count;
+END;
+/
+
+-- 6. Crear función para obtener clave 2FA
+CREATE OR REPLACE FUNCTION GET_USER_2FA_SECRET(p_username VARCHAR2) 
+RETURN VARCHAR2 IS
+    v_secret VARCHAR2(50);
+BEGIN
+    SELECT SECRET_KEY INTO v_secret
+    FROM USER_2FA_CONFIG
+    WHERE USERNAME = p_username;
+    
+    RETURN v_secret;
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        RETURN NULL;
+END;
+/
+
+-- 7. Probar funciones
+SELECT 'PRUEBA DE FUNCIONES' AS INFO FROM DUAL;
+SELECT 
+    'Usuario admin tiene 2FA: ' || USER_HAS_2FA('admin') AS TIENE_2FA,
+    'Clave secreta: ' || GET_USER_2FA_SECRET('admin') AS CLAVE_SECRETA
+FROM DUAL;
+
+-- 8. Activar 2FA para admin
+UPDATE USER_2FA_CONFIG 
+SET ENABLED = 'Y',
+    LAST_USED = SYSDATE
+WHERE USERNAME = 'admin';
+
+-- 9. Verificación final
+SELECT 'VERIFICACIÓN FINAL' AS INFO FROM DUAL;
+SELECT 
+    USERNAME,
+    SECRET_KEY,
+    LENGTH(SECRET_KEY) AS LONGITUD,
+    ENABLED,
+    CASE 
+        WHEN ENABLED = 'Y' THEN '✅ 2FA ACTIVO'
+        ELSE '⚙️ PENDIENTE DE ACTIVAR'
+    END AS ESTADO_2FA
+FROM USER_2FA_CONFIG
+WHERE USERNAME = 'admin';
+
+COMMIT;
+
+-- Script completado
+SELECT 'CONFIGURACIÓN 2FA SIMPLE COMPLETADA - LISTA PARA USAR' AS RESULTADO FROM DUAL;

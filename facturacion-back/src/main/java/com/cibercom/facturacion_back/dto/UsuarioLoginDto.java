@@ -1,5 +1,8 @@
 package com.cibercom.facturacion_back.dto;
 
+import com.cibercom.facturacion_back.model.UserRole;
+import com.cibercom.facturacion_back.model.PaymentStatus;
+
 /**
  * DTO para los datos del usuario en la respuesta de login
  */
@@ -13,6 +16,15 @@ public class UsuarioLoginDto {
     private Integer idDfi;
     private Integer idEstacionamiento;
     private String modificaUbicacion;
+    
+    // Nuevos campos para seguridad y roles
+    private UserRole role;
+    private PaymentStatus paymentStatus;
+    private boolean twoFactorEnabled;
+    private String twoFactorSecret;
+    private String lastLogin;
+    private String sessionToken;
+    private boolean isSuperAdmin;
     
     // Constructores
     public UsuarioLoginDto() {}
@@ -28,9 +40,11 @@ public class UsuarioLoginDto {
         this.idDfi = idDfi;
         this.idEstacionamiento = idEstacionamiento;
         this.modificaUbicacion = modificaUbicacion;
+        this.isSuperAdmin = false;
+        this.twoFactorEnabled = false;
     }
     
-    // Getters y Setters
+    // Getters y Setters existentes
     public String getNoUsuario() {
         return noUsuario;
     }
@@ -93,5 +107,87 @@ public class UsuarioLoginDto {
     
     public void setModificaUbicacion(String modificaUbicacion) {
         this.modificaUbicacion = modificaUbicacion;
+    }
+    
+    // Nuevos getters y setters
+    public UserRole getRole() {
+        return role;
+    }
+    
+    public void setRole(UserRole role) {
+        this.role = role;
+        this.isSuperAdmin = (role == UserRole.SUPER_ADMINISTRADOR);
+    }
+    
+    public PaymentStatus getPaymentStatus() {
+        return paymentStatus;
+    }
+    
+    public void setPaymentStatus(PaymentStatus paymentStatus) {
+        this.paymentStatus = paymentStatus;
+    }
+    
+    public boolean isTwoFactorEnabled() {
+        return twoFactorEnabled;
+    }
+    
+    public void setTwoFactorEnabled(boolean twoFactorEnabled) {
+        this.twoFactorEnabled = twoFactorEnabled;
+    }
+    
+    public String getTwoFactorSecret() {
+        return twoFactorSecret;
+    }
+    
+    public void setTwoFactorSecret(String twoFactorSecret) {
+        this.twoFactorSecret = twoFactorSecret;
+    }
+    
+    public String getLastLogin() {
+        return lastLogin;
+    }
+    
+    public void setLastLogin(String lastLogin) {
+        this.lastLogin = lastLogin;
+    }
+    
+    public String getSessionToken() {
+        return sessionToken;
+    }
+    
+    public void setSessionToken(String sessionToken) {
+        this.sessionToken = sessionToken;
+    }
+    
+    public boolean isSuperAdmin() {
+        return isSuperAdmin;
+    }
+    
+    public void setSuperAdmin(boolean superAdmin) {
+        isSuperAdmin = superAdmin;
+    }
+    
+    /**
+     * Verifica si el usuario tiene acceso basado en su estado de pago
+     */
+    public boolean hasAccess() {
+        if (isSuperAdmin) {
+            return true; // Super admin siempre tiene acceso
+        }
+        return paymentStatus != null && paymentStatus.allowsAccess();
+    }
+    
+    /**
+     * Verifica si el usuario puede gestionar otros usuarios
+     */
+    public boolean canManageUsers() {
+        return role != null && role.canManageUsers();
+    }
+    
+    /**
+     * Verifica si el usuario puede gestionar pagos
+     */
+    public boolean canManagePayments() {
+        return role != null && role.canManagePayments();
     }
 }

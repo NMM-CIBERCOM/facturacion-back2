@@ -1,0 +1,68 @@
+-- Script para probar el endpoint de perfiles
+-- Ejecutar en Oracle Database
+
+-- ==========================================
+-- PROBAR CONSULTA DEL SERVICIO
+-- ==========================================
+
+-- 1. Probar la consulta exacta que usa el servicio
+SELECT 'CONSULTA DEL SERVICIO MenuConfigService.obtenerPerfiles()' AS INFO FROM DUAL;
+SELECT 
+    ID_PERFIL, 
+    NOMBRE_PERFIL 
+FROM PERFIL 
+ORDER BY NOMBRE_PERFIL;
+
+-- 2. Verificar que los perfiles tienen datos válidos
+SELECT 'VERIFICACIÓN DE PERFILES' AS INFO FROM DUAL;
+SELECT 
+    ID_PERFIL,
+    NOMBRE_PERFIL,
+    CASE 
+        WHEN ID_PERFIL IS NULL THEN 'ID NULL'
+        WHEN NOMBRE_PERFIL IS NULL THEN 'NOMBRE NULL'
+        WHEN LENGTH(TRIM(NOMBRE_PERFIL)) = 0 THEN 'NOMBRE VACÍO'
+        ELSE 'OK'
+    END AS ESTADO_PERFIL
+FROM PERFIL
+ORDER BY ID_PERFIL;
+
+-- 3. Verificar usuarios y sus perfiles asignados
+SELECT 'USUARIOS Y PERFILES ASIGNADOS' AS INFO FROM DUAL;
+SELECT 
+    u.NO_USUARIO,
+    u.NOMBRE_EMPLEADO,
+    u.ID_PERFIL,
+    p.NOMBRE_PERFIL,
+    CASE 
+        WHEN p.ID_PERFIL IS NULL THEN 'PERFIL NO EXISTE'
+        ELSE 'PERFIL OK'
+    END AS ESTADO_PERFIL_USUARIO
+FROM USUARIOS u
+LEFT JOIN PERFIL p ON u.ID_PERFIL = p.ID_PERFIL
+WHERE u.ESTATUS_USUARIO = 'A'
+ORDER BY u.NO_USUARIO;
+
+-- 4. Verificar configuración de menús por perfil
+SELECT 'CONFIGURACIÓN DE MENÚS POR PERFIL' AS INFO FROM DUAL;
+SELECT 
+    mc.ID_PERFIL,
+    p.NOMBRE_PERFIL,
+    COUNT(*) AS TOTAL_CONFIGURACIONES
+FROM MENU_CONFIG mc
+LEFT JOIN PERFIL p ON mc.ID_PERFIL = p.ID_PERFIL
+GROUP BY mc.ID_PERFIL, p.NOMBRE_PERFIL
+ORDER BY mc.ID_PERFIL;
+
+-- 5. Verificar perfiles sin configuración
+SELECT 'PERFILES SIN CONFIGURACIÓN DE MENÚ' AS INFO FROM DUAL;
+SELECT 
+    p.ID_PERFIL,
+    p.NOMBRE_PERFIL
+FROM PERFIL p
+LEFT JOIN MENU_CONFIG mc ON p.ID_PERFIL = mc.ID_PERFIL
+WHERE mc.ID_PERFIL IS NULL
+ORDER BY p.ID_PERFIL;
+
+-- Script completado
+SELECT 'PRUEBA DE ENDPOINT COMPLETADA' AS RESULTADO FROM DUAL;

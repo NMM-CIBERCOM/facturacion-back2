@@ -31,4 +31,21 @@ public class SatValidationResponse {
         private String regimenFiscal;
         private String tipoPersona;
     }
+    
+    // Métodos explícitos para compatibilidad
+    public boolean isValido() {
+        return valido;
+    }
+    
+    public void setValido(boolean valido) {
+        this.valido = valido;
+    }
+    
+    public List<String> getErrores() {
+        return errores;
+    }
+    
+    public void setErrores(List<String> errores) {
+        this.errores = errores;
+    }
 } 

@@ -1,0 +1,49 @@
+-- Script simple para verificar perfiles directamente
+-- Ejecutar en Oracle Database
+
+-- ==========================================
+-- VERIFICACIÓN DIRECTA DE PERFILES
+-- ==========================================
+
+-- 1. Verificar perfiles existentes
+SELECT 'PERFILES EXISTENTES' AS INFO FROM DUAL;
+SELECT 
+    ID_PERFIL,
+    NOMBRE_PERFIL
+FROM PERFIL
+ORDER BY NOMBRE_PERFIL;
+
+-- 2. Verificar usuarios activos
+SELECT 'USUARIOS ACTIVOS' AS INFO FROM DUAL;
+SELECT 
+    NO_USUARIO,
+    NOMBRE_EMPLEADO,
+    ID_PERFIL,
+    ESTATUS_USUARIO
+FROM USUARIOS
+WHERE ESTATUS_USUARIO = 'A'
+ORDER BY NO_USUARIO;
+
+-- 3. Verificar configuración de menús
+SELECT 'CONFIGURACIÓN DE MENÚS' AS INFO FROM DUAL;
+SELECT 
+    mc.ID_PERFIL,
+    p.NOMBRE_PERFIL,
+    COUNT(*) AS TOTAL_CONFIGURACIONES
+FROM MENU_CONFIG mc
+LEFT JOIN PERFIL p ON mc.ID_PERFIL = p.ID_PERFIL
+GROUP BY mc.ID_PERFIL, p.NOMBRE_PERFIL
+ORDER BY mc.ID_PERFIL;
+
+-- 4. Verificar si hay perfiles sin configuración
+SELECT 'PERFILES SIN CONFIGURACIÓN' AS INFO FROM DUAL;
+SELECT 
+    p.ID_PERFIL,
+    p.NOMBRE_PERFIL
+FROM PERFIL p
+LEFT JOIN MENU_CONFIG mc ON p.ID_PERFIL = mc.ID_PERFIL
+WHERE mc.ID_PERFIL IS NULL
+ORDER BY p.ID_PERFIL;
+
+-- Script completado
+SELECT 'VERIFICACIÓN COMPLETADA' AS RESULTADO FROM DUAL;

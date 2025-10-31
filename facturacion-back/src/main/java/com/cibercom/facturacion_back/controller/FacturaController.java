@@ -13,15 +13,27 @@ import com.cibercom.facturacion_back.service.FacturaService;
 import com.cibercom.facturacion_back.service.ConsultaFacturaService;
 import com.cibercom.facturacion_back.service.FacturaTimbradoService;
 import com.cibercom.facturacion_back.service.ITextPdfService;
+import com.cibercom.facturacion_back.service.PDFParsingService;
+import com.cibercom.facturacion_back.model.FacturaInfo;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.Environment;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.http.HttpStatus;
 
 import java.util.Map;
 import java.util.HashMap;
+import java.util.List;
+import java.util.ArrayList;
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.time.LocalDateTime;
 
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -29,7 +41,7 @@ import org.slf4j.LoggerFactory;
 
 @RestController
 @RequestMapping("/api/factura")
-@CrossOrigin(origins = "*")
+@CrossOrigin(origins = "http://localhost:5173")
 public class FacturaController {
 
     private static final Logger logger = LoggerFactory.getLogger(FacturaController.class);
@@ -54,6 +66,9 @@ public class FacturaController {
 
     @Autowired
     private ITextPdfService iTextPdfService;
+
+    @Autowired
+    private PDFParsingService pdfParsingService;
 
     @PostMapping("/generar-pdf")
     public ResponseEntity<byte[]> generarPDF(@RequestBody Map<String, Object> request) {
@@ -467,6 +482,79 @@ public class FacturaController {
             logger.error("Error al descargar XML para UUID: {}", uuid, e);
             return ResponseEntity.status(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
+    }
+
+    // ========== ENDPOINTS PARA PARSING DE PDFs ==========
+    
+    @PostMapping("/procesar-pdf")
+    public ResponseEntity<?> procesarPDF(@RequestParam("archivo") MultipartFile archivo) {
+        if (!archivo.getContentType().equals("application/pdf")) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("El archivo debe ser un PDF.");
+        }
+
+        try {
+            String rutaArchivo = guardarArchivoTemporalmente(archivo);
+            FacturaInfo facturaInfo = pdfParsingService.parsearPDF(rutaArchivo);
+            new File(rutaArchivo).delete(); // Limpieza del archivo temporal
+
+            // Crear un objeto Map para incluir la facturaInfo y la fecha de última actualización
+            Map<String, Object> respuesta = new HashMap<>();
+            respuesta.put("facturaInfo", facturaInfo);
+            // Obtener la hora actual del sistema
+            LocalDateTime fechaActualizacion = LocalDateTime.now();
+            respuesta.put("fechaUltimaActualizacion", fechaActualizacion);
+
+            return ResponseEntity.ok(respuesta);
+        } catch (IOException e) {
+            logger.error("Error al procesar el archivo PDF", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Error al procesar el archivo: " + e.getMessage());
+        } catch (Exception e) {
+            logger.error("Error no esperado", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Error no esperado: " + e.getMessage());
+        }
+    }
+
+    @PostMapping("/procesar-pdfs")
+    public ResponseEntity<List<FacturaInfo>> procesarPDFs(@RequestParam("archivos") List<MultipartFile> archivos) {
+        List<String> rutasArchivos = new ArrayList<>();
+
+        try {
+            for (MultipartFile archivo : archivos) {
+                String rutaArchivo = guardarArchivoTemporalmente(archivo);
+                rutasArchivos.add(rutaArchivo);
+            }
+
+            List<FacturaInfo> facturasInfo = pdfParsingService.parsearPDFs(rutasArchivos);
+            // Limpieza de archivos temporales
+            for (String ruta : rutasArchivos) {
+                new File(ruta).delete();
+            }
+
+            return ResponseEntity.ok(facturasInfo);
+        } catch (IOException e) {
+            logger.error("Error al procesar los archivos PDF", e);
+            return ResponseEntity.badRequest().body(null);
+        }
+    }
+
+    @PostMapping("/guardar-informacion")
+    public ResponseEntity<?> guardarInformacion(@RequestBody FacturaInfo facturaInfo) {
+        pdfParsingService.guardarFacturaInfo(facturaInfo);
+        return ResponseEntity.ok("Información recibida con éxito");
+    }
+
+    private String guardarArchivoTemporalmente(MultipartFile archivo) throws IOException {
+        Path directorioTemporal = Files.createTempDirectory("facturas_pdf_temp");
+
+        String nombreArchivoOriginal = archivo.getOriginalFilename();
+        String nombreArchivoTemporal = System.currentTimeMillis() + "_" + (nombreArchivoOriginal != null ? nombreArchivoOriginal : "tempfile");
+        Path rutaArchivoTemporal = directorioTemporal.resolve(nombreArchivoTemporal);
+
+        Files.copy(archivo.getInputStream(), rutaArchivoTemporal, StandardCopyOption.REPLACE_EXISTING);
+
+        return rutaArchivoTemporal.toString();
     }
 
     @GetMapping("/health")

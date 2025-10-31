@@ -1,0 +1,545 @@
+-- =====================================================
+-- SCRIPT PARA RESTAURAR CONFIGURACIÓN COMPLETA DE MENÚS
+-- =====================================================
+
+-- IMPORTANTE: Este script restaura toda la configuración de menús que existía antes
+-- Incluye todas las pestañas y pantallas para todos los perfiles
+
+-- =====================================================
+-- 1. LIMPIAR CONFIGURACIÓN ACTUAL
+-- =====================================================
+
+-- Eliminar configuración actual
+DELETE FROM MENU_CONFIG;
+
+-- Resetear secuencia
+DROP SEQUENCE MENU_CONFIG_SEQ;
+CREATE SEQUENCE MENU_CONFIG_SEQ
+    START WITH 1
+    INCREMENT BY 1
+    NOCACHE;
+
+-- =====================================================
+-- 2. INSERTAR CONFIGURACIÓN COMPLETA
+-- =====================================================
+
+-- =====================================================
+-- DASHBOARD PARA TODOS LOS PERFILES
+-- =====================================================
+
+-- Dashboard - Operador de Crédito (ID_PERFIL = 1)
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Dashboard', 'dashboard', 1, 1, 'admin');
+
+-- Dashboard - Jefe de Crédito (ID_PERFIL = 2)
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Dashboard', 'dashboard', 1, 1, 'admin');
+
+-- Dashboard - Administrador (ID_PERFIL = 3)
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Dashboard', 'dashboard', 1, 1, 'admin');
+
+-- =====================================================
+-- FACTURACIÓN PARA TODOS LOS PERFILES
+-- =====================================================
+
+-- Facturación - Operador de Crédito
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Facturación', NULL, 1, 2, 'admin');
+
+-- Facturación - Jefe de Crédito
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Facturación', NULL, 1, 2, 'admin');
+
+-- Facturación - Administrador
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Facturación', NULL, 1, 2, 'admin');
+
+-- Pantallas de Facturación - Operador de Crédito
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Artículos', 'facturacion-articulos', 1, 1, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Intereses', 'facturacion-intereses', 1, 2, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Carta Factura', 'facturacion-carta', 1, 3, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Global', 'facturacion-global', 1, 4, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Monederos', 'facturacion-monederos', 1, 5, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Captura Libre', 'facturacion-captura-libre', 1, 6, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Cancelación Masiva', 'facturacion-cancelacion-masiva', 1, 7, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Nóminas', 'facturacion-nominas', 1, 8, 'admin');
+
+-- Pantallas de Facturación - Jefe de Crédito
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Artículos', 'facturacion-articulos', 1, 1, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Intereses', 'facturacion-intereses', 1, 2, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Carta Factura', 'facturacion-carta', 1, 3, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Global', 'facturacion-global', 1, 4, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Monederos', 'facturacion-monederos', 1, 5, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Captura Libre', 'facturacion-captura-libre', 1, 6, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Cancelación Masiva', 'facturacion-cancelacion-masiva', 1, 7, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Nóminas', 'facturacion-nominas', 1, 8, 'admin');
+
+-- Pantallas de Facturación - Administrador
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Artículos', 'facturacion-articulos', 1, 1, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Intereses', 'facturacion-intereses', 1, 2, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Carta Factura', 'facturacion-carta', 1, 3, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Global', 'facturacion-global', 1, 4, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Monederos', 'facturacion-monederos', 1, 5, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Captura Libre', 'facturacion-captura-libre', 1, 6, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Cancelación Masiva', 'facturacion-cancelacion-masiva', 1, 7, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Nóminas', 'facturacion-nominas', 1, 8, 'admin');
+
+-- =====================================================
+-- CONSULTAS PARA TODOS LOS PERFILES
+-- =====================================================
+
+-- Consultas - Operador de Crédito
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Consultas', NULL, 1, 3, 'admin');
+
+-- Consultas - Jefe de Crédito
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Consultas', NULL, 1, 3, 'admin');
+
+-- Consultas - Administrador
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Consultas', NULL, 1, 3, 'admin');
+
+-- Pantallas de Consultas - Operador de Crédito
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Facturas', 'consultas-facturas', 1, 1, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'SKU', 'consultas-sku', 1, 2, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Boletas', 'consultas-boletas', 1, 3, 'admin');
+
+-- Pantallas de Consultas - Jefe de Crédito
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Facturas', 'consultas-facturas', 1, 1, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'SKU', 'consultas-sku', 1, 2, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Boletas', 'consultas-boletas', 1, 3, 'admin');
+
+-- Pantallas de Consultas - Administrador
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Facturas', 'consultas-facturas', 1, 1, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'SKU', 'consultas-sku', 1, 2, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Boletas', 'consultas-boletas', 1, 3, 'admin');
+
+-- =====================================================
+-- ADMINISTRACIÓN PARA TODOS LOS PERFILES
+-- =====================================================
+
+-- Administración - Operador de Crédito
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Administración', NULL, 1, 4, 'admin');
+
+-- Administración - Jefe de Crédito
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Administración', NULL, 1, 4, 'admin');
+
+-- Administración - Administrador
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Administración', NULL, 1, 4, 'admin');
+
+-- Pantallas de Administración - Operador de Crédito
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Empleados', 'administracion-empleados', 1, 1, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Tiendas', 'administracion-tiendas', 1, 2, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Períodos Perfil', 'administracion-periodos-perfil', 1, 3, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Períodos Plataforma', 'administracion-periodos-plataforma', 1, 4, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Kioscos', 'administracion-kioscos', 1, 5, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Excepciones', 'administracion-excepciones', 1, 6, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Secciones', 'administracion-secciones', 1, 7, 'admin');
+
+-- Pantallas de Administración - Jefe de Crédito
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Empleados', 'administracion-empleados', 1, 1, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Tiendas', 'administracion-tiendas', 1, 2, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Períodos Perfil', 'administracion-periodos-perfil', 1, 3, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Períodos Plataforma', 'administracion-periodos-plataforma', 1, 4, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Kioscos', 'administracion-kioscos', 1, 5, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Excepciones', 'administracion-excepciones', 1, 6, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Secciones', 'administracion-secciones', 1, 7, 'admin');
+
+-- Pantallas de Administración - Administrador
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Empleados', 'administracion-empleados', 1, 1, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Tiendas', 'administracion-tiendas', 1, 2, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Períodos Perfil', 'administracion-periodos-perfil', 1, 3, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Períodos Plataforma', 'administracion-periodos-plataforma', 1, 4, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Kioscos', 'administracion-kioscos', 1, 5, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Excepciones', 'administracion-excepciones', 1, 6, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Secciones', 'administracion-secciones', 1, 7, 'admin');
+
+-- =====================================================
+-- REPORTES FACTURACIÓN FISCAL PARA TODOS LOS PERFILES
+-- =====================================================
+
+-- Reportes Facturación Fiscal - Operador de Crédito
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Reportes Facturación Fiscal', NULL, 1, 5, 'admin');
+
+-- Reportes Facturación Fiscal - Jefe de Crédito
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Reportes Facturación Fiscal', NULL, 1, 5, 'admin');
+
+-- Reportes Facturación Fiscal - Administrador
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Reportes Facturación Fiscal', NULL, 1, 5, 'admin');
+
+-- Pantallas de Reportes Facturación Fiscal - Operador de Crédito
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Boletas No Auditadas', 'reportes-boletas-no-auditadas', 1, 1, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Reporte Ingreso-Facturación', 'reportes-ingreso-facturacion', 1, 2, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Integración Factura Global', 'reportes-integracion-factura-global', 1, 3, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Integración Clientes', 'reportes-integracion-clientes', 1, 4, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Facturación clientes posterior a Global', 'reportes-facturacion-clientes-posterior-global', 1, 5, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Integración Sustitución CFDI', 'reportes-integracion-sustitucion-cfdi', 1, 6, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Control de emisión de REP', 'reportes-control-emision-rep', 1, 7, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Reportes REPgcp', 'reportes-repgcp', 1, 8, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Control de cambios', 'reportes-control-cambios', 1, 9, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Conciliación', 'reportes-conciliacion', 1, 10, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'REPs Sustituidos (Fiscal)', 'reportes-reps-sustituidos-fiscal', 1, 11, 'admin');
+
+-- Pantallas de Reportes Facturación Fiscal - Jefe de Crédito
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Boletas No Auditadas', 'reportes-boletas-no-auditadas', 1, 1, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Reporte Ingreso-Facturación', 'reportes-ingreso-facturacion', 1, 2, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Integración Factura Global', 'reportes-integracion-factura-global', 1, 3, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Integración Clientes', 'reportes-integracion-clientes', 1, 4, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Facturación clientes posterior a Global', 'reportes-facturacion-clientes-posterior-global', 1, 5, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Integración Sustitución CFDI', 'reportes-integracion-sustitucion-cfdi', 1, 6, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Control de emisión de REP', 'reportes-control-emision-rep', 1, 7, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Reportes REPgcp', 'reportes-repgcp', 1, 8, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Control de cambios', 'reportes-control-cambios', 1, 9, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Conciliación', 'reportes-conciliacion', 1, 10, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'REPs Sustituidos (Fiscal)', 'reportes-reps-sustituidos-fiscal', 1, 11, 'admin');
+
+-- Pantallas de Reportes Facturación Fiscal - Administrador
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Boletas No Auditadas', 'reportes-boletas-no-auditadas', 1, 1, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Reporte Ingreso-Facturación', 'reportes-ingreso-facturacion', 1, 2, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Integración Factura Global', 'reportes-integracion-factura-global', 1, 3, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Integración Clientes', 'reportes-integracion-clientes', 1, 4, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Facturación clientes posterior a Global', 'reportes-facturacion-clientes-posterior-global', 1, 5, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Integración Sustitución CFDI', 'reportes-integracion-sustitucion-cfdi', 1, 6, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Control de emisión de REP', 'reportes-control-emision-rep', 1, 7, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Reportes REPgcp', 'reportes-repgcp', 1, 8, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Control de cambios', 'reportes-control-cambios', 1, 9, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Conciliación', 'reportes-conciliacion', 1, 10, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'REPs Sustituidos (Fiscal)', 'reportes-reps-sustituidos-fiscal', 1, 11, 'admin');
+
+-- =====================================================
+-- REGISTRO CFDI PARA TODOS LOS PERFILES
+-- =====================================================
+
+-- Registro CFDI - Operador de Crédito
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Registro CFDI', NULL, 1, 6, 'admin');
+
+-- Registro CFDI - Jefe de Crédito
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Registro CFDI', NULL, 1, 6, 'admin');
+
+-- Registro CFDI - Administrador
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Registro CFDI', NULL, 1, 6, 'admin');
+
+-- Pantallas de Registro CFDI - Operador de Crédito
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Registro de Constancias', 'registro-cfdi', 1, 1, 'admin');
+
+-- Pantallas de Registro CFDI - Jefe de Crédito
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Registro de Constancias', 'registro-cfdi', 1, 1, 'admin');
+
+-- Pantallas de Registro CFDI - Administrador
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Registro de Constancias', 'registro-cfdi', 1, 1, 'admin');
+
+-- =====================================================
+-- MONITOR PARA TODOS LOS PERFILES
+-- =====================================================
+
+-- Monitor - Operador de Crédito
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Monitor', NULL, 1, 7, 'admin');
+
+-- Monitor - Jefe de Crédito
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Monitor', NULL, 1, 7, 'admin');
+
+-- Monitor - Administrador
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Monitor', NULL, 1, 7, 'admin');
+
+-- Pantallas de Monitor - Operador de Crédito
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Gráficas', 'monitor-graficas', 1, 1, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Bitácora', 'monitor-bitacora', 1, 2, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Disponibilidad', 'monitor-disponibilidad', 1, 3, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Logs', 'monitor-logs', 1, 4, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Permisos', 'monitor-permisos', 1, 5, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Decodificador', 'monitor-decodificador', 1, 6, 'admin');
+
+-- Pantallas de Monitor - Jefe de Crédito
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Gráficas', 'monitor-graficas', 1, 1, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Bitácora', 'monitor-bitacora', 1, 2, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Disponibilidad', 'monitor-disponibilidad', 1, 3, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Logs', 'monitor-logs', 1, 4, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Permisos', 'monitor-permisos', 1, 5, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Decodificador', 'monitor-decodificador', 1, 6, 'admin');
+
+-- Pantallas de Monitor - Administrador
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Gráficas', 'monitor-graficas', 1, 1, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Bitácora', 'monitor-bitacora', 1, 2, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Disponibilidad', 'monitor-disponibilidad', 1, 3, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Logs', 'monitor-logs', 1, 4, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Permisos', 'monitor-permisos', 1, 5, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Decodificador', 'monitor-decodificador', 1, 6, 'admin');
+
+-- =====================================================
+-- CONFIGURACIÓN SOLO PARA ADMINISTRADOR
+-- =====================================================
+
+-- Configuración - Administrador
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Configuración', NULL, 1, 8, 'admin');
+
+-- Pantallas de Configuración - Administrador
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Configuración de Correo', 'configuracion-correo', 1, 1, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Configuración de Empresa', 'configuracion-empresa', 1, 2, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Configuración de Temas', 'configuracion-temas', 1, 3, 'admin');
+
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) 
+VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Configuración de Menús', 'configuracion-menus', 1, 4, 'admin');
+
+-- =====================================================
+-- 3. VERIFICAR CONFIGURACIÓN RESTAURADA
+-- =====================================================
+
+COMMIT;
+
+-- Verificar configuración por perfil
+SELECT 
+    'CONFIGURACIÓN RESTAURADA' as ESTADO,
+    COUNT(*) as TOTAL_CONFIGURACIONES
+FROM MENU_CONFIG;
+
+-- Verificar pestañas principales por perfil
+SELECT 
+    ID_PERFIL,
+    COUNT(*) as TOTAL_PESTAÑAS
+FROM MENU_CONFIG 
+WHERE MENU_PATH IS NULL
+GROUP BY ID_PERFIL
+ORDER BY ID_PERFIL;
+
+-- Verificar pantallas por perfil
+SELECT 
+    ID_PERFIL,
+    COUNT(*) as TOTAL_PANTALLAS
+FROM MENU_CONFIG 
+WHERE MENU_PATH IS NOT NULL
+GROUP BY ID_PERFIL
+ORDER BY ID_PERFIL;
+
+-- Verificar configuración completa
+SELECT 
+    mc.ID_PERFIL,
+    p.NOMBRE_PERFIL,
+    mc.MENU_LABEL,
+    mc.MENU_PATH,
+    mc.IS_VISIBLE,
+    mc.ORDEN
+FROM MENU_CONFIG mc
+JOIN PERFIL p ON mc.ID_PERFIL = p.ID_PERFIL
+ORDER BY mc.ID_PERFIL, mc.ORDEN, mc.MENU_LABEL;
+
+-- =====================================================
+-- CONFIGURACIÓN COMPLETA RESTAURADA
+-- =====================================================

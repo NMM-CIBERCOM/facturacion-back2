@@ -4,11 +4,17 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.DecimalMin;
 import lombok.Data;
+import lombok.Builder;
+import lombok.AllArgsConstructor;
+import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 import java.util.List;
 
 @Data
+@Builder
+@AllArgsConstructor
+@NoArgsConstructor
 public class FacturaRequest {
     
     @NotBlank(message = "El nombre del emisor es obligatorio")
@@ -66,5 +72,111 @@ public class FacturaRequest {
         @NotNull(message = "El importe es obligatorio")
         @DecimalMin(value = "0.01", message = "El importe debe ser mayor a 0")
         private BigDecimal importe;
+        
+        // Métodos explícitos para compatibilidad
+        public BigDecimal getImporte() {
+            return importe;
+        }
+        
+        public void setImporte(BigDecimal importe) {
+            this.importe = importe;
+        }
+    }
+    
+    // Métodos explícitos para compatibilidad
+    public String getNombreEmisor() {
+        return nombreEmisor;
+    }
+    
+    public void setNombreEmisor(String nombreEmisor) {
+        this.nombreEmisor = nombreEmisor;
+    }
+    
+    public String getRfcEmisor() {
+        return rfcEmisor;
+    }
+    
+    public void setRfcEmisor(String rfcEmisor) {
+        this.rfcEmisor = rfcEmisor;
+    }
+    
+    public String getCodigoPostalEmisor() {
+        return codigoPostalEmisor;
+    }
+    
+    public void setCodigoPostalEmisor(String codigoPostalEmisor) {
+        this.codigoPostalEmisor = codigoPostalEmisor;
+    }
+    
+    public String getRegimenFiscalEmisor() {
+        return regimenFiscalEmisor;
+    }
+    
+    public void setRegimenFiscalEmisor(String regimenFiscalEmisor) {
+        this.regimenFiscalEmisor = regimenFiscalEmisor;
+    }
+    
+    public String getNombreReceptor() {
+        return nombreReceptor;
+    }
+    
+    public void setNombreReceptor(String nombreReceptor) {
+        this.nombreReceptor = nombreReceptor;
+    }
+    
+    public String getRfcReceptor() {
+        return rfcReceptor;
+    }
+    
+    public void setRfcReceptor(String rfcReceptor) {
+        this.rfcReceptor = rfcReceptor;
+    }
+    
+    public String getCodigoPostalReceptor() {
+        return codigoPostalReceptor;
+    }
+    
+    public void setCodigoPostalReceptor(String codigoPostalReceptor) {
+        this.codigoPostalReceptor = codigoPostalReceptor;
+    }
+    
+    public String getRegimenFiscalReceptor() {
+        return regimenFiscalReceptor;
+    }
+    
+    public void setRegimenFiscalReceptor(String regimenFiscalReceptor) {
+        this.regimenFiscalReceptor = regimenFiscalReceptor;
+    }
+    
+    public List<Concepto> getConceptos() {
+        return conceptos;
+    }
+    
+    public void setConceptos(List<Concepto> conceptos) {
+        this.conceptos = conceptos;
+    }
+    
+    public String getMetodoPago() {
+        return metodoPago;
+    }
+    
+    public void setMetodoPago(String metodoPago) {
+        this.metodoPago = metodoPago;
+    }
+    
+    public String getFormaPago() {
+        return formaPago;
+    }
+    
+    public void setFormaPago(String formaPago) {
+        this.formaPago = formaPago;
+    }
+    
+    public String getUsoCFDI() {
+        return usoCFDI;
+    }
+    
+    public void setUsoCFDI(String usoCFDI) {
+        this.usoCFDI = usoCFDI;
     }
 } 

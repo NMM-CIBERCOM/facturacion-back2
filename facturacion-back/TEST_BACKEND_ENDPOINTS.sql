@@ -1,0 +1,50 @@
+-- Script para verificar que el backend tenga datos para responder
+
+-- 1. Verificar que existen datos para Jefe de Crédito (ID_PERFIL = 2)
+SELECT 
+    'PESTAÑAS PRINCIPALES' as TIPO,
+    COUNT(*) as TOTAL,
+    COUNT(CASE WHEN IS_VISIBLE = 1 THEN 1 END) as VISIBLES,
+    COUNT(CASE WHEN IS_VISIBLE = 0 THEN 1 END) as OCULTAS
+FROM MENU_CONFIG 
+WHERE ID_PERFIL = 2 AND MENU_PATH IS NULL
+
+UNION ALL
+
+SELECT 
+    'PANTALLAS ESPECÍFICAS' as TIPO,
+    COUNT(*) as TOTAL,
+    COUNT(CASE WHEN IS_VISIBLE = 1 THEN 1 END) as VISIBLES,
+    COUNT(CASE WHEN IS_VISIBLE = 0 THEN 1 END) as OCULTAS
+FROM MENU_CONFIG 
+WHERE ID_PERFIL = 2 AND MENU_PATH IS NOT NULL;
+
+-- 2. Mostrar algunas pestañas principales para Jefe de Crédito
+SELECT 
+    MENU_LABEL,
+    IS_VISIBLE,
+    ORDEN
+FROM MENU_CONFIG 
+WHERE ID_PERFIL = 2 AND MENU_PATH IS NULL
+ORDER BY ORDEN;
+
+-- 3. Mostrar algunas pantallas específicas para Jefe de Crédito
+SELECT 
+    MENU_LABEL,
+    MENU_PATH,
+    IS_VISIBLE,
+    ORDEN
+FROM MENU_CONFIG 
+WHERE ID_PERFIL = 2 AND MENU_PATH IS NOT NULL
+ORDER BY ORDEN
+FETCH FIRST 10 ROWS ONLY;
+
+-- 4. Verificar que el usuario Jefe de Crédito existe
+SELECT 
+    u.NO_USUARIO,
+    u.NOMBRE_EMPLEADO,
+    p.NOMBRE_PERFIL,
+    u.ID_PERFIL
+FROM USUARIOS u
+JOIN PERFIL p ON u.ID_PERFIL = p.ID_PERFIL
+WHERE p.NOMBRE_PERFIL LIKE '%Jefe%' OR p.NOMBRE_PERFIL LIKE '%Credito%';

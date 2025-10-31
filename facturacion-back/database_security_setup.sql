@@ -1,0 +1,178 @@
+-- Script SQL para crear las tablas necesarias para el sistema de seguridad mejorado
+-- Ejecutar en Oracle Database
+
+-- Tabla para estados de pago de usuarios
+CREATE TABLE USER_PAYMENT_STATUS (
+    NO_USUARIO VARCHAR2(50) NOT NULL,
+    PAYMENT_STATUS VARCHAR2(20) NOT NULL CHECK (PAYMENT_STATUS IN ('PAID', 'PENDING', 'OVERDUE', 'SUSPENDED', 'CANCELLED')),
+    LAST_PAYMENT_DATE DATE,
+    NEXT_PAYMENT_DATE DATE,
+    AMOUNT NUMBER(10,2),
+    PAYMENT_METHOD VARCHAR2(50),
+    NOTES VARCHAR2(500),
+    CREATED_AT DATE DEFAULT SYSDATE,
+    UPDATED_AT DATE DEFAULT SYSDATE,
+    UPDATED_BY VARCHAR2(50),
+    CONSTRAINT PK_USER_PAYMENT_STATUS PRIMARY KEY (NO_USUARIO),
+    CONSTRAINT FK_USER_PAYMENT_STATUS_USUARIO FOREIGN KEY (NO_USUARIO) REFERENCES USUARIOS(NO_USUARIO)
+);
+
+-- Agregar nuevas columnas a la tabla USUARIOS para autenticación en dos pasos
+ALTER TABLE USUARIOS ADD (
+    TWO_FACTOR_ENABLED CHAR(1) DEFAULT 'N' CHECK (TWO_FACTOR_ENABLED IN ('Y', 'N')),
+    TWO_FACTOR_SECRET VARCHAR2(100),
+    LAST_LOGIN DATE,
+    USER_ROLE VARCHAR2(20) DEFAULT 'USER',
+    PASSWORD_ENCODED CHAR(1) DEFAULT 'N' CHECK (PASSWORD_ENCODED IN ('Y', 'N'))
+);
+
+-- Crear índices para mejorar el rendimiento
+CREATE INDEX IDX_USER_PAYMENT_STATUS ON USER_PAYMENT_STATUS(PAYMENT_STATUS);
+CREATE INDEX IDX_USER_PAYMENT_STATUS_DATE ON USER_PAYMENT_STATUS(LAST_PAYMENT_DATE);
+CREATE INDEX IDX_USUARIOS_TWO_FACTOR ON USUARIOS(TWO_FACTOR_ENABLED);
+CREATE INDEX IDX_USUARIOS_LAST_LOGIN ON USUARIOS(LAST_LOGIN);
+
+-- Insertar datos de ejemplo para super administrador
+INSERT INTO USUARIOS (
+    NO_USUARIO, NOMBRE_EMPLEADO, PASSWORD, ESTATUS_USUARIO, ID_PERFIL, 
+    FECHA_ALTA, FECHA_MOD, USUARIO_MOD, ID_DFI, ID_ESTACIONAMIENTO, 
+    MODIFICA_UBICACION, USER_ROLE, PASSWORD_ENCODED
+) VALUES (
+    'SUPERADMIN', 'Super Administrador Cibercom', 'admin123', 'A', 1,
+    SYSDATE, SYSDATE, 'SYSTEM', 1, 1,
+    'N', 'SUPER_ADMIN', 'N'
+);
+
+-- Insertar estado de pago para el super administrador (siempre pagado)
+INSERT INTO USER_PAYMENT_STATUS (
+    NO_USUARIO, PAYMENT_STATUS, CREATED_AT, UPDATED_AT, UPDATED_BY
+) VALUES (
+    'SUPERADMIN', 'PAID', SYSDATE, SYSDATE, 'SYSTEM'
+);
+
+-- Crear vista para usuarios con información de pago
+CREATE OR REPLACE VIEW V_USUARIOS_CON_PAGO AS
+SELECT 
+    u.NO_USUARIO,
+    u.NOMBRE_EMPLEADO,
+    u.ESTATUS_USUARIO,
+    u.ID_PERFIL,
+    p.NOMBRE_PERFIL,
+    u.TWO_FACTOR_ENABLED,
+    u.LAST_LOGIN,
+    u.USER_ROLE,
+    COALESCE(ups.PAYMENT_STATUS, 'PAID') as PAYMENT_STATUS,
+    ups.LAST_PAYMENT_DATE,
+    ups.NEXT_PAYMENT_DATE,
+    ups.AMOUNT,
+    ups.PAYMENT_METHOD,
+    ups.NOTES,
+    CASE 
+        WHEN u.USER_ROLE = 'SUPER_ADMIN' THEN 'Y'
+        WHEN COALESCE(ups.PAYMENT_STATUS, 'PAID') IN ('PAID') THEN 'Y'
+        ELSE 'N'
+    END as HAS_ACCESS
+FROM USUARIOS u
+LEFT JOIN PERFIL p ON u.ID_PERFIL = p.ID_PERFIL
+LEFT JOIN USER_PAYMENT_STATUS ups ON u.NO_USUARIO = ups.NO_USUARIO
+WHERE u.ESTATUS_USUARIO = 'A';
+
+-- Crear trigger para actualizar UPDATED_AT automáticamente
+CREATE OR REPLACE TRIGGER TRG_USER_PAYMENT_STATUS_UPDATE
+    BEFORE UPDATE ON USER_PAYMENT_STATUS
+    FOR EACH ROW
+BEGIN
+    :NEW.UPDATED_AT := SYSDATE;
+END;
+/
+
+-- Crear procedimiento para migrar contraseñas existentes a Base64
+CREATE OR REPLACE PROCEDURE SP_MIGRATE_PASSWORDS_TO_BASE64
+AS
+    CURSOR c_users IS
+        SELECT NO_USUARIO, PASSWORD 
+        FROM USUARIOS 
+        WHERE PASSWORD_ENCODED = 'N' AND PASSWORD IS NOT NULL;
+    
+    v_encoded_password VARCHAR2(200);
+BEGIN
+    FOR user_rec IN c_users LOOP
+        -- Codificar contraseña en Base64
+        v_encoded_password := UTL_ENCODE.BASE64_ENCODE(UTL_RAW.CAST_TO_RAW(user_rec.PASSWORD));
+        
+        -- Actualizar contraseña codificada
+        UPDATE USUARIOS 
+        SET PASSWORD = v_encoded_password,
+            PASSWORD_ENCODED = 'Y'
+        WHERE NO_USUARIO = user_rec.NO_USUARIO;
+        
+        COMMIT;
+    END LOOP;
+    
+    DBMS_OUTPUT.PUT_LINE('Migración de contraseñas completada');
+EXCEPTION
+    WHEN OTHERS THEN
+        ROLLBACK;
+        DBMS_OUTPUT.PUT_LINE('Error en migración: ' || SQLERRM);
+END;
+/
+
+-- Crear función para verificar acceso de usuario
+CREATE OR REPLACE FUNCTION FN_USER_HAS_ACCESS(p_username VARCHAR2)
+RETURN CHAR
+AS
+    v_user_role VARCHAR2(20);
+    v_payment_status VARCHAR2(20);
+BEGIN
+    -- Obtener rol del usuario
+    SELECT USER_ROLE INTO v_user_role
+    FROM USUARIOS
+    WHERE NO_USUARIO = p_username AND ESTATUS_USUARIO = 'A';
+    
+    -- Super admin siempre tiene acceso
+    IF v_user_role = 'SUPER_ADMIN' THEN
+        RETURN 'Y';
+    END IF;
+    
+    -- Verificar estado de pago
+    SELECT COALESCE(PAYMENT_STATUS, 'PAID') INTO v_payment_status
+    FROM USER_PAYMENT_STATUS
+    WHERE NO_USUARIO = p_username;
+    
+    -- Verificar si tiene acceso
+    IF v_payment_status IN ('PAID') THEN
+        RETURN 'Y';
+    ELSE
+        RETURN 'N';
+    END IF;
+    
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        RETURN 'N';
+    WHEN OTHERS THEN
+        RETURN 'N';
+END;
+/
+
+-- Comentarios en las tablas
+COMMENT ON TABLE USER_PAYMENT_STATUS IS 'Tabla para gestionar el estado de pago de los usuarios';
+COMMENT ON COLUMN USER_PAYMENT_STATUS.NO_USUARIO IS 'Identificador del usuario';
+COMMENT ON COLUMN USER_PAYMENT_STATUS.PAYMENT_STATUS IS 'Estado del pago: PAID, PENDING, OVERDUE, SUSPENDED, CANCELLED';
+COMMENT ON COLUMN USER_PAYMENT_STATUS.LAST_PAYMENT_DATE IS 'Fecha del último pago';
+COMMENT ON COLUMN USER_PAYMENT_STATUS.NEXT_PAYMENT_DATE IS 'Fecha del próximo pago';
+COMMENT ON COLUMN USER_PAYMENT_STATUS.AMOUNT IS 'Monto del pago';
+COMMENT ON COLUMN USER_PAYMENT_STATUS.PAYMENT_METHOD IS 'Método de pago utilizado';
+COMMENT ON COLUMN USER_PAYMENT_STATUS.NOTES IS 'Notas adicionales sobre el pago';
+
+COMMENT ON COLUMN USUARIOS.TWO_FACTOR_ENABLED IS 'Indica si la autenticación en dos pasos está habilitada';
+COMMENT ON COLUMN USUARIOS.TWO_FACTOR_SECRET IS 'Clave secreta para autenticación en dos pasos';
+COMMENT ON COLUMN USUARIOS.LAST_LOGIN IS 'Fecha y hora del último login';
+COMMENT ON COLUMN USUARIOS.USER_ROLE IS 'Rol del usuario: SUPER_ADMIN, ADMIN, USER, OPERATOR';
+COMMENT ON COLUMN USUARIOS.PASSWORD_ENCODED IS 'Indica si la contraseña está codificada';
+
+-- Crear sinónimos para facilitar el acceso
+CREATE SYNONYM UPS FOR USER_PAYMENT_STATUS;
+CREATE SYNONYM VUCP FOR V_USUARIOS_CON_PAGO;
+
+-- Script completado
+SELECT 'Script de seguridad completado exitosamente' AS RESULTADO FROM DUAL;

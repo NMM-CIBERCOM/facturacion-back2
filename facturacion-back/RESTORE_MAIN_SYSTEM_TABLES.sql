@@ -1,0 +1,163 @@
+-- =====================================================
+-- SCRIPT PARA RESTAURAR TABLAS DEL SISTEMA PRINCIPAL
+-- =====================================================
+
+-- IMPORTANTE: Este script restaura las tablas necesarias para el sistema principal de facturación
+-- que fueron eliminadas accidentalmente por el script de limpieza del MS CDP
+
+-- =====================================================
+-- 1. RESTAURAR TABLA DE USUARIOS
+-- =====================================================
+
+CREATE TABLE USUARIOS (
+    NO_USUARIO VARCHAR2(50) NOT NULL,
+    NOMBRE_EMPLEADO VARCHAR2(100) NOT NULL,
+    PASSWORD VARCHAR2(100) NOT NULL,
+    ESTATUS_USUARIO VARCHAR2(20) DEFAULT 'ACTIVO',
+    ID_PERFIL NUMBER(10) NOT NULL,
+    FECHA_ALTA DATE DEFAULT SYSDATE,
+    FECHA_MOD DATE DEFAULT SYSDATE,
+    USUARIO_MOD VARCHAR2(50),
+    ID_DFI NUMBER(10) DEFAULT 1,
+    ID_ESTACIONAMIENTO NUMBER(10) DEFAULT 1,
+    MODIFICA_UBICACION CHAR(1) DEFAULT 'S',
+    CONSTRAINT PK_USUARIOS PRIMARY KEY (NO_USUARIO),
+    CONSTRAINT FK_USUARIOS_PERFIL FOREIGN KEY (ID_PERFIL) REFERENCES PERFIL(ID_PERFIL)
+);
+
+-- =====================================================
+-- 2. RESTAURAR TABLA DE PERFILES
+-- =====================================================
+
+CREATE TABLE PERFIL (
+    ID_PERFIL NUMBER(10) NOT NULL,
+    NOMBRE_PERFIL VARCHAR2(50) NOT NULL,
+    FECHA_ALTA DATE DEFAULT SYSDATE,
+    FECHA_MOD DATE DEFAULT SYSDATE,
+    USUARIO_MOD VARCHAR2(50),
+    CONSTRAINT PK_PERFIL PRIMARY KEY (ID_PERFIL)
+);
+
+-- =====================================================
+-- 3. RESTAURAR TABLA DE CONFIGURACIÓN DE MENÚS
+-- =====================================================
+
+CREATE TABLE MENU_CONFIG (
+    ID_CONFIG NUMBER(10) NOT NULL,
+    ID_PERFIL NUMBER(10) NOT NULL,
+    MENU_LABEL VARCHAR2(100) NOT NULL,
+    MENU_PATH VARCHAR2(200),
+    IS_VISIBLE NUMBER(1) DEFAULT 1,
+    ORDEN NUMBER(10) DEFAULT 1,
+    FECHA_CREACION DATE DEFAULT SYSDATE,
+    FECHA_MODIFICACION DATE DEFAULT SYSDATE,
+    USUARIO_CREACION VARCHAR2(50),
+    USUARIO_MODIFICACION VARCHAR2(50),
+    CONSTRAINT PK_MENU_CONFIG PRIMARY KEY (ID_CONFIG),
+    CONSTRAINT FK_MENU_CONFIG_PERFIL FOREIGN KEY (ID_PERFIL) REFERENCES PERFIL(ID_PERFIL)
+);
+
+-- =====================================================
+-- 4. CREAR SECUENCIAS
+-- =====================================================
+
+-- Secuencia para USUARIOS
+CREATE SEQUENCE USUARIO_SEQ
+    START WITH 1
+    INCREMENT BY 1
+    NOCACHE;
+
+-- Secuencia para PERFIL
+CREATE SEQUENCE PERFIL_SEQ
+    START WITH 1
+    INCREMENT BY 1
+    NOCACHE;
+
+-- Secuencia para MENU_CONFIG
+CREATE SEQUENCE MENU_CONFIG_SEQ
+    START WITH 1
+    INCREMENT BY 1
+    NOCACHE;
+
+-- =====================================================
+-- 5. INSERTAR DATOS BÁSICOS
+-- =====================================================
+
+-- Insertar perfiles
+INSERT INTO PERFIL (ID_PERFIL, NOMBRE_PERFIL, FECHA_ALTA, FECHA_MOD, USUARIO_MOD) VALUES (1, 'Operador de Crédito', SYSDATE, SYSDATE, 'SYSTEM');
+INSERT INTO PERFIL (ID_PERFIL, NOMBRE_PERFIL, FECHA_ALTA, FECHA_MOD, USUARIO_MOD) VALUES (2, 'Jefe de Crédito', SYSDATE, SYSDATE, 'SYSTEM');
+INSERT INTO PERFIL (ID_PERFIL, NOMBRE_PERFIL, FECHA_ALTA, FECHA_MOD, USUARIO_MOD) VALUES (3, 'Administrador', SYSDATE, SYSDATE, 'SYSTEM');
+
+-- Insertar usuarios
+INSERT INTO USUARIOS (
+    NO_USUARIO, NOMBRE_EMPLEADO, PASSWORD, ESTATUS_USUARIO, ID_PERFIL,
+    FECHA_ALTA, FECHA_MOD, USUARIO_MOD, ID_DFI, ID_ESTACIONAMIENTO, MODIFICA_UBICACION
+) VALUES (
+    'admin', 'Administrador Sistema', 'admin123', 'ACTIVO', 3,
+    SYSDATE, SYSDATE, 'SYSTEM', 1, 1, 'S'
+);
+
+INSERT INTO USUARIOS (
+    NO_USUARIO, NOMBRE_EMPLEADO, PASSWORD, ESTATUS_USUARIO, ID_PERFIL,
+    FECHA_ALTA, FECHA_MOD, USUARIO_MOD, ID_DFI, ID_ESTACIONAMIENTO, MODIFICA_UBICACION
+) VALUES (
+    'operador', 'Operador de Crédito', 'operador123', 'ACTIVO', 1,
+    SYSDATE, SYSDATE, 'SYSTEM', 1, 1, 'S'
+);
+
+INSERT INTO USUARIOS (
+    NO_USUARIO, NOMBRE_EMPLEADO, PASSWORD, ESTATUS_USUARIO, ID_PERFIL,
+    FECHA_ALTA, FECHA_MOD, USUARIO_MOD, ID_DFI, ID_ESTACIONAMIENTO, MODIFICA_UBICACION
+) VALUES (
+    'jefe', 'Jefe de Crédito', 'jefe123', 'ACTIVO', 2,
+    SYSDATE, SYSDATE, 'SYSTEM', 1, 1, 'S'
+);
+
+-- =====================================================
+-- 6. INSERTAR CONFIGURACIÓN BÁSICA DE MENÚS
+-- =====================================================
+
+-- Dashboard para todos los perfiles
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) VALUES (MENU_CONFIG_SEQ.NEXTVAL, 1, 'Dashboard', 'dashboard', 1, 1, 'admin');
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) VALUES (MENU_CONFIG_SEQ.NEXTVAL, 2, 'Dashboard', 'dashboard', 1, 1, 'admin');
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Dashboard', 'dashboard', 1, 1, 'admin');
+
+-- Configuración solo para administrador
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Configuración', NULL, 1, 1, 'admin');
+INSERT INTO MENU_CONFIG (ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE, ORDEN, USUARIO_CREACION) VALUES (MENU_CONFIG_SEQ.NEXTVAL, 3, 'Configuración de Menús', 'configuracion-menus', 1, 1, 'admin');
+
+-- =====================================================
+-- 7. VERIFICAR RESTAURACIÓN
+-- =====================================================
+
+-- Verificar que las tablas existen
+SELECT 'TABLAS RESTAURADAS' as ESTADO, COUNT(*) as TOTAL
+FROM USER_TABLES 
+WHERE TABLE_NAME IN ('USUARIOS', 'PERFIL', 'MENU_CONFIG');
+
+-- Verificar usuarios
+SELECT NO_USUARIO, NOMBRE_EMPLEADO, ID_PERFIL, ESTATUS_USUARIO
+FROM USUARIOS
+ORDER BY ID_PERFIL;
+
+-- Verificar perfiles
+SELECT ID_PERFIL, NOMBRE_PERFIL
+FROM PERFIL
+ORDER BY ID_PERFIL;
+
+-- Verificar configuración de menús
+SELECT ID_CONFIG, ID_PERFIL, MENU_LABEL, MENU_PATH, IS_VISIBLE
+FROM MENU_CONFIG
+ORDER BY ID_PERFIL, ORDEN;
+
+COMMIT;
+
+-- =====================================================
+-- RESTAURACIÓN COMPLETADA
+-- =====================================================
+-- Las tablas del sistema principal han sido restauradas
+-- Ahora deberías poder iniciar sesión con:
+-- - admin / admin123 (Administrador)
+-- - operador / operador123 (Operador de Crédito)  
+-- - jefe / jefe123 (Jefe de Crédito)
+-- =====================================================
