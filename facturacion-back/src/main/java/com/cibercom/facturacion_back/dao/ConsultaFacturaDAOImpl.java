@@ -138,7 +138,28 @@ public class ConsultaFacturaDAOImpl implements ConsultaFacturaDAO {
 
                 logger.info("Ejecutando stored procedure con {} parámetros IN y 1 OUT cursor", paramIndex - 1);
 
-                stmt.execute();
+                try {
+                    stmt.execute();
+                } catch (SQLException e) {
+                    String msg = e.getMessage() != null ? e.getMessage() : "";
+                    int code = e.getErrorCode();
+                    logger.error("Error al ejecutar el stored procedure: {} (code={})", msg, code);
+
+                    boolean isBrokenPkg = msg.contains("ORA-04063") || msg.contains("ORA-06508") || code == 4063
+                            || code == 6508;
+                    if (isBrokenPkg) {
+                        logger.warn(
+                                "FEE_UTIL_PCK.buscaFacturas falló por paquete con errores (ORA-04063/06508). Ejecutando fallback directo contra FACTURAS...");
+                        try {
+                            return buscarFacturasFallback(conn, request);
+                        } catch (Exception fb) {
+                            logger.error("Fallback directo contra FACTURAS también falló: {}", fb.getMessage(), fb);
+                            throw new RuntimeException(
+                                    "Fallback directo contra FACTURAS falló: " + fb.getMessage(), fb);
+                        }
+                    }
+                    throw e;
+                }
 
                 try (ResultSet rs = (ResultSet) stmt.getObject(12)) {
                     if (rs == null) {
@@ -175,6 +196,127 @@ public class ConsultaFacturaDAOImpl implements ConsultaFacturaDAO {
         return facturas;
     }
 
+    /**
+     * Fallback directo contra la tabla FACTURAS usando filtros básicos del request.
+     * Evita el uso del paquete FEE_UTIL_PCK cuando está roto o faltante.
+     */
+    private List<FacturaConsultaDTO> buscarFacturasFallback(Connection conn, ConsultaFacturaRequest request)
+            throws SQLException {
+        List<Object> params = new ArrayList<>();
+        StringBuilder sb = new StringBuilder();
+
+        // Detectar columnas disponibles para evitar ORA-00904
+        boolean hasEstado = columnExists(conn, "FACTURAS", "ESTADO");
+        boolean hasTienda = columnExists(conn, "FACTURAS", "TIENDA");
+        boolean hasEmisorRfc = columnExists(conn, "FACTURAS", "EMISOR_RFC");
+        boolean hasReceptorRfc = columnExists(conn, "FACTURAS", "RFC_R");
+        // Resolver columna de fecha disponible para evitar ORA-00904
+        String dateCol = null;
+        String[] dateCandidates = new String[] {"FECHA_FACTURA", "FECHA_EMISION", "FECHA", "FECHA_TIMBRADO", "FECHA_CREACION"};
+        for (String cand : dateCandidates) {
+            if (columnExists(conn, "FACTURAS", cand)) { dateCol = cand; break; }
+        }
+        boolean hasImporte = columnExists(conn, "FACTURAS", "IMPORTE");
+        boolean hasSerie = columnExists(conn, "FACTURAS", "SERIE");
+        boolean hasFolio = columnExists(conn, "FACTURAS", "FOLIO");
+        boolean hasUuid = columnExists(conn, "FACTURAS", "UUID");
+
+        StringBuilder selectCols = new StringBuilder();
+        // Selección mínima
+        if (hasUuid) selectCols.append("UUID");
+        if (hasEmisorRfc) selectCols.append(", EMISOR_RFC");
+        if (hasReceptorRfc) selectCols.append(", RFC_R");
+        if (dateCol != null) selectCols.append(", ").append(dateCol).append(" AS FECHA_FACTURA");
+        if (hasImporte) selectCols.append(", IMPORTE");
+        if (hasSerie) selectCols.append(", SERIE");
+        if (hasFolio) selectCols.append(", FOLIO");
+        if (hasTienda) selectCols.append(", TIENDA");
+        if (hasEstado) selectCols.append(", ESTADO");
+
+        sb.append("SELECT ").append(selectCols.length() > 0 ? selectCols.toString() : "UUID")
+          .append(" FROM FACTURAS WHERE 1=1");
+
+        if (request.getUuid() != null && !request.getUuid().trim().isEmpty()) {
+            sb.append(" AND UUID = ?");
+            params.add(request.getUuid().trim());
+        }
+
+        if (request.getRfcReceptor() != null && !request.getRfcReceptor().trim().isEmpty()
+                && !"TODAS".equalsIgnoreCase(request.getRfcReceptor().trim())) {
+            sb.append(" AND UPPER(RFC_R) = UPPER(?)");
+            params.add(request.getRfcReceptor().trim());
+        }
+
+        if (request.getSerie() != null && !request.getSerie().trim().isEmpty()) {
+            sb.append(" AND SERIE = ?");
+            params.add(request.getSerie().trim());
+        }
+        if (request.getFolio() != null && !request.getFolio().trim().isEmpty()) {
+            sb.append(" AND FOLIO = ?");
+            params.add(request.getFolio().trim());
+        }
+
+        if (dateCol != null) {
+            if (request.getFechaInicio() != null) {
+                sb.append(" AND ").append(dateCol).append(" >= ?");
+                params.add(java.sql.Date.valueOf(request.getFechaInicio()));
+            }
+            if (request.getFechaFin() != null) {
+                // Inclusivo: fecha <= fin
+                sb.append(" AND ").append(dateCol).append(" <= ?");
+                params.add(java.sql.Date.valueOf(request.getFechaFin()));
+            }
+            sb.append(" ORDER BY ").append(dateCol).append(" DESC");
+        }
+
+        String sql = sb.toString();
+        logger.info("Ejecutando fallback SQL: {}", sql);
+
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            for (int i = 0; i < params.size(); i++) {
+                ps.setObject(i + 1, params.get(i));
+            }
+            List<FacturaConsultaDTO> list = new ArrayList<>();
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    FacturaConsultaDTO dto = new FacturaConsultaDTO();
+                    // Usar ResultSetMetaData para leer sólo columnas presentes
+                    java.sql.ResultSetMetaData md = rs.getMetaData();
+                    java.util.Set<String> labels = new java.util.HashSet<>();
+                    for (int i = 1; i <= md.getColumnCount(); i++) {
+                        labels.add(md.getColumnLabel(i).toUpperCase());
+                    }
+                    if (labels.contains("UUID")) dto.setUuid(rs.getString("UUID"));
+                    if (labels.contains("EMISOR_RFC")) dto.setRfcEmisor(rs.getString("EMISOR_RFC"));
+                    if (labels.contains("RFC_R")) dto.setRfcReceptor(rs.getString("RFC_R"));
+                    if (labels.contains("SERIE")) dto.setSerie(rs.getString("SERIE"));
+                    if (labels.contains("FOLIO")) dto.setFolio(rs.getString("FOLIO"));
+                    if (labels.contains("FECHA_FACTURA")) {
+                        java.sql.Timestamp ts = rs.getTimestamp("FECHA_FACTURA");
+                        if (ts != null) {
+                            dto.setFechaEmision(ts.toLocalDateTime().toLocalDate());
+                        }
+                    }
+                    if (labels.contains("IMPORTE")) {
+                        java.math.BigDecimal imp = rs.getBigDecimal("IMPORTE");
+                        if (imp != null) {
+                            dto.setImporte(imp);
+                        }
+                    }
+                    if (labels.contains("ESTADO")) {
+                        dto.setEstatusFacturacion(rs.getString("ESTADO"));
+                        dto.setEstatusSat(rs.getString("ESTADO"));
+                    }
+                    if (labels.contains("TIENDA")) dto.setTienda(rs.getString("TIENDA"));
+                    // ALMACEN/USUARIO podrían no existir; se dejan nulos
+                    list.add(dto);
+                }
+            }
+            logger.info("Fallback retornó {} facturas", list.size());
+            return list;
+        }
+    }
+
     @Override
     public boolean cancelarFactura(com.cibercom.facturacion_back.dto.CancelFacturaRequest request) {
         String updateSql = "UPDATE FACTURAS\n" +
@@ -198,10 +340,17 @@ public class ConsultaFacturaDAOImpl implements ConsultaFacturaDAO {
 
     @Override
     public boolean marcarEnProceso(String uuid) {
-        String sql = "UPDATE FACTURAS SET ESTADO='EN PROCESO DE CANCELACION' WHERE UUID=? AND ESTADO IN ('VIGENTE','ACTIVA','EMITIDA')";
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, uuid);
-            return ps.executeUpdate() > 0;
+        try (Connection conn = dataSource.getConnection()) {
+            boolean hasEstado = columnExists(conn, "FACTURAS", "ESTADO");
+            if (!hasEstado) {
+                logger.warn("Columna ESTADO no existe; se omite marcar EN_PROCESO para UUID {}", uuid);
+                return false;
+            }
+            String sql = "UPDATE FACTURAS SET ESTADO='EN PROCESO DE CANCELACION' WHERE UUID=? AND ESTADO IN ('VIGENTE','ACTIVA','EMITIDA')";
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, uuid);
+                return ps.executeUpdate() > 0;
+            }
         } catch (SQLException e) {
             logger.error("Error al marcar EN_PROCESO {}: {}", uuid, e.getMessage());
             throw new RuntimeException("Error marcando EN_PROCESO: " + e.getMessage(), e);
@@ -210,11 +359,18 @@ public class ConsultaFacturaDAOImpl implements ConsultaFacturaDAO {
 
     @Override
     public boolean actualizarEstado(String uuid, String estado) {
-        String sql = "UPDATE FACTURAS SET ESTADO=? WHERE UUID=?";
-        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, estado);
-            ps.setString(2, uuid);
-            return ps.executeUpdate() > 0;
+        try (Connection conn = dataSource.getConnection()) {
+            boolean hasEstado = columnExists(conn, "FACTURAS", "ESTADO");
+            if (!hasEstado) {
+                logger.warn("Columna ESTADO no existe; se omite actualización de estado para UUID {} a {}", uuid, estado);
+                return false;
+            }
+            String sql = "UPDATE FACTURAS SET ESTADO=? WHERE UUID=?";
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, estado);
+                ps.setString(2, uuid);
+                return ps.executeUpdate() > 0;
+            }
         } catch (SQLException e) {
             logger.error("Error al actualizar estado {} a {}: {}", uuid, estado, e.getMessage());
             throw new RuntimeException("Error actualizando estado: " + e.getMessage(), e);
@@ -238,31 +394,84 @@ public class ConsultaFacturaDAOImpl implements ConsultaFacturaDAO {
             return info;
         }
 
-        String sql = "SELECT UUID, EMISOR_RFC, RFC_R, FECHA_FACTURA, IMPORTE AS TOTAL, SERIE, FOLIO, TIENDA, ESTADO FROM FACTURAS WHERE UUID = ?";
-        try (Connection conn = dataSource.getConnection();
-                PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, uuid);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    FacturaInfo info = new FacturaInfo();
-                    info.uuid = rs.getString("UUID");
-                    info.rfcEmisor = rs.getString("EMISOR_RFC");
-                    info.rfcReceptor = rs.getString("RFC_R");
-                    java.sql.Timestamp ts = rs.getTimestamp("FECHA_FACTURA");
-                    if (ts != null)
-                        info.fechaFactura = ts.toInstant().atOffset(java.time.ZoneOffset.UTC);
-                    info.total = rs.getBigDecimal("TOTAL");
-                    info.serie = rs.getString("SERIE");
-                    info.folio = rs.getString("FOLIO");
-                    info.tienda = rs.getString("TIENDA");
-                    info.estatus = rs.getString("ESTADO");
-                    return info;
+        try (Connection conn = dataSource.getConnection()) {
+            boolean hasEstado = columnExists(conn, "FACTURAS", "ESTADO");
+            boolean hasTienda = columnExists(conn, "FACTURAS", "TIENDA");
+            boolean hasEmisorRfc = columnExists(conn, "FACTURAS", "EMISOR_RFC");
+            boolean hasReceptorRfc = columnExists(conn, "FACTURAS", "RFC_R");
+            String dateCol = null;
+            for (String cand : new String[]{"FECHA_FACTURA", "FECHA_EMISION", "FECHA", "FECHA_TIMBRADO", "FECHA_CREACION"}) {
+                if (columnExists(conn, "FACTURAS", cand)) { dateCol = cand; break; }
+            }
+            boolean hasSerie = columnExists(conn, "FACTURAS", "SERIE");
+            boolean hasFolio = columnExists(conn, "FACTURAS", "FOLIO");
+
+            StringBuilder selectCols = new StringBuilder("UUID");
+            if (hasEmisorRfc) selectCols.append(", EMISOR_RFC");
+            if (hasReceptorRfc) selectCols.append(", RFC_R");
+            if (dateCol != null) selectCols.append(", ").append(dateCol).append(" AS FECHA_FACTURA");
+            // IMPORTE siempre con alias TOTAL si existe
+            if (columnExists(conn, "FACTURAS", "IMPORTE")) selectCols.append(", IMPORTE AS TOTAL");
+            if (hasSerie) selectCols.append(", SERIE");
+            if (hasFolio) selectCols.append(", FOLIO");
+            if (hasTienda) selectCols.append(", TIENDA");
+            if (hasEstado) selectCols.append(", ESTADO");
+
+            String sql = "SELECT " + selectCols + " FROM FACTURAS WHERE UUID = ?";
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, uuid);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        FacturaInfo info = new FacturaInfo();
+                        info.uuid = rs.getString("UUID");
+                        java.sql.ResultSetMetaData md = rs.getMetaData();
+                        java.util.Set<String> labels = new java.util.HashSet<>();
+                        for (int i = 1; i <= md.getColumnCount(); i++) {
+                            labels.add(md.getColumnLabel(i).toUpperCase());
+                        }
+                        if (labels.contains("EMISOR_RFC")) info.rfcEmisor = rs.getString("EMISOR_RFC");
+                        if (labels.contains("RFC_R")) info.rfcReceptor = rs.getString("RFC_R");
+                        java.sql.Timestamp ts = labels.contains("FECHA_FACTURA") ? rs.getTimestamp("FECHA_FACTURA") : null;
+                        if (ts != null)
+                            info.fechaFactura = ts.toInstant().atOffset(java.time.ZoneOffset.UTC);
+                        if (labels.contains("TOTAL")) info.total = rs.getBigDecimal("TOTAL");
+                        if (labels.contains("SERIE")) info.serie = rs.getString("SERIE");
+                        if (labels.contains("FOLIO")) info.folio = rs.getString("FOLIO");
+                        if (labels.contains("TIENDA")) info.tienda = rs.getString("TIENDA");
+                        if (labels.contains("ESTADO")) info.estatus = rs.getString("ESTADO");
+                        return info;
+                    }
+                    return null;
                 }
-                return null;
             }
         } catch (SQLException e) {
             logger.error("Error obteniendo factura por UUID {}: {}", uuid, e.getMessage());
             throw new RuntimeException("Error consultando factura por UUID: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Verifica si una columna existe en la tabla dada usando DatabaseMetaData.
+     */
+    private boolean columnExists(Connection conn, String tableName, String columnName) {
+        try {
+            DatabaseMetaData meta = conn.getMetaData();
+            try (ResultSet rs = meta.getColumns(null, null, tableName, columnName)) {
+                return rs.next();
+            }
+        } catch (SQLException e) {
+            // Como fallback, intentar consultar ALL_TAB_COLUMNS
+            String sql = "SELECT 1 FROM ALL_TAB_COLUMNS WHERE UPPER(TABLE_NAME)=? AND UPPER(COLUMN_NAME)=?";
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, tableName.toUpperCase());
+                ps.setString(2, columnName.toUpperCase());
+                try (ResultSet rs = ps.executeQuery()) {
+                    return rs.next();
+                }
+            } catch (SQLException ignored) {
+                logger.warn("No se pudo verificar existencia de columna {}.{}: {}", tableName, columnName, e.getMessage());
+                return false;
+            }
         }
     }
 

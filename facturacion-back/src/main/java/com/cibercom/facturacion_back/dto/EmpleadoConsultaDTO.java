@@ -1,6 +1,7 @@
 package com.cibercom.facturacion_back.dto;
 
 import java.sql.Timestamp;
+import java.math.BigDecimal;
 
 /**
  * DTO para consulta de empleados
@@ -10,6 +11,8 @@ public class EmpleadoConsultaDTO {
     private Integer id;
     private String contrasena;
     private String correo;
+    private String rfc;
+    private String curp;
     private String nombre;
     private String noUsuario;
     private String nombreEmpleado;
@@ -23,6 +26,7 @@ public class EmpleadoConsultaDTO {
     private String modificaUbicacion;
     private String password;
     private String usuarioMod;
+    private BigDecimal salarioBase;
 
     // Constructor por defecto
     public EmpleadoConsultaDTO() {}
@@ -50,6 +54,22 @@ public class EmpleadoConsultaDTO {
 
     public void setCorreo(String correo) {
         this.correo = correo;
+    }
+
+    public String getRfc() {
+        return rfc;
+    }
+
+    public void setRfc(String rfc) {
+        this.rfc = rfc;
+    }
+
+    public String getCurp() {
+        return curp;
+    }
+
+    public void setCurp(String curp) {
+        this.curp = curp;
     }
 
     public String getNombre() {
@@ -156,12 +176,22 @@ public class EmpleadoConsultaDTO {
         this.usuarioMod = usuarioMod;
     }
 
+    public BigDecimal getSalarioBase() {
+        return salarioBase;
+    }
+
+    public void setSalarioBase(BigDecimal salarioBase) {
+        this.salarioBase = salarioBase;
+    }
+
     @Override
     public String toString() {
         return "EmpleadoConsultaDTO{" +
                 "id=" + id +
                 ", contrasena='" + contrasena + '\'' +
                 ", correo='" + correo + '\'' +
+                ", rfc='" + rfc + '\'' +
+                ", curp='" + curp + '\'' +
                 ", nombre='" + nombre + '\'' +
                 ", noUsuario='" + noUsuario + '\'' +
                 ", nombreEmpleado='" + nombreEmpleado + '\'' +
@@ -175,6 +205,7 @@ public class EmpleadoConsultaDTO {
                 ", modificaUbicacion='" + modificaUbicacion + '\'' +
                 ", password='" + password + '\'' +
                 ", usuarioMod='" + usuarioMod + '\'' +
+                ", salarioBase=" + salarioBase +
                 '}';
     }
 }

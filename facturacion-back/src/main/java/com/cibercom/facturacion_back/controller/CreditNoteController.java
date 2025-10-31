@@ -4,12 +4,15 @@ import com.cibercom.facturacion_back.model.CreditNote;
 import com.cibercom.facturacion_back.model.CreditNoteItem;
 import com.cibercom.facturacion_back.model.CreditNoteLink;
 import com.cibercom.facturacion_back.service.CreditNoteService;
+import com.cibercom.facturacion_back.service.CreditNoteOracleSaveService;
+import com.cibercom.facturacion_back.dto.CreditNoteSaveRequest;
 import lombok.Data;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.beans.factory.ObjectProvider;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -24,8 +27,11 @@ public class CreditNoteController {
     private static final Logger logger = LoggerFactory.getLogger(CreditNoteController.class);
 
     private final CreditNoteService service;
-    public CreditNoteController(CreditNoteService service) {
+    private final ObjectProvider<CreditNoteOracleSaveService> oracleSaveProvider;
+    public CreditNoteController(CreditNoteService service,
+                                ObjectProvider<CreditNoteOracleSaveService> oracleSaveProvider) {
         this.service = service;
+        this.oracleSaveProvider = oracleSaveProvider;
     }
 
     @Data
@@ -90,6 +96,24 @@ public class CreditNoteController {
             @RequestParam(value = "uuidFactura", required = false) String uuidFactura) {
         List<CreditNote> list = service.search(fechaInicio, fechaFin, uuidFactura);
         return ResponseEntity.ok(list.stream().map(this::toResponse).toList());
+    }
+
+    /** Guardar Nota de Crédito en Oracle: FACTURAS y NOTAS_CREDITO */
+    @PostMapping("/guardar")
+    public ResponseEntity<?> guardar(@RequestBody CreditNoteSaveRequest request) {
+        CreditNoteOracleSaveService svc = oracleSaveProvider.getIfAvailable();
+        if (svc == null) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("ok", false);
+            m.put("message", "Oracle no disponible (perfil 'oracle' inactivo)");
+            return ResponseEntity.status(501).body(m);
+        }
+        CreditNoteOracleSaveService.SaveResult res = svc.guardar(request);
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("ok", res.ok);
+        m.put("uuidNc", res.uuidNc);
+        m.put("errors", res.errors);
+        return ResponseEntity.ok(m);
     }
 
     private LocalDate parsePeriodo(String periodo) {

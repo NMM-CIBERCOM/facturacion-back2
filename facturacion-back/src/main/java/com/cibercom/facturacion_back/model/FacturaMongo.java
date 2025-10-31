@@ -136,6 +136,7 @@ public class FacturaMongo {
     public java.util.Map<String, Object> getReceptor() { return receptor; }
     public java.util.Map<String, Object> getEmisor() { return emisor; }
     public String getEstado() { return estado; }
+    public String getEstadoDescripcion() { return estadoDescripcion; }
     public String getUuid() { return uuid; }
     public String getXmlContent() { return xmlContent; }
     public java.time.LocalDateTime getFechaTimbrado() { return fechaTimbrado; }

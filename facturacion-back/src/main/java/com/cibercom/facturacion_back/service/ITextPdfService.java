@@ -30,6 +30,7 @@ import java.io.StringReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.math.BigDecimal;
 import java.util.Base64;
 import java.util.Map;
 
@@ -61,14 +62,23 @@ public class ITextPdfService {
             // Agregar información de empresa y cliente
             agregarInformacionEmpresaCliente(document, facturaData, logoConfig);
             
-            // Agregar conceptos con diseño moderno
-            agregarConceptosModerno(document, facturaData, logoConfig);
+            // Si es nómina, agregar sección específica; de lo contrario, conceptos
+            if (tieneNomina(facturaData)) {
+                agregarSeccionNomina(document, facturaData, logoConfig);
+            } else {
+                // Agregar conceptos con diseño moderno
+                agregarConceptosModerno(document, facturaData, logoConfig);
+            }
             
             // Agregar complemento Carta Porte
             agregarComplementoCartaPorte(document, facturaData, logoConfig);
             
-            // Agregar totales modernos
-            agregarTotalesModerno(document, facturaData, logoConfig);
+            // Totales: nómina o factura clásica
+            if (tieneNomina(facturaData)) {
+                agregarTotalesNomina(document, facturaData, logoConfig);
+            } else {
+                agregarTotalesModerno(document, facturaData, logoConfig);
+            }
             
             // Agregar información fiscal moderna
             agregarInformacionFiscalModerna(document, facturaData, logoConfig);
@@ -202,7 +212,8 @@ public class ITextPdfService {
                 .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE)
                 .setWidth(UnitValue.createPercentValue(70));
             
-            Paragraph titulo = new Paragraph("FACTURA ELECTRÓNICA")
+            String tituloTexto = tieneNomina(factura) ? "RECIBO DE NÓMINA" : "FACTURA ELECTRÓNICA";
+            Paragraph titulo = new Paragraph(tituloTexto)
                 .setBold()
                 .setFontSize(16)
                 .setFontColor(ColorConstants.WHITE)
@@ -546,18 +557,23 @@ public class ITextPdfService {
                 conceptosTable.addHeaderCell(headerCell);
             }
             
-            // Obtener conceptos
+            // Obtener conceptos.
+            // Si no vienen en facturaData, construir uno dinámico con los totales para que
+            // el PDF refleje los importes reales del ticket/factura y no el ejemplo.
             java.util.List<java.util.Map<String, Object>> conceptos = getListValue(facturaData, "conceptos");
             if (conceptos == null || conceptos.isEmpty()) {
-                // Crear concepto de ejemplo
                 conceptos = new java.util.ArrayList<>();
-                java.util.Map<String, Object> conceptoEjemplo = new java.util.HashMap<>();
-                conceptoEjemplo.put("cantidad", "1");
-                conceptoEjemplo.put("descripcion", "Producto de ejemplo");
-                conceptoEjemplo.put("valorUnitario", "100.00");
-                conceptoEjemplo.put("importe", "100.00");
-                conceptoEjemplo.put("iva", "16.00");
-                conceptos.add(conceptoEjemplo);
+                java.util.Map<String, Object> conceptoUnico = new java.util.HashMap<>();
+                conceptoUnico.put("cantidad", "1");
+                // Descripción genérica si no se proporcionó: se puede ajustar según el flujo
+                conceptoUnico.put("descripcion", getString(facturaData, "descripcionConcepto", "Venta"));
+                String subtotalStr = getString(facturaData, "subtotal", "0.00");
+                String ivaStr = getString(facturaData, "iva", "0.00");
+                // Usamos el subtotal como precio unitario e importe para un concepto único
+                conceptoUnico.put("valorUnitario", subtotalStr);
+                conceptoUnico.put("importe", subtotalStr);
+                conceptoUnico.put("iva", ivaStr);
+                conceptos.add(conceptoUnico);
             }
             
             // Agregar filas de conceptos
@@ -605,6 +621,173 @@ public class ITextPdfService {
             return (java.util.List<java.util.Map<String, Object>>) value;
         }
         return null;
+    }
+
+    /**
+     * Sección específica para recibo de nómina.
+     */
+    @SuppressWarnings("unchecked")
+    private void agregarSeccionNomina(Document document, Map<String, Object> facturaData, Map<String, Object> logoConfig) {
+        try {
+            DeviceRgb primaryColor = extraerColorPrimario(logoConfig);
+            Map<String, Object> nomina = (Map<String, Object>) facturaData.get("nomina");
+            if (nomina == null) nomina = java.util.Collections.emptyMap();
+
+            Table container = new Table(1);
+            container.setWidth(UnitValue.createPercentValue(100));
+            container.setMarginTop(8);
+
+            Cell cell = new Cell()
+                .setBorder(new SolidBorder(new DeviceRgb(226, 232, 240), 1))
+                .setBackgroundColor(new DeviceRgb(248, 250, 252))
+                .setPadding(8);
+
+            Paragraph titulo = new Paragraph("NÓMINA")
+                .setBold()
+                .setFontSize(9)
+                .setFontColor(primaryColor)
+                .setMarginBottom(4);
+            cell.add(titulo);
+
+            Table inner = new Table(2);
+            inner.setWidth(UnitValue.createPercentValue(100));
+
+            // Lado izquierdo: datos del empleado
+            Cell left = new Cell().setBorder(null);
+            left.add(new Paragraph("Empleado: " + getNominaString(facturaData, "nombre", getString(facturaData, "nombreReceptor", "")))
+                .setFontSize(8));
+            String curp = getNominaString(facturaData, "curp", "");
+            if (!curp.isEmpty()) {
+                left.add(new Paragraph("CURP: " + curp).setFontSize(8));
+            }
+            String rfcRec = getNominaString(facturaData, "rfcReceptor", getString(facturaData, "rfcReceptor", ""));
+            if (!rfcRec.isEmpty()) {
+                left.add(new Paragraph("RFC Receptor: " + rfcRec).setFontSize(8));
+            }
+            inner.addCell(left);
+
+            // Lado derecho: periodo y fechas
+            Cell right = new Cell().setBorder(null);
+            String periodo = getNominaString(facturaData, "periodoPago", "");
+            if (!periodo.isEmpty()) {
+                right.add(new Paragraph("Periodo: " + periodo).setFontSize(8));
+            }
+            String fPago = getNominaString(facturaData, "fechaPago", "");
+            if (!fPago.isEmpty()) {
+                right.add(new Paragraph("Fecha de Pago: " + fPago).setFontSize(8));
+            }
+            String fNom = getNominaString(facturaData, "fechaNomina", "");
+            if (!fNom.isEmpty()) {
+                right.add(new Paragraph("Fecha Nómina: " + fNom).setFontSize(8));
+            }
+            inner.addCell(right);
+
+            cell.add(inner);
+            container.addCell(cell);
+            document.add(container);
+        } catch (Exception e) {
+            logger.error("Error agregando sección de nómina: ", e);
+        }
+    }
+
+    /**
+     * Totales específicos para nómina (Percepciones, Deducciones, Neto a Pagar).
+     */
+    private void agregarTotalesNomina(Document document, Map<String, Object> facturaData, Map<String, Object> logoConfig) {
+        try {
+            DeviceRgb primaryColor = extraerColorPrimario(logoConfig);
+
+            Table resumenContainer = new Table(2);
+            resumenContainer.setWidth(UnitValue.createPercentValue(100));
+            resumenContainer.setMarginTop(8);
+
+            // Espacio para alinear a la derecha
+            Cell espacioCell = new Cell()
+                .setBorder(null)
+                .setWidth(UnitValue.createPercentValue(65));
+            resumenContainer.addCell(espacioCell);
+
+            // Totales
+            Cell totalesCell = new Cell()
+                .setBorder(new SolidBorder(primaryColor, 1))
+                .setBackgroundColor(new DeviceRgb(248, 250, 252))
+                .setPadding(8)
+                .setWidth(UnitValue.createPercentValue(35));
+
+            BigDecimal percepciones = getNominaBigDecimal(facturaData, "percepciones", BigDecimal.ZERO);
+            BigDecimal deducciones = getNominaBigDecimal(facturaData, "deducciones", BigDecimal.ZERO);
+            BigDecimal neto = percepciones.subtract(deducciones);
+
+            Paragraph per = new Paragraph("Percepciones: $" + percepciones.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString())
+                .setFontSize(9)
+                .setMarginBottom(3)
+                .setTextAlignment(TextAlignment.RIGHT);
+            totalesCell.add(per);
+
+            Paragraph ded = new Paragraph("Deducciones: $" + deducciones.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString())
+                .setFontSize(9)
+                .setMarginBottom(3)
+                .setTextAlignment(TextAlignment.RIGHT);
+            totalesCell.add(ded);
+
+            Paragraph net = new Paragraph("NETO A PAGAR: $" + neto.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString())
+                .setBold()
+                .setFontSize(11)
+                .setFontColor(primaryColor)
+                .setTextAlignment(TextAlignment.RIGHT)
+                .setMarginTop(3);
+            totalesCell.add(net);
+
+            resumenContainer.addCell(totalesCell);
+            document.add(resumenContainer);
+        } catch (Exception e) {
+            logger.error("Error agregando totales de nómina: ", e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private boolean tieneNomina(Map<String, Object> facturaData) {
+        try {
+            Object n = facturaData != null ? facturaData.get("nomina") : null;
+            boolean hasMap = (n instanceof Map) && !((Map<?,?>) n).isEmpty();
+            String serie = getString(facturaData, "serie", "");
+            return hasMap || (serie != null && serie.equalsIgnoreCase("NOM"));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private String getNominaString(Map<String, Object> facturaData, String key, String defaultValue) {
+        try {
+            Object n = facturaData != null ? facturaData.get("nomina") : null;
+            if (n instanceof Map) {
+                Object v = ((Map<?,?>) n).get(key);
+                return v != null ? v.toString() : defaultValue;
+            }
+            return defaultValue;
+        } catch (Exception e) {
+            return defaultValue;
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private BigDecimal getNominaBigDecimal(Map<String, Object> facturaData, String key, BigDecimal defaultValue) {
+        try {
+            Object n = facturaData != null ? facturaData.get("nomina") : null;
+            Object v = null;
+            if (n instanceof Map) {
+                v = ((Map<?,?>) n).get(key);
+            }
+            if (v == null) return defaultValue;
+            if (v instanceof BigDecimal) return (BigDecimal) v;
+            if (v instanceof Number) return new BigDecimal(((Number) v).toString());
+            String s = v.toString();
+            if (s == null || s.trim().isEmpty()) return defaultValue;
+            return new BigDecimal(s.trim());
+        } catch (Exception e) {
+            return defaultValue;
+        }
     }
     
     private void agregarTotalesModerno(Document document, Map<String, Object> facturaData, Map<String, Object> logoConfig) {

@@ -107,15 +107,19 @@ public class UsuarioService {
      * Consulta todos los empleados
      */
     public List<EmpleadoConsultaDTO> consultarEmpleados() {
-        String sql = "SELECT u.NO_USUARIO, " +
-                    "u.NOMBRE_EMPLEADO, p.NOMBRE_PERFIL, u.ESTATUS_USUARIO, u.FECHA_ALTA, " +
-                    "u.FECHA_MOD, u.ID_DFI, u.ID_ESTACIONAMIENTO, u.ID_PERFIL, " +
-                    "u.MODIFICA_UBICACION, u.PASSWORD, u.USUARIO_MOD " +
-                    "FROM USUARIOS u " +
-                    "LEFT JOIN PERFIL p ON u.ID_PERFIL = p.ID_PERFIL " +
-                    "ORDER BY u.NOMBRE_EMPLEADO";
-        
-        return jdbcTemplate.query(sql, new EmpleadoRowMapper());
+        StringBuilder sql = new StringBuilder();
+        sql.append("SELECT e.NO_USUARIO, ");
+        sql.append("(e.NOMBRE || ' ' || e.APELLIDO_PATERNO || ' ' || e.APELLIDO_MATERNO) AS NOMBRE_EMPLEADO, ");
+        sql.append("e.CORREO_ELECTRONICO AS CORREO, ");
+        sql.append("e.ESTATUS_EMPLEADO AS ESTATUS_USUARIO, ");
+        sql.append("e.FECHA_INGRESO AS FECHA_ALTA, ");
+        sql.append("NULL AS FECHA_MOD, NULL AS ID_DFI, NULL AS ID_ESTACIONAMIENTO, NULL AS ID_PERFIL, ");
+        sql.append("NULL AS MODIFICA_UBICACION, NULL AS PASSWORD, NULL AS USUARIO_MOD, ");
+        sql.append("e.SALARIO_BASE AS SALARIO_BASE, e.RFC AS RFC, e.CURP AS CURP ");
+        sql.append("FROM EMPLEADOS e ");
+        sql.append("ORDER BY NOMBRE_EMPLEADO");
+
+        return jdbcTemplate.query(sql.toString(), new EmpleadoRowMapper());
     }
 
     /**
@@ -123,32 +127,31 @@ public class UsuarioService {
      */
     public List<EmpleadoConsultaDTO> consultarEmpleadosEspecificos(String noUsuario, String nombreEmpleado, String idPerfil) {
         StringBuilder sql = new StringBuilder();
-        sql.append("SELECT u.NO_USUARIO, ");
-        sql.append("u.NOMBRE_EMPLEADO, p.NOMBRE_PERFIL, u.ESTATUS_USUARIO, u.FECHA_ALTA, ");
-        sql.append("u.FECHA_MOD, u.ID_DFI, u.ID_ESTACIONAMIENTO, u.ID_PERFIL, ");
-        sql.append("u.MODIFICA_UBICACION, u.PASSWORD, u.USUARIO_MOD ");
-        sql.append("FROM USUARIOS u ");
-        sql.append("LEFT JOIN PERFIL p ON u.ID_PERFIL = p.ID_PERFIL ");
+        sql.append("SELECT e.NO_USUARIO, ");
+        sql.append("(e.NOMBRE || ' ' || e.APELLIDO_PATERNO || ' ' || e.APELLIDO_MATERNO) AS NOMBRE_EMPLEADO, ");
+        sql.append("e.CORREO_ELECTRONICO AS CORREO, ");
+        sql.append("e.ESTATUS_EMPLEADO AS ESTATUS_USUARIO, ");
+        sql.append("e.FECHA_INGRESO AS FECHA_ALTA, ");
+        sql.append("NULL AS FECHA_MOD, NULL AS ID_DFI, NULL AS ID_ESTACIONAMIENTO, NULL AS ID_PERFIL, ");
+        sql.append("NULL AS MODIFICA_UBICACION, NULL AS PASSWORD, NULL AS USUARIO_MOD, ");
+        sql.append("e.SALARIO_BASE AS SALARIO_BASE, e.RFC AS RFC, e.CURP AS CURP ");
+        sql.append("FROM EMPLEADOS e ");
         sql.append("WHERE 1=1 ");
         
         List<Object> params = new ArrayList<>();
         
         if (noUsuario != null && !noUsuario.trim().isEmpty()) {
-            sql.append("AND u.NO_USUARIO LIKE ? ");
+            sql.append("AND e.NO_USUARIO LIKE ? ");
             params.add("%" + noUsuario + "%");
         }
-        
+
         if (nombreEmpleado != null && !nombreEmpleado.trim().isEmpty()) {
-            sql.append("AND u.NOMBRE_EMPLEADO LIKE ? ");
+            sql.append("AND (e.NOMBRE || ' ' || e.APELLIDO_PATERNO || ' ' || e.APELLIDO_MATERNO) LIKE ? ");
             params.add("%" + nombreEmpleado + "%");
         }
         
-        if (idPerfil != null && !idPerfil.trim().isEmpty()) {
-            sql.append("AND u.ID_PERFIL = ? ");
-            params.add(Integer.parseInt(idPerfil));
-        }
-        
-        sql.append("ORDER BY u.NOMBRE_EMPLEADO");
+        // idPerfil no aplica en EMPLEADOS; filtro omitido intencionalmente
+        sql.append("ORDER BY NOMBRE_EMPLEADO");
         
         return jdbcTemplate.query(sql.toString(), params.toArray(), new EmpleadoRowMapper());
     }
@@ -262,10 +265,8 @@ public class UsuarioService {
         @Override
         public EmpleadoConsultaDTO mapRow(ResultSet rs, int rowNum) throws SQLException {
             EmpleadoConsultaDTO empleado = new EmpleadoConsultaDTO();
-            // Mapear columnas existentes
             empleado.setNoUsuario(rs.getString("NO_USUARIO"));
             empleado.setNombreEmpleado(rs.getString("NOMBRE_EMPLEADO"));
-            empleado.setNombrePerfil(rs.getString("NOMBRE_PERFIL"));
             empleado.setEstatusUsuario(rs.getString("ESTATUS_USUARIO"));
             empleado.setFechaAlta(rs.getTimestamp("FECHA_ALTA"));
             empleado.setFechaMod(rs.getTimestamp("FECHA_MOD"));
@@ -275,16 +276,18 @@ public class UsuarioService {
             empleado.setModificaUbicacion(rs.getString("MODIFICA_UBICACION"));
             empleado.setPassword(rs.getString("PASSWORD"));
             empleado.setUsuarioMod(rs.getString("USUARIO_MOD"));
-            
-            // Valores por defecto para columnas que no existen en la tabla
-            empleado.setId(null);         // No hay columna ID_USUARIO en la tabla
-            empleado.setContrasena(null); // No existe en la tabla USUARIOS
-            empleado.setCorreo(null);     // No existe en la tabla USUARIOS
-            empleado.setNombre(rs.getString("NOMBRE_EMPLEADO")); // Usar NOMBRE_EMPLEADO como nombre
-            
+            empleado.setCorreo(rs.getString("CORREO"));
+            empleado.setNombre(rs.getString("NOMBRE_EMPLEADO"));
+            empleado.setSalarioBase(rs.getBigDecimal("SALARIO_BASE"));
+            empleado.setRfc(rs.getString("RFC"));
+            empleado.setCurp(rs.getString("CURP"));
+            empleado.setNombrePerfil(null); // No aplica en EMPLEADOS
+            empleado.setId(null);           // No existe ID en este esquema
+            empleado.setContrasena(null);
             return empleado;
         }
     }
+
 
     /**
      * RowMapper para mapear resultados de consulta a UsuarioLoginDto

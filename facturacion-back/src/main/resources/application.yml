@@ -18,6 +18,9 @@ spring:
             enable: true
           from: nm9282672@gmail.com
 
+server:
+  port: 8080
+
 ---
 
 spring:

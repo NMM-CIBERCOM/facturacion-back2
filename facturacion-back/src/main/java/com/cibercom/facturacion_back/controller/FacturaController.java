@@ -73,11 +73,17 @@ public class FacturaController {
     @Autowired
     private UuidFacturaOracleDAO uuidFacturaOracleDAO;
 
+    @Autowired(required = false)
+    private com.cibercom.facturacion_back.dao.ConsultaXmlOracleDAO consultaXmlOracleDAO;
+
     @Autowired
     private FormatoCorreoService formatoCorreoService;
 
-    @Autowired
-    private CorreoService correoService;
+  @Autowired
+  private CorreoService correoService;
+
+  @Autowired(required = false)
+  private com.cibercom.facturacion_back.service.FacturacionGlobalService facturacionGlobalService;
 
     @PostMapping("/generar-pdf")
     public ResponseEntity<byte[]> generarPDF(@RequestBody Map<String, Object> request) {
@@ -104,6 +110,67 @@ public class FacturaController {
             return ResponseEntity.internalServerError().build();
         }
     }
+
+    // Construcción de XML mínimo cuando no existe el XML almacenado
+    private String construirXmlMinimo(String uuid, com.cibercom.facturacion_back.dao.UuidFacturaOracleDAO.Result r) {
+        try {
+            String serie = safe(r.serie);
+            String folio = safe(r.folio);
+            String total = r.total != null ? r.total.toPlainString() : "0.00";
+            String subtotal = r.subtotal != null ? r.subtotal.toPlainString() : total;
+            String descuento = r.descuento != null ? r.descuento.toPlainString() : null;
+            String iva = r.iva != null ? r.iva.toPlainString() : null;
+            String formaPago = safe(r.formaPago);
+            String metodoPago = safe(r.metodoPago);
+            String usoCfdi = safe(r.usoCfdi);
+            String rfcEmisor = safe(r.rfcEmisor);
+            String rfcReceptor = safe(r.rfcReceptor);
+            String fecha = r.fechaFactura != null ? java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME
+                    .format(r.fechaFactura.atOffset(java.time.ZoneOffset.UTC)) : null;
+            if (fecha == null) {
+                fecha = java.time.OffsetDateTime.now().withOffsetSameInstant(java.time.ZoneOffset.UTC)
+                        .format(java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+            }
+            if (rfcEmisor.isEmpty() || rfcReceptor.isEmpty()) {
+                // Sin RFCs no podemos construir un CFDI válido
+                return null;
+            }
+
+            StringBuilder sb = new StringBuilder();
+            sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
+            sb.append("<cfdi:Comprobante xmlns:cfdi=\"http://www.sat.gob.mx/cfd/4\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"");
+            sb.append(" Version=\"4.0\"");
+            if (!serie.isEmpty()) sb.append(" Serie=\"" + escape(serie) + "\"");
+            if (!folio.isEmpty()) sb.append(" Folio=\"" + escape(folio) + "\"");
+            sb.append(" Fecha=\"" + escape(fecha) + "\"");
+            sb.append(" SubTotal=\"" + escape(subtotal) + "\"");
+            if (descuento != null) sb.append(" Descuento=\"" + escape(descuento) + "\"");
+            sb.append(" Total=\"" + escape(total) + "\"");
+            sb.append(" Moneda=\"MXN\" LugarExpedicion=\"00000\"");
+            if (!formaPago.isEmpty()) sb.append(" FormaPago=\"" + escape(formaPago) + "\"");
+            if (!metodoPago.isEmpty()) sb.append(" MetodoPago=\"" + escape(metodoPago) + "\"");
+            sb.append(">");
+            sb.append("<cfdi:Emisor Rfc=\"" + escape(rfcEmisor) + "\" Nombre=\"Emisor\" RegimenFiscal=\"601\"/>");
+            sb.append("<cfdi:Receptor Rfc=\"" + escape(rfcReceptor) + "\" Nombre=\"Receptor\" UsoCFDI=\"" + (usoCfdi.isEmpty()?"G03":escape(usoCfdi)) + "\"/>");
+            sb.append("<cfdi:Conceptos>");
+            sb.append("<cfdi:Concepto ClaveProdServ=\"01010101\" Cantidad=\"1\" ClaveUnidad=\"ACT\" Descripcion=\"Producto genérico\" ValorUnitario=\"" + escape(total) + "\" Importe=\"" + escape(total) + "\"/>");
+            sb.append("</cfdi:Conceptos>");
+            if (iva != null) {
+                sb.append("<cfdi:Impuestos>");
+                sb.append("<cfdi:Traslados>");
+                sb.append("<cfdi:Traslado Base=\"" + escape(subtotal) + "\" Importe=\"" + escape(iva) + "\" Impuesto=\"002\" TipoFactor=\"Tasa\" TasaOCuota=\"0.160000\"/>");
+                sb.append("</cfdi:Traslados>");
+                sb.append("</cfdi:Impuestos>");
+            }
+            sb.append("</cfdi:Comprobante>");
+            return sb.toString();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String safe(String s) { return s == null ? "" : s.trim(); }
+    private String escape(String s) { return s.replace("\"", "&quot;"); }
 
     @GetMapping("/descargar-pdf/{uuid}")
     public ResponseEntity<byte[]> descargarPdfPorUuid(@PathVariable String uuid) {
@@ -472,9 +539,32 @@ public class FacturaController {
                 java.util.Optional<com.cibercom.facturacion_back.dao.UuidFacturaOracleDAO.Result> opt = uuidFacturaOracleDAO.obtenerBasicosPorUuid(uuid);
                 if (!opt.isPresent()) {
                     logger.warn("Factura no encontrada en Oracle para UUID: {}", uuid);
-                    return ResponseEntity.notFound().build();
+                    // No encontrada en FACTURAS: intentar CONSULTAS
+                    if (consultaXmlOracleDAO != null) {
+                        java.util.Optional<String> xmlOpt = consultaXmlOracleDAO.obtenerXmlPorUuid(uuid);
+                        if (xmlOpt.isPresent()) {
+                            xmlContent = xmlOpt.get();
+                        }
+                    }
+                } else {
+                    xmlContent = opt.get().xmlContent;
+                    // Si FACTURAS no tiene XML, intentar CONSULTAS como fallback
+                    if (xmlContent == null || xmlContent.isEmpty()) {
+                        if (consultaXmlOracleDAO != null) {
+                            java.util.Optional<String> xmlOpt = consultaXmlOracleDAO.obtenerXmlPorUuid(uuid);
+                            if (xmlOpt.isPresent()) {
+                                xmlContent = xmlOpt.get();
+                            }
+                        }
+                        // Fallback final: intentar construir un XML mínimo con datos disponibles
+                        if (xmlContent == null || xmlContent.isEmpty()) {
+                            String generado = construirXmlMinimo(uuid, opt.get());
+                            if (generado != null && !generado.isEmpty()) {
+                                xmlContent = generado;
+                            }
+                        }
+                    }
                 }
-                xmlContent = opt.get().xmlContent;
             }
 
             if (xmlContent == null || xmlContent.isEmpty()) {
@@ -828,6 +918,38 @@ public ResponseEntity<CfdiConsultaResponse> consultarPorUuid(
             default:
                 // Retornar tal cual para que el flujo no falle; el consumo downstream maneja cancelado por substring
                 return codigo;
+    }
+}
+
+    // Preview de factura global por fecha y tienda
+    @PostMapping("/global/preview")
+    public ResponseEntity<com.cibercom.facturacion_back.dto.FacturaGlobalPreviewResponse> previewFacturaGlobal(
+            @RequestBody com.cibercom.facturacion_back.dto.FacturaGlobalPreviewRequest request) {
+        try {
+            if (facturacionGlobalService == null) {
+                return ResponseEntity.badRequest().build();
+            }
+            var resp = facturacionGlobalService.preview(request);
+            return ResponseEntity.ok(resp);
+        } catch (Exception e) {
+            logger.error("Error en preview de factura global: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    // Consulta combinada de facturas, tickets y carta porte por periodo
+    @PostMapping("/global/consulta")
+    public ResponseEntity<com.cibercom.facturacion_back.dto.FacturaGlobalConsultaResponse> consultarFacturaGlobal(
+            @RequestBody com.cibercom.facturacion_back.dto.FacturaGlobalConsultaRequest request) {
+        try {
+            if (facturacionGlobalService == null) {
+                return ResponseEntity.badRequest().build();
+            }
+            var resp = facturacionGlobalService.consulta(request);
+            return ResponseEntity.ok(resp);
+        } catch (Exception e) {
+            logger.error("Error en consulta de factura global: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().build();
         }
     }
 }
