@@ -130,6 +130,47 @@ public class TicketOracleDAO implements TicketDAO {
     }
 
     @Override
+    public List<TicketDto> buscarPorIdTicket(Long idTicket) {
+        if (idTicket == null) {
+            throw new IllegalArgumentException("ID_TICKET no puede ser nulo");
+        }
+        String idCol = "ID_TICKET";
+        String tiendaCodigoCol = "CODIGO_TIENDA";
+        String tiendaIdCol = "TIENDA_ID";
+        String terminalCol = "TERMINAL_ID";
+        String fechaCol = "FECHA";
+        String folioCol = "FOLIO";
+        String subtotalCol = "SUBTOTAL";
+        String ivaCol = "IVA";
+        String totalCol = "TOTAL";
+        String formaPagoCol = "FORMA_PAGO";
+        String rfcCol = "RFC_CLIENTE";
+        String nombreCol = "NOMBRE_CLIENTE";
+        String statusCol = "STATUS";
+        String idFacturaCol = "ID_FACTURA";
+
+        String select = "SELECT " +
+                expr(idCol, "ID_TICKET") + ", " +
+                expr(tiendaCodigoCol, "CODIGO_TIENDA") + ", " +
+                expr(tiendaIdCol, "TIENDA_ID") + ", " +
+                expr(terminalCol, "TERMINAL_ID") + ", " +
+                expr(fechaCol, "FECHA") + ", " +
+                expr(folioCol, "FOLIO") + ", " +
+                expr(subtotalCol, "SUBTOTAL") + ", " +
+                expr(ivaCol, "IVA") + ", " +
+                expr(totalCol, "TOTAL") + ", " +
+                expr(formaPagoCol, "FORMA_PAGO") + ", " +
+                expr(rfcCol, "RFC_CLIENTE") + ", " +
+                expr(nombreCol, "NOMBRE_CLIENTE") + ", " +
+                expr(statusCol, "STATUS") + ", " +
+                expr(idFacturaCol, "ID_FACTURA") +
+                " FROM TICKETS WHERE " + idCol + " = ?";
+
+        logger.info("Consulta TICKETS por ID_TICKET SQL: {}", select);
+        return jdbcTemplate.query(select, new Object[]{idTicket}, mapper());
+    }
+
+    @Override
     public boolean actualizarIdFacturaPorFiltros(TicketSearchRequest request, Long idFactura) {
         if (idFactura == null) {
             logger.warn("ID_FACTURA nulo, no se puede actualizar TICKETS");

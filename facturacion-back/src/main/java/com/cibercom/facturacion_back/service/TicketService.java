@@ -40,4 +40,14 @@ public class TicketService {
         }
         return ticketDAO.buscarPorIdFactura(idFactura);
     }
+
+    /**
+     * Busca tickets por su ID_TICKET.
+     */
+    public java.util.List<TicketDto> buscarTicketsPorIdTicket(Long idTicket) {
+        if (ticketDAO == null) {
+            throw new IllegalStateException("No hay implementación de TicketDAO disponible (perfil Oracle no activo)");
+        }
+        return ticketDAO.buscarPorIdTicket(idTicket);
+    }
 }

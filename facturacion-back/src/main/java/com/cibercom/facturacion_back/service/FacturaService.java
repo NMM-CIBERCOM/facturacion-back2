@@ -16,6 +16,7 @@ import com.cibercom.facturacion_back.model.ClienteCatalogo;
 import com.cibercom.facturacion_back.dao.ConceptoOracleDAO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -35,6 +36,10 @@ import org.w3c.dom.NodeList;
 import java.io.ByteArrayInputStream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.cibercom.facturacion_back.integration.PacClient;
+import com.cibercom.facturacion_back.dto.PacTimbradoRequest;
+import com.cibercom.facturacion_back.dto.PacTimbradoResponse;
 
 @Service
 public class FacturaService {
@@ -59,6 +64,19 @@ public class FacturaService {
     @Autowired(required = false)
     private TicketService ticketService;
 
+    // Valores por defecto del EMISOR (configurables vía propiedades)
+    @Value("${facturacion.emisor.rfc:EEM123456789}")
+    private String rfcEmisorDefault;
+
+    @Value("${facturacion.emisor.nombre:Empresa Ejemplo S.A. de C.V.}")
+    private String nombreEmisorDefault;
+
+    @Value("${facturacion.emisor.regimen:601}")
+    private String regimenFiscalEmisorDefault;
+
+    @Value("${facturacion.emisor.cp:00000}")
+    private String codigoPostalEmisorDefault;
+
     @Autowired(required = false)
     private ConceptoOracleDAO conceptoOracleDAO;
 
@@ -67,6 +85,12 @@ public class FacturaService {
 
     @Autowired(required = false)
     private com.cibercom.facturacion_back.dao.NominaOracleDAO nominaOracleDAO;
+
+    @Autowired(required = false)
+    private PacClient pacClient;
+
+    @Autowired
+    private FacturaTimbradoService facturaTimbradoService;
 
     /**
      * Procesa una factura generando solo el XML (sin timbrar)
@@ -284,8 +308,15 @@ public class FacturaService {
             String uuid = UUID.randomUUID().toString().toUpperCase();
 
             // 4. Generar XML de la factura con totales y CP dinámicos
-            String cp = extraerCodigoPostal(request.getDomicilioFiscal());
-            String xml = generarXMLDesdeFrontend(request, subtotal, iva, total, cp, formaPagoOverride);
+            String cpReceptor = extraerCodigoPostal(request.getDomicilioFiscal());
+            String xml = generarXMLDesdeFrontend(
+                    request,
+                    subtotal,
+                    iva,
+                    total,
+                    codigoPostalEmisorDefault, // Lugar de expedición del EMISOR
+                    cpReceptor,                // Domicilio fiscal del RECEPTOR
+                    formaPagoOverride);
 
             // 5. Guardar en Oracle (siempre)
             Factura facturaOracle = guardarEnOracle(request, xml, uuid, subtotal, iva, total);
@@ -316,7 +347,73 @@ public class FacturaService {
                 logger.warn("Fallo al enlazar ticket con factura: {}", e.getMessage());
             }
 
-            // 8. Construir respuesta exitosa
+            // 8. Enviar a timbrado del PAC (simulador)
+            try {
+                if (pacClient != null) {
+                    PacTimbradoRequest pacReq = PacTimbradoRequest.builder()
+                            .uuid(uuid)
+                            .xmlContent(xml)
+                            .rfcEmisor(rfcEmisorDefault)
+                            .rfcReceptor(request.getRfc())
+                            .total(total != null ? total.doubleValue() : 0.0)
+                            .tipo("INGRESO")
+                            .fechaFactura(request.getFecha() != null ? request.getFecha().toString() : java.time.OffsetDateTime.now().toString())
+                            .publicoGeneral(Boolean.FALSE)
+                            .serie("A")
+                            .folio(facturaOracle.getFolio())
+                            .tienda(request.getTienda())
+                            .terminal(request.getTerminal())
+                            .boleta(request.getBoleta())
+                            .medioPago(request.getMedioPago())
+                            .formaPago(formaPagoOverride != null && !formaPagoOverride.isBlank() ? formaPagoOverride : request.getFormaPago())
+                            .usoCFDI(request.getUsoCfdi())
+                            .regimenFiscalEmisor(regimenFiscalEmisorDefault)
+                            .regimenFiscalReceptor(request.getRegimenFiscal())
+                            .relacionadosUuids(null)
+                            .build();
+
+                    PacTimbradoResponse pacResp = pacClient.solicitarTimbrado(pacReq);
+                    if (pacResp != null) {
+                        response.put("timbrado", Map.of(
+                                "ok", pacResp.getOk(),
+                                "status", pacResp.getStatus(),
+                                "receiptId", pacResp.getReceiptId(),
+                                "message", pacResp.getMessage()
+                        ));
+
+                        // Si el PAC confirma timbrado inmediato (EMITIDA), actualizar la factura en BD de inmediato
+                        try {
+                            if (Boolean.TRUE.equals(pacResp.getOk()) && "0".equals(pacResp.getStatus())) {
+                                facturaTimbradoService.actualizarFacturaTimbrada(uuid, pacResp);
+                            }
+                        } catch (Exception updEx) {
+                            logger.warn("No se pudo actualizar la factura a EMITIDA tras respuesta inmediata del PAC: {}", updEx.getMessage());
+                        }
+                    } else {
+                        response.put("timbrado", Map.of(
+                                "ok", false,
+                                "status", "ERROR",
+                                "message", "PAC no respondió"
+                        ));
+                    }
+                } else {
+                    logger.warn("PacClient no disponible; se omite envío al PAC");
+                    response.put("timbrado", Map.of(
+                            "ok", false,
+                            "status", "OMITIDO",
+                            "message", "PacClient no disponible"
+                    ));
+                }
+            } catch (Exception e) {
+                logger.warn("Fallo al enviar timbrado al PAC: {}", e.getMessage());
+                response.put("timbrado", Map.of(
+                        "ok", false,
+                        "status", "ERROR",
+                        "message", e.getMessage()
+                ));
+            }
+
+            // 9. Construir respuesta exitosa
             response.put("exitoso", true);
             response.put("mensaje", "Factura procesada y guardada exitosamente");
             response.put("uuid", uuid);
@@ -510,7 +607,8 @@ public class FacturaService {
                                            BigDecimal subtotal,
                                            BigDecimal iva,
                                            BigDecimal total,
-                                           String lugarExpedicionCp,
+                                           String lugarExpedicionEmisorCp,
+                                           String domicilioFiscalReceptorCp,
                                            String formaPagoOverride) {
         StringBuilder xml = new StringBuilder();
         String fechaActual = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss"));
@@ -534,19 +632,19 @@ public class FacturaService {
         xml.append("TipoDeComprobante=\"I\" ");
         xml.append("Exportacion=\"01\" ");
         xml.append("MetodoPago=\"").append(request.getMedioPago()).append("\" ");
-        xml.append("LugarExpedicion=\"").append(lugarExpedicionCp != null ? lugarExpedicionCp : "00000").append("\">\n");
+        xml.append("LugarExpedicion=\"").append(lugarExpedicionEmisorCp != null ? lugarExpedicionEmisorCp : "00000").append("\">\n");
 
         // Emisor
         xml.append("  <cfdi:Emisor ");
-        xml.append("Rfc=\"").append(request.getRfc()).append("\" ");
-        xml.append("Nombre=\"").append(request.getRazonSocial()).append("\" ");
-        xml.append("RegimenFiscal=\"").append(request.getRegimenFiscal()).append("\"/>\n");
+        xml.append("Rfc=\"").append(rfcEmisorDefault).append("\" ");
+        xml.append("Nombre=\"").append(nombreEmisorDefault).append("\" ");
+        xml.append("RegimenFiscal=\"").append(regimenFiscalEmisorDefault).append("\"/>\n");
 
         // Receptor
         xml.append("  <cfdi:Receptor ");
         xml.append("Rfc=\"").append(request.getRfc()).append("\" ");
         xml.append("Nombre=\"").append(request.getRazonSocial()).append("\" ");
-        xml.append("DomicilioFiscalReceptor=\"").append(lugarExpedicionCp != null ? lugarExpedicionCp : "00000").append("\" ");
+        xml.append("DomicilioFiscalReceptor=\"").append(domicilioFiscalReceptorCp != null ? domicilioFiscalReceptorCp : "00000").append("\" ");
         xml.append("RegimenFiscalReceptor=\"").append(request.getRegimenFiscal()).append("\" ");
         xml.append("UsoCFDI=\"").append(request.getUsoCfdi()).append("\"/>\n");
 
@@ -615,16 +713,16 @@ public class FacturaService {
                 .selloDigital("Simulado para ambiente de pruebas")
                 .certificado("Simulado para ambiente de pruebas")
                 // Datos del Emisor
-                .emisorRfc(request.getRfc())
-                .emisorRazonSocial(request.getRazonSocial())
-                .emisorNombre(request.getNombre())
-                .emisorPaterno(request.getPaterno())
-                .emisorMaterno(request.getMaterno())
-                .emisorCorreo(request.getCorreoElectronico())
-                .emisorPais(request.getPais())
-                .emisorDomicilioFiscal(request.getDomicilioFiscal())
-                .emisorRegimenFiscal(request.getRegimenFiscal())
-                // Datos del Receptor (usando datos del emisor como ejemplo)
+                .emisorRfc(rfcEmisorDefault)
+                .emisorRazonSocial(nombreEmisorDefault)
+                .emisorNombre("")
+                .emisorPaterno("")
+                .emisorMaterno("")
+                .emisorCorreo("")
+                .emisorPais("MEX")
+                .emisorDomicilioFiscal("CP " + (codigoPostalEmisorDefault != null ? codigoPostalEmisorDefault : "00000"))
+                .emisorRegimenFiscal(regimenFiscalEmisorDefault)
+                // Datos del Receptor
                 .receptorRfc(request.getRfc())
                 .receptorRazonSocial(request.getRazonSocial())
                 .idReceptor(idReceptor)
@@ -651,6 +749,10 @@ public class FacturaService {
                 .ieps(BigDecimal.ZERO)
                 .total(total)
                 .build();
+
+        // Persistir estatus en columnas reales de Oracle
+        factura.setEstatusFactura(Integer.valueOf(EstadoFactura.EN_PROCESO_EMISION.getCodigo()));
+        factura.setStatusSat(EstadoFactura.EN_PROCESO_EMISION.getDescripcion());
 
         return facturaRepository.save(factura);
     }
@@ -711,15 +813,15 @@ public class FacturaService {
 
         // Crear mapas para emisor y receptor
         Map<String, Object> emisor = new HashMap<>();
-        emisor.put("rfc", request.getRfc());
-        emisor.put("razonSocial", request.getRazonSocial());
-        emisor.put("nombre", request.getNombre());
-        emisor.put("paterno", request.getPaterno());
-        emisor.put("materno", request.getMaterno());
-        emisor.put("correo", request.getCorreoElectronico());
-        emisor.put("pais", request.getPais());
-        emisor.put("domicilioFiscal", request.getDomicilioFiscal());
-        emisor.put("regimenFiscal", request.getRegimenFiscal());
+        emisor.put("rfc", rfcEmisorDefault);
+        emisor.put("razonSocial", nombreEmisorDefault);
+        emisor.put("nombre", "");
+        emisor.put("paterno", "");
+        emisor.put("materno", "");
+        emisor.put("correo", "");
+        emisor.put("pais", "MEX");
+        emisor.put("domicilioFiscal", "CP " + (codigoPostalEmisorDefault != null ? codigoPostalEmisorDefault : "00000"));
+        emisor.put("regimenFiscal", regimenFiscalEmisorDefault);
 
         Map<String, Object> receptor = new HashMap<>();
         receptor.put("rfc", request.getRfc());

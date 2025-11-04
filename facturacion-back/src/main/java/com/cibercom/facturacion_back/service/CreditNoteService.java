@@ -319,6 +319,13 @@ public class CreditNoteService {
         return resp;
     }
 
+    /**
+     * Exponer timbrado para notas de crédito construidas manualmente desde el controlador.
+     */
+    public PacTimbradoResponse timbrarManual(PacTimbradoRequest req) {
+        return solicitarTimbradoConReintento(req);
+    }
+
     private String buildUniqueKey(LocalDateTime periodoClave, List<String> uuids) {
         String fechaKey = periodoClave.toLocalDate().toString();
         List<String> sorted = uuids == null ? Collections.emptyList() : uuids.stream().filter(Objects::nonNull).distinct().sorted().collect(Collectors.toList());

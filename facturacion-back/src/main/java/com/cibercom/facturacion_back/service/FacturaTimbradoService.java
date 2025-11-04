@@ -19,8 +19,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -172,6 +170,8 @@ public class FacturaTimbradoService {
             if (factura != null) {
                 factura.setEstado(EstadoFactura.EMITIDA.getCodigo());
                 factura.setEstadoDescripcion(EstadoFactura.EMITIDA.getDescripcion());
+                factura.setEstatusFactura(Integer.valueOf(EstadoFactura.EMITIDA.getCodigo()));
+                factura.setStatusSat(EstadoFactura.EMITIDA.getDescripcion());
                 factura.setFechaTimbrado(pacResponse.getFechaTimbrado());
                 factura.setXmlContent(pacResponse.getXmlTimbrado());
                 factura.setCadenaOriginal(pacResponse.getCadenaOriginal());
@@ -282,6 +282,8 @@ public class FacturaTimbradoService {
             if (factura != null) {
                 factura.setEstado(EstadoFactura.EN_PROCESO_EMISION.getCodigo());
                 factura.setEstadoDescripcion(EstadoFactura.EN_PROCESO_EMISION.getDescripcion());
+                factura.setEstatusFactura(Integer.valueOf(EstadoFactura.EN_PROCESO_EMISION.getCodigo()));
+                factura.setStatusSat(EstadoFactura.EN_PROCESO_EMISION.getDescripcion());
                 facturaRepository.save(factura);
             }
         }
@@ -307,6 +309,8 @@ public class FacturaTimbradoService {
             if (factura != null) {
                 factura.setEstado(EstadoFactura.CANCELADA_SAT.getCodigo());
                 factura.setEstadoDescripcion(EstadoFactura.CANCELADA_SAT.getDescripcion());
+                factura.setEstatusFactura(Integer.valueOf(EstadoFactura.CANCELADA_SAT.getCodigo()));
+                factura.setStatusSat(EstadoFactura.CANCELADA_SAT.getDescripcion());
                 facturaRepository.save(factura);
             }
         }
@@ -332,6 +336,8 @@ public class FacturaTimbradoService {
             if (factura != null) {
                 factura.setEstado(EstadoFactura.FACTURA_TEMPORAL.getCodigo());
                 factura.setEstadoDescripcion(EstadoFactura.FACTURA_TEMPORAL.getDescripcion());
+                factura.setEstatusFactura(Integer.valueOf(EstadoFactura.FACTURA_TEMPORAL.getCodigo()));
+                factura.setStatusSat(EstadoFactura.FACTURA_TEMPORAL.getDescripcion());
                 facturaRepository.save(factura);
             }
         }

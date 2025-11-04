@@ -130,6 +130,17 @@
             <version>1.17</version>
         </dependency>
 
+        <!-- Apache PDFBox para extraer texto de PDFs (parsing de constancias) -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>2.0.30</version>
+        </dependency>
+        <!-- Spring Security (necesario para SecurityConfig) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

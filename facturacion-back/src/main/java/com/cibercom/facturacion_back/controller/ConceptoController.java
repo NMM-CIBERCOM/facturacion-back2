@@ -5,10 +5,12 @@ import com.cibercom.facturacion_back.dto.ConceptoInsertResponse;
 import com.cibercom.facturacion_back.service.ConceptoService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Profile;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
+@Profile("oracle")
 @RequestMapping("/api/conceptos")
 @CrossOrigin(origins = "*")
 public class ConceptoController {

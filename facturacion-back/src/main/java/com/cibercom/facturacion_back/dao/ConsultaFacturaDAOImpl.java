@@ -207,6 +207,10 @@ public class ConsultaFacturaDAOImpl implements ConsultaFacturaDAO {
 
         // Detectar columnas disponibles para evitar ORA-00904
         boolean hasEstado = columnExists(conn, "FACTURAS", "ESTADO");
+        boolean hasEstatusFacturacion = columnExists(conn, "FACTURAS", "ESTATUS_FACTURACION");
+        boolean hasEstatusFactura = columnExists(conn, "FACTURAS", "ESTATUS_FACTURA");
+        boolean hasEstatusSat = columnExists(conn, "FACTURAS", "ESTATUS_SAT");
+        boolean hasStatusSat = columnExists(conn, "FACTURAS", "STATUS_SAT");
         boolean hasTienda = columnExists(conn, "FACTURAS", "TIENDA");
         boolean hasEmisorRfc = columnExists(conn, "FACTURAS", "EMISOR_RFC");
         boolean hasReceptorRfc = columnExists(conn, "FACTURAS", "RFC_R");
@@ -231,7 +235,13 @@ public class ConsultaFacturaDAOImpl implements ConsultaFacturaDAO {
         if (hasSerie) selectCols.append(", SERIE");
         if (hasFolio) selectCols.append(", FOLIO");
         if (hasTienda) selectCols.append(", TIENDA");
-        if (hasEstado) selectCols.append(", ESTADO");
+        // Preferir columnas específicas
+        if (hasEstatusFacturacion) selectCols.append(", ESTATUS_FACTURACION");
+        else if (hasEstatusFactura) selectCols.append(", ESTATUS_FACTURA");
+        else if (hasEstado) selectCols.append(", ESTADO");
+        // SAT status si existe
+        if (hasEstatusSat) selectCols.append(", ESTATUS_SAT");
+        else if (hasStatusSat) selectCols.append(", STATUS_SAT");
 
         sb.append("SELECT ").append(selectCols.length() > 0 ? selectCols.toString() : "UUID")
           .append(" FROM FACTURAS WHERE 1=1");
@@ -303,8 +313,20 @@ public class ConsultaFacturaDAOImpl implements ConsultaFacturaDAO {
                             dto.setImporte(imp);
                         }
                     }
-                    if (labels.contains("ESTADO")) {
+                    // Mapear estatus de facturación
+                    if (labels.contains("ESTATUS_FACTURACION")) {
+                        dto.setEstatusFacturacion(rs.getString("ESTATUS_FACTURACION"));
+                    } else if (labels.contains("ESTATUS_FACTURA")) {
+                        dto.setEstatusFacturacion(rs.getString("ESTATUS_FACTURA"));
+                    } else if (labels.contains("ESTADO")) {
                         dto.setEstatusFacturacion(rs.getString("ESTADO"));
+                    }
+                    // Mapear estatus SAT
+                    if (labels.contains("ESTATUS_SAT")) {
+                        dto.setEstatusSat(rs.getString("ESTATUS_SAT"));
+                    } else if (labels.contains("STATUS_SAT")) {
+                        dto.setEstatusSat(rs.getString("STATUS_SAT"));
+                    } else if (labels.contains("ESTADO")) {
                         dto.setEstatusSat(rs.getString("ESTADO"));
                     }
                     if (labels.contains("TIENDA")) dto.setTienda(rs.getString("TIENDA"));
@@ -319,19 +341,113 @@ public class ConsultaFacturaDAOImpl implements ConsultaFacturaDAO {
 
     @Override
     public boolean cancelarFactura(com.cibercom.facturacion_back.dto.CancelFacturaRequest request) {
-        String updateSql = "UPDATE FACTURAS\n" +
-                "SET ESTADO = 'CANCELADA'\n" +
-                "WHERE UUID = ?\n" +
-                "  AND ESTADO IN ('VIGENTE','ACTIVA','EMITIDA')\n" +
-                "  AND (EXTRACT(YEAR FROM FECHA_FACTURA) = EXTRACT(YEAR FROM SYSDATE)\n" +
-                "       OR (EXTRACT(YEAR FROM FECHA_FACTURA) = EXTRACT(YEAR FROM SYSDATE) - 1\n" +
-                "           AND EXTRACT(MONTH FROM SYSDATE) = 1))";
+        try (Connection conn = dataSource.getConnection()) {
+            // Detectar columna de estado disponible (tipo texto)
+            String statusCol = null;
+            if (columnExists(conn, "FACTURAS", "ESTADO")) {
+                statusCol = "ESTADO";
+            } else if (columnExists(conn, "FACTURAS", "STATUS_SAT")) {
+                statusCol = "STATUS_SAT";
+            } else if (columnExists(conn, "FACTURAS", "ESTATUS_SAT")) {
+                statusCol = "ESTATUS_SAT";
+            }
 
-        try (Connection conn = dataSource.getConnection();
-                PreparedStatement ps = conn.prepareStatement(updateSql)) {
-            ps.setString(1, request.getUuid());
-            int updated = ps.executeUpdate();
-            return updated > 0;
+            // Detectar columnas adicionales que podemos actualizar de forma segura
+            boolean hasFechaCancela = columnExists(conn, "FACTURAS", "FECHA_CANCELA");
+            boolean hasCodeCancela = columnExists(conn, "FACTURAS", "CODE_CANCELA");
+            boolean hasMotivoCancela = columnExists(conn, "FACTURAS", "MOTIVO_CANCELA");
+            boolean hasEstatusFacturaNum = columnExists(conn, "FACTURAS", "ESTATUS_FACTURA");
+            boolean hasEstatusFacturacionTxt = columnExists(conn, "FACTURAS", "ESTATUS_FACTURACION");
+
+            // Detectar columna de fecha para restricción de ventana fiscal
+            String dateCol = null;
+            for (String cand : new String[]{"FECHA_FACTURA", "FECHA_EMISION", "FECHA", "FECHA_TIMBRADO", "FECHA_CREACION"}) {
+                if (columnExists(conn, "FACTURAS", cand)) { dateCol = cand; break; }
+            }
+
+            StringBuilder sql = new StringBuilder("UPDATE FACTURAS SET ");
+            java.util.List<Object> params = new java.util.ArrayList<>();
+            boolean firstSet = true;
+
+            // Setear estado si existe columna de estado
+            if (statusCol != null) {
+                sql.append(statusCol).append("=?");
+                params.add("CANCELADA");
+                firstSet = false;
+            } else {
+                logger.warn("Columna de estado no encontrada; se omitirá actualización de estado para UUID {}", request.getUuid());
+            }
+
+            // FECHA_CANCELA = SYSDATE
+            if (hasFechaCancela) {
+                if (!firstSet) sql.append(", ");
+                sql.append("FECHA_CANCELA=SYSDATE");
+                firstSet = false;
+            }
+
+            // CODE_CANCELA = código motivo (si existe)
+            if (hasCodeCancela && request.getMotivo() != null && !request.getMotivo().isBlank()) {
+                if (!firstSet) sql.append(", ");
+                sql.append("CODE_CANCELA=?");
+                params.add(request.getMotivo());
+                firstSet = false;
+            }
+
+            // MOTIVO_CANCELA = motivo (si existe) — usamos el mismo código por falta de descripción
+            if (hasMotivoCancela && request.getMotivo() != null && !request.getMotivo().isBlank()) {
+                if (!firstSet) sql.append(", ");
+                sql.append("MOTIVO_CANCELA=?");
+                params.add(request.getMotivo());
+                firstSet = false;
+            }
+
+            // ESTATUS_FACTURA (numérico) = 2 CANCELADA EN SAT
+            if (hasEstatusFacturaNum) {
+                if (!firstSet) sql.append(", ");
+                sql.append("ESTATUS_FACTURA=?");
+                params.add(Integer.valueOf(2));
+                firstSet = false;
+            }
+
+            // ESTATUS_FACTURACION (texto), si existiera = 'CANCELADA EN SAT'
+            if (hasEstatusFacturacionTxt) {
+                if (!firstSet) sql.append(", ");
+                sql.append("ESTATUS_FACTURACION=?");
+                params.add("CANCELADA EN SAT");
+                firstSet = false;
+            }
+
+            // WHERE UUID = ?
+            sql.append(" WHERE UUID=?");
+            params.add(request.getUuid());
+
+            // Filtro por estados permisibles sólo si hay columna de estado
+            if (statusCol != null) {
+                sql.append(" AND UPPER(").append(statusCol).append(") IN ('VIGENTE','ACTIVA','EMITIDA')");
+            } else {
+                logger.warn("No se aplicará filtro de estado al cancelar UUID {} por falta de columna de estado", request.getUuid());
+            }
+
+            // Restricción de ventana fiscal si se detectó columna de fecha
+            if (dateCol != null) {
+                sql.append(" AND (EXTRACT(YEAR FROM ").append(dateCol).append(") = EXTRACT(YEAR FROM SYSDATE) ")
+                   .append(" OR (EXTRACT(YEAR FROM ").append(dateCol).append(") = EXTRACT(YEAR FROM SYSDATE) - 1 AND EXTRACT(MONTH FROM SYSDATE) = 1))");
+            } else {
+                logger.warn("Columna de fecha no encontrada; se omite restricción de ventana fiscal para UUID {}", request.getUuid());
+            }
+
+            try (PreparedStatement ps = conn.prepareStatement(sql.toString())) {
+                int idx = 1;
+                for (Object p : params) {
+                    if (p instanceof String) {
+                        ps.setString(idx++, (String) p);
+                    } else {
+                        ps.setObject(idx++, p);
+                    }
+                }
+                int updated = ps.executeUpdate();
+                return updated > 0;
+            }
         } catch (SQLException e) {
             logger.error("Error al cancelar factura {}: {}", request.getUuid(), e.getMessage());
             throw new RuntimeException("Error al cancelar factura: " + e.getMessage(), e);
@@ -341,12 +457,20 @@ public class ConsultaFacturaDAOImpl implements ConsultaFacturaDAO {
     @Override
     public boolean marcarEnProceso(String uuid) {
         try (Connection conn = dataSource.getConnection()) {
-            boolean hasEstado = columnExists(conn, "FACTURAS", "ESTADO");
-            if (!hasEstado) {
-                logger.warn("Columna ESTADO no existe; se omite marcar EN_PROCESO para UUID {}", uuid);
+            // Detectar columna de estado disponible (tipo texto)
+            String statusCol = null;
+            if (columnExists(conn, "FACTURAS", "ESTADO")) {
+                statusCol = "ESTADO";
+            } else if (columnExists(conn, "FACTURAS", "STATUS_SAT")) {
+                statusCol = "STATUS_SAT";
+            } else if (columnExists(conn, "FACTURAS", "ESTATUS_SAT")) {
+                statusCol = "ESTATUS_SAT";
+            }
+            if (statusCol == null) {
+                logger.warn("No existe columna de estado; se omite marcar EN_PROCESO para UUID {}", uuid);
                 return false;
             }
-            String sql = "UPDATE FACTURAS SET ESTADO='EN PROCESO DE CANCELACION' WHERE UUID=? AND ESTADO IN ('VIGENTE','ACTIVA','EMITIDA')";
+            String sql = "UPDATE FACTURAS SET " + statusCol + "='EN PROCESO DE CANCELACION' WHERE UUID=? AND UPPER(" + statusCol + ") IN ('VIGENTE','ACTIVA','EMITIDA')";
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setString(1, uuid);
                 return ps.executeUpdate() > 0;
@@ -360,12 +484,20 @@ public class ConsultaFacturaDAOImpl implements ConsultaFacturaDAO {
     @Override
     public boolean actualizarEstado(String uuid, String estado) {
         try (Connection conn = dataSource.getConnection()) {
-            boolean hasEstado = columnExists(conn, "FACTURAS", "ESTADO");
-            if (!hasEstado) {
-                logger.warn("Columna ESTADO no existe; se omite actualización de estado para UUID {} a {}", uuid, estado);
+            // Detectar columna de estado disponible (tipo texto)
+            String statusCol = null;
+            if (columnExists(conn, "FACTURAS", "ESTADO")) {
+                statusCol = "ESTADO";
+            } else if (columnExists(conn, "FACTURAS", "STATUS_SAT")) {
+                statusCol = "STATUS_SAT";
+            } else if (columnExists(conn, "FACTURAS", "ESTATUS_SAT")) {
+                statusCol = "ESTATUS_SAT";
+            }
+            if (statusCol == null) {
+                logger.warn("No existe columna de estado; se omite actualización de estado para UUID {} a {}", uuid, estado);
                 return false;
             }
-            String sql = "UPDATE FACTURAS SET ESTADO=? WHERE UUID=?";
+            String sql = "UPDATE FACTURAS SET " + statusCol + "=? WHERE UUID=?";
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setString(1, estado);
                 ps.setString(2, uuid);
@@ -397,8 +529,16 @@ public class ConsultaFacturaDAOImpl implements ConsultaFacturaDAO {
         try (Connection conn = dataSource.getConnection()) {
             boolean hasEstado = columnExists(conn, "FACTURAS", "ESTADO");
             boolean hasTienda = columnExists(conn, "FACTURAS", "TIENDA");
-            boolean hasEmisorRfc = columnExists(conn, "FACTURAS", "EMISOR_RFC");
-            boolean hasReceptorRfc = columnExists(conn, "FACTURAS", "RFC_R");
+            // Detectar columnas RFC en diferentes esquemas: EMISOR_RFC, RFC_E, RFC_EMISOR
+            String emisorCol = null;
+            if (columnExists(conn, "FACTURAS", "EMISOR_RFC")) emisorCol = "EMISOR_RFC";
+            else if (columnExists(conn, "FACTURAS", "RFC_E")) emisorCol = "RFC_E";
+            else if (columnExists(conn, "FACTURAS", "RFC_EMISOR")) emisorCol = "RFC_EMISOR";
+
+            // Detectar columnas RFC receptor: RFC_R, RFC_RECEPTOR
+            String receptorCol = null;
+            if (columnExists(conn, "FACTURAS", "RFC_R")) receptorCol = "RFC_R";
+            else if (columnExists(conn, "FACTURAS", "RFC_RECEPTOR")) receptorCol = "RFC_RECEPTOR";
             String dateCol = null;
             for (String cand : new String[]{"FECHA_FACTURA", "FECHA_EMISION", "FECHA", "FECHA_TIMBRADO", "FECHA_CREACION"}) {
                 if (columnExists(conn, "FACTURAS", cand)) { dateCol = cand; break; }
@@ -407,8 +547,8 @@ public class ConsultaFacturaDAOImpl implements ConsultaFacturaDAO {
             boolean hasFolio = columnExists(conn, "FACTURAS", "FOLIO");
 
             StringBuilder selectCols = new StringBuilder("UUID");
-            if (hasEmisorRfc) selectCols.append(", EMISOR_RFC");
-            if (hasReceptorRfc) selectCols.append(", RFC_R");
+            if (emisorCol != null) selectCols.append(", ").append(emisorCol).append(" AS RFC_EMISOR");
+            if (receptorCol != null) selectCols.append(", ").append(receptorCol).append(" AS RFC_RECEPTOR");
             if (dateCol != null) selectCols.append(", ").append(dateCol).append(" AS FECHA_FACTURA");
             // IMPORTE siempre con alias TOTAL si existe
             if (columnExists(conn, "FACTURAS", "IMPORTE")) selectCols.append(", IMPORTE AS TOTAL");
@@ -429,8 +569,8 @@ public class ConsultaFacturaDAOImpl implements ConsultaFacturaDAO {
                         for (int i = 1; i <= md.getColumnCount(); i++) {
                             labels.add(md.getColumnLabel(i).toUpperCase());
                         }
-                        if (labels.contains("EMISOR_RFC")) info.rfcEmisor = rs.getString("EMISOR_RFC");
-                        if (labels.contains("RFC_R")) info.rfcReceptor = rs.getString("RFC_R");
+                        if (labels.contains("RFC_EMISOR")) info.rfcEmisor = rs.getString("RFC_EMISOR");
+                        if (labels.contains("RFC_RECEPTOR")) info.rfcReceptor = rs.getString("RFC_RECEPTOR");
                         java.sql.Timestamp ts = labels.contains("FECHA_FACTURA") ? rs.getTimestamp("FECHA_FACTURA") : null;
                         if (ts != null)
                             info.fechaFactura = ts.toInstant().atOffset(java.time.ZoneOffset.UTC);
@@ -439,6 +579,9 @@ public class ConsultaFacturaDAOImpl implements ConsultaFacturaDAO {
                         if (labels.contains("FOLIO")) info.folio = rs.getString("FOLIO");
                         if (labels.contains("TIENDA")) info.tienda = rs.getString("TIENDA");
                         if (labels.contains("ESTADO")) info.estatus = rs.getString("ESTADO");
+                        // Fallback para simulador PAC si RFCs no están presentes
+                        if (info.rfcEmisor == null || info.rfcEmisor.isBlank()) info.rfcEmisor = "XAXX010101000";
+                        if (info.rfcReceptor == null || info.rfcReceptor.isBlank()) info.rfcReceptor = "XAXX010101000";
                         return info;
                     }
                     return null;
@@ -515,9 +658,33 @@ public class ConsultaFacturaDAOImpl implements ConsultaFacturaDAO {
         if (importe != null) {
             factura.setImporte(importe);
         }
+        // Robust mapping: handle different column names returned by SP or direct table
+        java.sql.ResultSetMetaData md = rs.getMetaData();
+        java.util.Set<String> labels = new java.util.HashSet<>();
+        for (int i = 1; i <= md.getColumnCount(); i++) {
+            labels.add(md.getColumnLabel(i).toUpperCase());
+        }
 
-        factura.setEstatusFacturacion(rs.getString("ESTATUS_FACTURACION"));
-        factura.setEstatusSat(rs.getString("ESTATUS_SAT"));
+        String estatusFacturacion = null;
+        if (labels.contains("ESTATUS_FACTURACION")) {
+            estatusFacturacion = rs.getString("ESTATUS_FACTURACION");
+        } else if (labels.contains("ESTATUS_FACTURA")) {
+            estatusFacturacion = rs.getString("ESTATUS_FACTURA");
+        } else if (labels.contains("ESTADO")) {
+            estatusFacturacion = rs.getString("ESTADO");
+        }
+
+        String estatusSat = null;
+        if (labels.contains("ESTATUS_SAT")) {
+            estatusSat = rs.getString("ESTATUS_SAT");
+        } else if (labels.contains("STATUS_SAT")) {
+            estatusSat = rs.getString("STATUS_SAT");
+        } else if (labels.contains("ESTADO")) {
+            estatusSat = rs.getString("ESTADO");
+        }
+
+        factura.setEstatusFacturacion(estatusFacturacion);
+        factura.setEstatusSat(estatusSat);
         factura.setTienda(rs.getString("TIENDA"));
         factura.setAlmacen(rs.getString("ALMACEN"));
         factura.setUsuario(rs.getString("USUARIO"));

@@ -19,4 +19,9 @@ public interface TicketDAO {
      * Busca tickets vinculados a una factura específica por su ID_FACTURA.
      */
     List<TicketDto> buscarPorIdFactura(Long idFactura);
+
+    /**
+     * Busca tickets por su ID_TICKET.
+     */
+    List<TicketDto> buscarPorIdTicket(Long idTicket);
 }

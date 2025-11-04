@@ -17,12 +17,14 @@ import com.cibercom.facturacion_back.service.ITextPdfService;
 import com.cibercom.facturacion_back.dto.CfdiConsultaResponse;
 import com.cibercom.facturacion_back.service.CfdiXmlParserService;
 import com.cibercom.facturacion_back.dao.UuidFacturaOracleDAO;
+import com.cibercom.facturacion_back.dao.ConceptoOracleDAO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.Environment;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.Map;
 import java.util.HashMap;
@@ -34,6 +36,8 @@ import com.cibercom.facturacion_back.service.FormatoCorreoService;
 import com.cibercom.facturacion_back.dto.FormatoCorreoDto;
 import com.cibercom.facturacion_back.service.CorreoService;
 import com.cibercom.facturacion_back.dto.ConfiguracionCorreoResponseDto;
+import com.cibercom.facturacion_back.service.PDFParsingService;
+import com.cibercom.facturacion_back.model.FacturaInfo;
 
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -74,6 +78,9 @@ public class FacturaController {
     private UuidFacturaOracleDAO uuidFacturaOracleDAO;
 
     @Autowired(required = false)
+    private ConceptoOracleDAO conceptoOracleDAO;
+
+    @Autowired(required = false)
     private com.cibercom.facturacion_back.dao.ConsultaXmlOracleDAO consultaXmlOracleDAO;
 
     @Autowired
@@ -84,6 +91,9 @@ public class FacturaController {
 
   @Autowired(required = false)
   private com.cibercom.facturacion_back.service.FacturacionGlobalService facturacionGlobalService;
+
+  @Autowired
+  private PDFParsingService pdfParsingService;
 
     @PostMapping("/generar-pdf")
     public ResponseEntity<byte[]> generarPDF(@RequestBody Map<String, Object> request) {
@@ -443,7 +453,7 @@ public class FacturaController {
         try {
             logger.info("🔄 Recibido callback automático del PAC - UUID: {}, Status: {}", cb.uuid, cb.status);
 
-            if ("0".equals(cb.status)) {
+            if ("0".equals(cb.status) || "EMITIDA".equalsIgnoreCase(cb.status)) {
 
                 PacTimbradoResponse pacResponse = PacTimbradoResponse.builder()
                         .ok(true)
@@ -463,7 +473,7 @@ public class FacturaController {
                 facturaTimbradoService.actualizarFacturaTimbrada(cb.uuid, pacResponse);
                 logger.info("✅ Factura {} actualizada automáticamente a EMITIDA por callback del PAC", cb.uuid);
 
-            } else if ("2".equals(cb.status)) {
+            } else if ("2".equals(cb.status) || "CANCELADA_SAT".equalsIgnoreCase(cb.status)) {
 
                 PacTimbradoResponse pacResponse = PacTimbradoResponse.builder()
                         .ok(false)
@@ -619,10 +629,115 @@ public class FacturaController {
         }
     }
 
+    /**
+     * Devuelve el ID_FACTURA asociado a un UUID, si existe en Oracle.
+     * Útil para consultar tickets y detalles por idFactura.
+     */
+    @GetMapping("/id-factura/{uuid}")
+    public ResponseEntity<Map<String, Object>> obtenerIdFacturaPorUuid(@PathVariable String uuid) {
+        try {
+            if (conceptoOracleDAO == null) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "success", false,
+                        "message", "DAO ConceptoOracle no disponible (perfil Oracle no activo)"
+                ));
+            }
+            java.util.Optional<Long> idOpt = conceptoOracleDAO.obtenerIdFacturaPorUuid(uuid);
+            if (idOpt.isPresent() && idOpt.get() != null) {
+                return ResponseEntity.ok(Map.of(
+                        "success", true,
+                        "idFactura", idOpt.get()
+                ));
+            }
+            return ResponseEntity.ok(Map.of(
+                    "success", false,
+                    "message", "No se encontró ID_FACTURA para el UUID especificado"
+            ));
+        } catch (Exception e) {
+            logger.error("Error obteniendo ID_FACTURA por UUID {}: {}", uuid, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of(
+                    "success", false,
+                    "message", "Error consultando ID_FACTURA",
+                    "error", e.getMessage()
+            ));
+        }
+    }
+
     @GetMapping("/health")
     public ResponseEntity<String> healthCheck() {
         logger.info("Health check solicitado para FacturaController");
         return ResponseEntity.ok("FacturaService funcionando correctamente");
+    }
+
+    // --- Registro CFDI: Parseo de Constancias (PDFs) ---
+    @PostMapping(value = "/procesar-pdf", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<FacturaInfo> procesarPdf(@RequestPart("file") MultipartFile file) {
+        try {
+            if (file == null || file.isEmpty()) {
+                return ResponseEntity.badRequest().build();
+            }
+            Path temp = Files.createTempFile("constancia-", ".pdf");
+            Files.write(temp, file.getBytes());
+            FacturaInfo info = pdfParsingService.parsearPDF(temp.toAbsolutePath().toString());
+            try { Files.deleteIfExists(temp); } catch (Exception ignored) {}
+            return ResponseEntity.ok(info);
+        } catch (Exception e) {
+            logger.error("Error procesando PDF de constancia", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    @PostMapping(value = "/procesar-pdfs", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<java.util.List<FacturaInfo>> procesarPdfs(
+            @RequestPart(value = "archivos", required = false) java.util.List<MultipartFile> archivos,
+            @RequestPart(value = "files", required = false) java.util.List<MultipartFile> files) {
+        try {
+            java.util.List<MultipartFile> input = new java.util.ArrayList<>();
+            if (archivos != null) input.addAll(archivos);
+            if (files != null) input.addAll(files);
+            if (input.isEmpty()) {
+                return ResponseEntity.badRequest().body(java.util.List.of());
+            }
+            java.util.List<String> rutas = new java.util.ArrayList<>();
+            java.util.List<Path> temps = new java.util.ArrayList<>();
+            for (MultipartFile mf : input) {
+                if (mf != null && !mf.isEmpty()) {
+                    Path t = Files.createTempFile("constancia-", ".pdf");
+                    Files.write(t, mf.getBytes());
+                    rutas.add(t.toAbsolutePath().toString());
+                    temps.add(t);
+                }
+            }
+            java.util.List<FacturaInfo> infos = pdfParsingService.parsearPDFs(rutas);
+            for (Path t : temps) { try { Files.deleteIfExists(t); } catch (Exception ignored) {} }
+            return ResponseEntity.ok(infos);
+        } catch (Exception e) {
+            logger.error("Error procesando múltiples PDFs de constancias", e);
+            return ResponseEntity.internalServerError().body(java.util.List.of());
+        }
+    }
+
+    @PostMapping(value = "/guardar-informacion", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<Map<String, Object>> guardarInformacion(@RequestBody FacturaInfo facturaInfo) {
+        try {
+            if (facturaInfo == null) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "exitoso", false,
+                        "mensaje", "FacturaInfo inválido"
+                ));
+            }
+            pdfParsingService.guardarFacturaInfo(facturaInfo);
+            return ResponseEntity.ok(Map.of(
+                    "exitoso", true,
+                    "mensaje", "Información guardada"
+            ));
+        } catch (Exception e) {
+            logger.error("Error guardando información de constancia", e);
+            return ResponseEntity.internalServerError().body(Map.of(
+                    "exitoso", false,
+                    "mensaje", "Error interno: " + e.getMessage()
+            ));
+        }
     }
 
     @PostMapping("/insertar-uuid")

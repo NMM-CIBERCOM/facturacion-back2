@@ -19,7 +19,17 @@ import java.util.Map;
 public class PacClient {
     private static final Logger logger = LoggerFactory.getLogger(PacClient.class);
     private final RestTemplate restTemplate = new RestTemplate();
-    private final String baseUrl = "http://localhost:8085/api/pac";
+    private final String baseUrl;
+
+    public PacClient() {
+        String defecto = "http://localhost:8085/api/pac";
+        String env = System.getenv("PAC_BASE_URL");
+        String prop = System.getProperty("pac.base-url");
+        String elegido = (env != null && !env.isBlank()) ? env : ((prop != null && !prop.isBlank()) ? prop : defecto);
+        // Normalizar quitando slashes finales
+        this.baseUrl = elegido.replaceAll("/+$", "");
+        logger.info("PacClient baseUrl={}", this.baseUrl);
+    }
 
     public PacResponse solicitarCancelacion(PacRequest req) {
         try {
@@ -129,3 +139,6 @@ public class PacClient {
         }
     }
 }
+
+
+

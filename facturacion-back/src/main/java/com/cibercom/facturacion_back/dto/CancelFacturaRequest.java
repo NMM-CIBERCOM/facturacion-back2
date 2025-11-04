@@ -47,3 +47,6 @@ public class CancelFacturaRequest {
         this.uuidSustituto = uuidSustituto;
     }
 }
+
+
+

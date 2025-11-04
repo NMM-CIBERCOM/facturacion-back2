@@ -6,6 +6,8 @@ import com.cibercom.facturacion_back.model.CreditNoteLink;
 import com.cibercom.facturacion_back.service.CreditNoteService;
 import com.cibercom.facturacion_back.service.CreditNoteOracleSaveService;
 import com.cibercom.facturacion_back.dto.CreditNoteSaveRequest;
+import com.cibercom.facturacion_back.dto.PacTimbradoRequest;
+import com.cibercom.facturacion_back.dto.PacTimbradoResponse;
 import lombok.Data;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -108,12 +110,65 @@ public class CreditNoteController {
             m.put("message", "Oracle no disponible (perfil 'oracle' inactivo)");
             return ResponseEntity.status(501).body(m);
         }
+        logger.info("NC Controller Guardar: uuidNc={} rfcEmisor={} rfcReceptor={} total={}", request.getUuidNc(), request.getRfcEmisor(), request.getRfcReceptor(), request.getTotal());
         CreditNoteOracleSaveService.SaveResult res = svc.guardar(request);
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("ok", res.ok);
         m.put("uuidNc", res.uuidNc);
         m.put("errors", res.errors);
+        logger.info("NC Controller Guardar: ok={} uuidNc={} errors={}", res.ok, res.uuidNc, res.errors);
         return ResponseEntity.ok(m);
+    }
+
+    /** Timbrar Nota de Crédito vía PAC (EGRESO) */
+    @PostMapping("/timbrar")
+    public ResponseEntity<?> timbrar(@RequestBody CreditNoteSaveRequest request) {
+        try {
+            logger.info("NC Controller Timbrar: solicitud uuidNc={} rfcEmisor={} rfcReceptor={} total={} serie={} folio={} uuidFacturaOrig={}",
+                    request.getUuidNc(), request.getRfcEmisor(), request.getRfcReceptor(), request.getTotal(), request.getSerieNc(), request.getFolioNc(), request.getUuidFacturaOrig());
+            // Construir solicitud al PAC usando los datos de la Nota de Crédito del frontend
+            String uuid = request.getUuidNc() != null && !request.getUuidNc().isBlank()
+                    ? request.getUuidNc()
+                    : java.util.UUID.randomUUID().toString().toUpperCase();
+
+            String serie = request.getSerieNc() != null && !request.getSerieNc().isBlank() ? request.getSerieNc() : "NC";
+            String folio = request.getFolioNc() != null && !request.getFolioNc().isBlank() ? request.getFolioNc() : "1";
+            String fecha = request.getFechaEmision() != null ? request.getFechaEmision().toString() : java.time.LocalDateTime.now().toString();
+
+            PacTimbradoRequest req = PacTimbradoRequest.builder()
+                    .uuid(uuid)
+                    .xmlContent(request.getXmlContent())
+                    .rfcEmisor(request.getRfcEmisor())
+                    .rfcReceptor(request.getRfcReceptor())
+                    .total(request.getTotal() != null ? request.getTotal().doubleValue() : null)
+                    .tipo("EGRESO")
+                    .fechaFactura(fecha)
+                    .publicoGeneral(false)
+                    .serie(serie)
+                    .folio(folio)
+                    .medioPago(request.getMetodoPago())
+                    .formaPago(request.getFormaPago())
+                    .usoCFDI(request.getUsoCfdi())
+                    .regimenFiscalEmisor(request.getRegimenFiscal())
+                    .regimenFiscalReceptor("601")
+                    .relacionadosUuids(request.getUuidFacturaOrig())
+                    .build();
+
+            PacTimbradoResponse resp = service.timbrarManual(req);
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("ok", resp.getOk());
+            m.put("status", resp.getStatus());
+            m.put("uuid", resp.getUuid());
+            m.put("serie", resp.getSerie() != null ? resp.getSerie() : serie);
+            m.put("folio", resp.getFolio() != null ? resp.getFolio() : folio);
+            m.put("xmlTimbrado", resp.getXmlTimbrado());
+            m.put("message", resp.getMessage());
+            logger.info("NC Controller Timbrar: respuesta ok={} status={} uuid={} message={}", resp.getOk(), resp.getStatus(), resp.getUuid(), resp.getMessage());
+            return ResponseEntity.ok(m);
+        } catch (Exception e) {
+            logger.error("Error timbrando nota de crédito: {}", e.getMessage());
+            return ResponseEntity.status(500).body(Map.of("ok", false, "error", e.getMessage()));
+        }
     }
 
     private LocalDate parsePeriodo(String periodo) {
