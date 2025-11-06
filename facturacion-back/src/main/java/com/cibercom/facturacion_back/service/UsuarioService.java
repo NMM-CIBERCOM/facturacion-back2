@@ -18,7 +18,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.ArrayList;
-import java.util.Date;
 
 /**
  * Servicio para la gestión de usuarios
@@ -54,11 +53,14 @@ public class UsuarioService {
                              "ID_PERFIL, FECHA_ALTA, FECHA_MOD, USUARIO_MOD, ID_DFI, ID_ESTACIONAMIENTO, MODIFICA_UBICACION) " +
                              "VALUES (?, ?, ?, ?, ?, SYSDATE, SYSDATE, ?, ?, ?, ?)";
             
+            // Usar 'ACTIVO' como valor por defecto para cumplir con la restricción CHK_USUARIOS_ESTATUS
+            String estatusUsuario = usuario.getEstatusUsuario() != null ? usuario.getEstatusUsuario() : "ACTIVO";
+            
             int result = jdbcTemplate.update(insertSql,
                 usuario.getNoUsuario(),
                 usuario.getNombreEmpleado(),
                 usuario.getPassword(),
-                usuario.getEstatusUsuario() != null ? usuario.getEstatusUsuario() : "A",
+                estatusUsuario,
                 usuario.getIdPerfil(),
                 usuario.getUsuarioMod() != null ? usuario.getUsuarioMod() : "SYSTEM",
                 usuario.getIdDfi(),
@@ -124,22 +126,62 @@ public class UsuarioService {
 
     /**
      * Consulta empleados específicos por criterios
+     * Busca en ambas tablas: USUARIOS (usuarios registrados) y EMPLEADOS (catálogo de empleados)
      */
     public List<EmpleadoConsultaDTO> consultarEmpleadosEspecificos(String noUsuario, String nombreEmpleado, String idPerfil) {
         StringBuilder sql = new StringBuilder();
-        sql.append("SELECT e.NO_USUARIO, ");
-        sql.append("(e.NOMBRE || ' ' || e.APELLIDO_PATERNO || ' ' || e.APELLIDO_MATERNO) AS NOMBRE_EMPLEADO, ");
-        sql.append("e.CORREO_ELECTRONICO AS CORREO, ");
-        sql.append("e.ESTATUS_EMPLEADO AS ESTATUS_USUARIO, ");
-        sql.append("e.FECHA_INGRESO AS FECHA_ALTA, ");
-        sql.append("NULL AS FECHA_MOD, NULL AS ID_DFI, NULL AS ID_ESTACIONAMIENTO, NULL AS ID_PERFIL, ");
-        sql.append("NULL AS MODIFICA_UBICACION, NULL AS PASSWORD, NULL AS USUARIO_MOD, ");
-        sql.append("e.SALARIO_BASE AS SALARIO_BASE, e.RFC AS RFC, e.CURP AS CURP ");
-        sql.append("FROM EMPLEADOS e ");
+        
+        // Primera parte: Consulta de USUARIOS (usuarios registrados en el sistema)
+        sql.append("SELECT u.NO_USUARIO, ");
+        sql.append("u.NOMBRE_EMPLEADO AS NOMBRE_EMPLEADO, ");
+        sql.append("NULL AS CORREO, ");
+        sql.append("CASE WHEN u.ESTATUS_USUARIO IN ('ACTIVO', 'A') THEN 'ACTIVO' ELSE 'INACTIVO' END AS ESTATUS_USUARIO, ");
+        sql.append("u.FECHA_ALTA AS FECHA_ALTA, ");
+        sql.append("u.FECHA_MOD AS FECHA_MOD, ");
+        sql.append("u.ID_DFI AS ID_DFI, ");
+        sql.append("u.ID_ESTACIONAMIENTO AS ID_ESTACIONAMIENTO, ");
+        sql.append("u.ID_PERFIL AS ID_PERFIL, ");
+        sql.append("u.MODIFICA_UBICACION AS MODIFICA_UBICACION, ");
+        sql.append("u.PASSWORD AS PASSWORD, ");
+        sql.append("u.USUARIO_MOD AS USUARIO_MOD, ");
+        sql.append("NULL AS SALARIO_BASE, NULL AS RFC, NULL AS CURP, ");
+        sql.append("p.NOMBRE_PERFIL AS NOMBRE_PERFIL ");
+        sql.append("FROM USUARIOS u ");
+        sql.append("LEFT JOIN PERFIL p ON u.ID_PERFIL = p.ID_PERFIL ");
         sql.append("WHERE 1=1 ");
         
         List<Object> params = new ArrayList<>();
         
+        if (noUsuario != null && !noUsuario.trim().isEmpty()) {
+            sql.append("AND u.NO_USUARIO LIKE ? ");
+            params.add("%" + noUsuario + "%");
+        }
+
+        if (nombreEmpleado != null && !nombreEmpleado.trim().isEmpty()) {
+            sql.append("AND u.NOMBRE_EMPLEADO LIKE ? ");
+            params.add("%" + nombreEmpleado + "%");
+        }
+        
+        if (idPerfil != null && !idPerfil.trim().isEmpty()) {
+            sql.append("AND u.ID_PERFIL = ? ");
+            params.add(Integer.parseInt(idPerfil));
+        }
+        
+        // UNION con la segunda parte: Consulta de EMPLEADOS (catálogo)
+        sql.append("UNION ");
+        sql.append("SELECT e.NO_USUARIO, ");
+        sql.append("(e.NOMBRE || ' ' || e.APELLIDO_PATERNO || ' ' || e.APELLIDO_MATERNO) AS NOMBRE_EMPLEADO, ");
+        sql.append("e.CORREO_ELECTRONICO AS CORREO, ");
+        sql.append("CASE WHEN e.ESTATUS_EMPLEADO = 'A' THEN 'ACTIVO' ELSE 'INACTIVO' END AS ESTATUS_USUARIO, ");
+        sql.append("e.FECHA_INGRESO AS FECHA_ALTA, ");
+        sql.append("NULL AS FECHA_MOD, NULL AS ID_DFI, NULL AS ID_ESTACIONAMIENTO, NULL AS ID_PERFIL, ");
+        sql.append("NULL AS MODIFICA_UBICACION, NULL AS PASSWORD, NULL AS USUARIO_MOD, ");
+        sql.append("e.SALARIO_BASE AS SALARIO_BASE, e.RFC AS RFC, e.CURP AS CURP, ");
+        sql.append("NULL AS NOMBRE_PERFIL ");
+        sql.append("FROM EMPLEADOS e ");
+        sql.append("WHERE 1=1 ");
+        
+        // Aplicar los mismos filtros para EMPLEADOS
         if (noUsuario != null && !noUsuario.trim().isEmpty()) {
             sql.append("AND e.NO_USUARIO LIKE ? ");
             params.add("%" + noUsuario + "%");
@@ -151,9 +193,13 @@ public class UsuarioService {
         }
         
         // idPerfil no aplica en EMPLEADOS; filtro omitido intencionalmente
+        
         sql.append("ORDER BY NOMBRE_EMPLEADO");
         
-        return jdbcTemplate.query(sql.toString(), params.toArray(), new EmpleadoRowMapper());
+        logger.info("Ejecutando consulta de empleados específicos con SQL: {}", sql.toString());
+        logger.info("Parámetros: {}", params);
+        
+        return jdbcTemplate.query(sql.toString(), params.toArray(new Object[0]), new EmpleadoRowMapper());
     }
 
     /**
@@ -192,17 +238,22 @@ public class UsuarioService {
         Map<String, Object> response = new HashMap<>();
         
         try {
-            String sql = "UPDATE USUARIOS SET ESTATUS_USUARIO = 'I', FECHA_MOD = SYSDATE, USUARIO_MOD = ? " +
+            // Usar 'INACTIVO' en lugar de 'I' para cumplir con la restricción CHK_USUARIOS_ESTATUS
+            String sql = "UPDATE USUARIOS SET ESTATUS_USUARIO = 'INACTIVO', FECHA_MOD = SYSDATE, USUARIO_MOD = ? " +
                         "WHERE NO_USUARIO = ?";
+            
+            logger.info("Inactivando usuario: {} con estatus: INACTIVO", noUsuario);
             
             int result = jdbcTemplate.update(sql, usuarioMod, noUsuario);
             
             if (result > 0) {
                 response.put("success", true);
                 response.put("message", "Usuario eliminado exitosamente");
+                logger.info("Usuario {} inactivado correctamente", noUsuario);
             } else {
                 response.put("success", false);
                 response.put("message", "Usuario no encontrado");
+                logger.warn("Usuario {} no encontrado para inactivar", noUsuario);
             }
             
         } catch (Exception e) {
@@ -281,7 +332,8 @@ public class UsuarioService {
             empleado.setSalarioBase(rs.getBigDecimal("SALARIO_BASE"));
             empleado.setRfc(rs.getString("RFC"));
             empleado.setCurp(rs.getString("CURP"));
-            empleado.setNombrePerfil(null); // No aplica en EMPLEADOS
+            // nombrePerfil puede venir de USUARIOS (con JOIN a PERFIL) o ser NULL si viene de EMPLEADOS
+            empleado.setNombrePerfil(rs.getString("NOMBRE_PERFIL"));
             empleado.setId(null);           // No existe ID en este esquema
             empleado.setContrasena(null);
             return empleado;
