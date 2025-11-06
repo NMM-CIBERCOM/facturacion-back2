@@ -110,33 +110,65 @@ public class MenuConfigService {
         Map<String, Object> response = new HashMap<>();
         
         try {
+            // Validar que isVisible no sea null
+            if (isVisible == null) {
+                logger.error("❌ ERROR: isVisible es NULL para ID_CONFIG: {}", idConfig);
+                response.put("success", false);
+                response.put("message", "El valor de isVisible no puede ser null");
+                return response;
+            }
+            
             // Convertir Boolean a Integer (1 = visible, 0 = oculto)
-            Integer isVisibleInt = isVisible != null && isVisible ? 1 : 0;
+            Integer isVisibleInt = isVisible ? 1 : 0;
             String usuario = usuarioMod != null && !usuarioMod.trim().isEmpty() ? usuarioMod : "admin";
+            
+            logger.info("🔄 INICIANDO ACTUALIZACIÓN - ID_CONFIG: {}, isVisible (Boolean): {}, isVisibleInt (Integer): {}, USUARIO: {}", 
+                        idConfig, isVisible, isVisibleInt, usuario);
             
             // Usar los nombres correctos de las columnas según la estructura real de la tabla
             String sql = "UPDATE MENU_CONFIG SET IS_VISIBLE = ?, FECHA_MODIFICACION = SYSDATE, USUARIO_MODIFICACION = ? " +
                         "WHERE ID_CONFIG = ?";
             
-            logger.debug("Actualizando visibilidad - ID_CONFIG: {}, IS_VISIBLE: {}, USUARIO_MODIFICACION: {}", 
-                        idConfig, isVisibleInt, usuario);
+            logger.info("📝 Ejecutando SQL: {} con parámetros: IS_VISIBLE={}, USUARIO={}, ID_CONFIG={}", 
+                        sql, isVisibleInt, usuario, idConfig);
             
             int rowsAffected = jdbcTemplate.update(sql, isVisibleInt, usuario, idConfig);
             
+            logger.info("📊 Filas afectadas por UPDATE: {}", rowsAffected);
+            
             if (rowsAffected > 0) {
+                // Verificar el valor actualizado en la BD
+                String verifySql = "SELECT IS_VISIBLE FROM MENU_CONFIG WHERE ID_CONFIG = ?";
+                try {
+                    Integer valorActualizado = jdbcTemplate.queryForObject(verifySql, Integer.class, idConfig);
+                    logger.info("✅ VERIFICACIÓN EN BD - ID_CONFIG: {}, IS_VISIBLE después de UPDATE: {}", idConfig, valorActualizado);
+                    
+                    // Verificar que el valor guardado coincida con el esperado
+                    if (!valorActualizado.equals(isVisibleInt)) {
+                        logger.error("❌ ERROR DE PERSISTENCIA - Valor esperado: {}, Valor en BD: {}", isVisibleInt, valorActualizado);
+                        response.put("success", false);
+                        response.put("message", String.format("Error: El valor guardado (%d) no coincide con el esperado (%d)", valorActualizado, isVisibleInt));
+                        return response;
+                    }
+                } catch (Exception e) {
+                    logger.warn("⚠️ No se pudo verificar el valor en BD: {}", e.getMessage());
+                }
+                
                 response.put("success", true);
                 response.put("message", "Visibilidad actualizada correctamente");
-                logger.info("Visibilidad actualizada exitosamente para ID_CONFIG: {}", idConfig);
+                response.put("isVisible", isVisible);
+                response.put("isVisibleInt", isVisibleInt);
+                logger.info("✅ ÉXITO - Visibilidad actualizada para ID_CONFIG: {} -> IS_VISIBLE = {}", idConfig, isVisibleInt);
             } else {
                 response.put("success", false);
                 response.put("message", "No se encontró la configuración con ID: " + idConfig);
-                logger.warn("No se encontró configuración con ID_CONFIG: {}", idConfig);
+                logger.warn("⚠️ No se encontró configuración con ID_CONFIG: {}", idConfig);
             }
             
             return response;
             
         } catch (Exception e) {
-            logger.error("Error al actualizar visibilidad de config {}: {}", idConfig, e.getMessage(), e);
+            logger.error("❌ EXCEPCIÓN al actualizar visibilidad de config {}: {}", idConfig, e.getMessage(), e);
             response.put("success", false);
             String errorMessage = e.getMessage();
             // Si es un error de SQL, extraer solo el mensaje relevante
