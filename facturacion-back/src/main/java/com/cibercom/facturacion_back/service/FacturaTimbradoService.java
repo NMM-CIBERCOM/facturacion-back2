@@ -16,6 +16,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -23,6 +25,8 @@ import java.util.UUID;
 
 @Service
 public class FacturaTimbradoService {
+
+    private static final Logger logger = LoggerFactory.getLogger(FacturaTimbradoService.class);
 
     @Autowired
     private SatValidationService satValidationService;
@@ -85,24 +89,37 @@ public class FacturaTimbradoService {
             // 4. Generar XML según lineamientos del SAT
             String xml = generarXMLFactura(request, subtotal, iva, total);
 
-            // 5. Generar UUID temporal para seguimiento (formato antiguo sin guiones)
-            String uuidTemporal = UUID.randomUUID().toString().replace("-", "").toUpperCase();
-
-            // 6. Guardar factura en estado POR_TIMBRAR
-            guardarFacturaEnProceso(request, xml, uuidTemporal, subtotal, iva, total);
-
-            // 7. Enviar solicitud de timbrado al PAC
-            PacTimbradoRequest pacRequest = construirPacTimbradoRequest(request, xml, total, uuidTemporal);
+            // 5. Enviar solicitud de timbrado al PAC (sin guardar antes)
+            PacTimbradoRequest pacRequest = construirPacTimbradoRequest(request, xml, total);
             PacTimbradoResponse pacResponse = pacClient.solicitarTimbrado(pacRequest);
 
-            // 8. Procesar respuesta del PAC
+            // 6. Procesar respuesta del PAC
             if (pacResponse != null && Boolean.TRUE.equals(pacResponse.getOk())) {
-                if ("0".equals(pacResponse.getStatus())) {
-                    // Timbrado inmediato exitoso (EMITIDA)
-                    actualizarFacturaTimbrada(uuidTemporal, pacResponse);
-                    return construirRespuestaExitosa(request, subtotal, iva, total, pacResponse, uuidTemporal);
-                } else if ("4".equals(pacResponse.getStatus())) {
+                // Finkok retorna "TIMBRADO" cuando es exitoso, también aceptar "0" para compatibilidad
+                String status = pacResponse.getStatus();
+                if ("TIMBRADO".equals(status) || "TIMBRADO_PREVIAMENTE".equals(status) || "0".equals(status)) {
+                    // Timbrado inmediato exitoso - Guardar directamente con UUID de Finkok y estado EMITIDA
+                    String uuidFinkok = pacResponse.getUuid();
+                    if (uuidFinkok == null || uuidFinkok.isBlank()) {
+                        return FacturaResponse.builder()
+                                .exitoso(false)
+                                .mensaje("Error: Finkok no devolvió UUID en la respuesta")
+                                .timestamp(LocalDateTime.now())
+                                .errores("UUID no disponible en respuesta de Finkok")
+                                .build();
+                    }
+                    // Normalizar formato del UUID de Finkok: asegurar que tenga guiones en formato estándar (8-4-4-4-12)
+                    uuidFinkok = normalizarUUIDConGuiones(uuidFinkok);
+                    
+                    // Guardar factura directamente con UUID de Finkok y estado EMITIDA
+                    guardarFacturaTimbrada(request, pacResponse, subtotal, iva, total, uuidFinkok);
+                    
+                    return construirRespuestaExitosa(request, subtotal, iva, total, pacResponse, uuidFinkok);
+                } else if ("4".equals(status) || "EN_PROCESO_EMISION".equalsIgnoreCase(status)) {
                     // Timbrado en proceso (asíncrono) - EN_PROCESO_EMISION
+                    // Para este caso, necesitamos un UUID temporal para seguimiento
+                    String uuidTemporal = UUID.randomUUID().toString().replace("-", "").toUpperCase();
+                    guardarFacturaEnProceso(request, pacResponse.getXmlTimbrado() != null ? pacResponse.getXmlTimbrado() : xml, uuidTemporal, subtotal, iva, total);
                     actualizarFacturaEnProcesoEmision(uuidTemporal);
                     return FacturaResponse.builder()
                             .exitoso(true)
@@ -114,7 +131,6 @@ public class FacturaTimbradoService {
                             .build();
                 } else {
                     // Timbrado rechazado
-                    actualizarFacturaRechazada(uuidTemporal, pacResponse);
                     return FacturaResponse.builder()
                             .exitoso(false)
                             .mensaje("Timbrado rechazado por PAC")
@@ -124,7 +140,6 @@ public class FacturaTimbradoService {
                 }
             } else {
                 // Error en comunicación con PAC
-                actualizarFacturaError(uuidTemporal, pacResponse);
                 return FacturaResponse.builder()
                         .exitoso(false)
                         .mensaje("Error en comunicación con PAC")
@@ -145,15 +160,36 @@ public class FacturaTimbradoService {
 
     /**
      * Actualiza factura con datos de timbrado exitoso (llamado por callback)
+     * Usa REQUIRES_NEW para asegurar que se ejecute en una transacción separada y se confirme inmediatamente
      */
-    @Transactional
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
     public void actualizarFacturaTimbrada(String uuid, PacTimbradoResponse pacResponse) {
+        logger.info("=== ACTUALIZANDO FACTURA TIMBRADA ===");
+        logger.info("UUID temporal: {}", uuid);
+        
+        // Obtener el UUID oficial que devuelve Finkok
+        String uuidFinkok = pacResponse.getUuid();
+        if (uuidFinkok != null && !uuidFinkok.isBlank()) {
+            // Normalizar formato del UUID de Finkok: asegurar que tenga guiones en formato estándar (8-4-4-4-12)
+            uuidFinkok = normalizarUUIDConGuiones(uuidFinkok);
+            logger.info("UUID de Finkok (normalizado con guiones): {}", uuidFinkok);
+        } else {
+            logger.warn("⚠️ Finkok no devolvió UUID, usando UUID temporal");
+            uuidFinkok = uuid;
+        }
+        
+        logger.info("Perfil activo: {}", environment.getActiveProfiles().length > 0 ? environment.getActiveProfiles()[0] : "oracle");
+        
         String activeProfile = environment.getActiveProfiles().length > 0 ? environment.getActiveProfiles()[0]
                 : "oracle";
 
         if ("mongo".equals(activeProfile)) {
+            // Buscar por UUID temporal (el que se usó para guardar inicialmente)
             FacturaMongo facturaMongo = facturaMongoRepository.findByUuid(uuid);
             if (facturaMongo != null) {
+                logger.info("Factura encontrada en MongoDB, actualizando a EMITIDA (0)");
+                // Actualizar el UUID con el oficial de Finkok
+                facturaMongo.setUuid(uuidFinkok);
                 facturaMongo.setEstado(EstadoFactura.EMITIDA.getCodigo());
                 facturaMongo.setEstadoDescripcion(EstadoFactura.EMITIDA.getDescripcion());
                 facturaMongo.setFechaTimbrado(pacResponse.getFechaTimbrado());
@@ -164,10 +200,28 @@ public class FacturaTimbradoService {
                 facturaMongo.setSerie(pacResponse.getSerie());
                 facturaMongo.setFolio(pacResponse.getFolio());
                 facturaMongoRepository.save(facturaMongo);
+                logger.info("✓ Factura actualizada en MongoDB - UUID: {}, Estado: {}, Descripción: {}", 
+                        uuidFinkok, EstadoFactura.EMITIDA.getCodigo(), EstadoFactura.EMITIDA.getDescripcion());
+            } else {
+                logger.error("✗ Factura no encontrada en MongoDB con UUID temporal: {}", uuid);
             }
         } else {
-            Factura factura = facturaRepository.findById(uuid).orElse(null);
+            // Buscar por UUID temporal (el que se usó para guardar inicialmente)
+            Factura factura = facturaRepository.findByUuid(uuid).orElse(null);
+            if (factura == null) {
+                // Intentar buscar con variaciones del UUID
+                factura = facturaRepository.findByUuid(uuid.toUpperCase()).orElse(null);
+                if (factura == null) {
+                    factura = facturaRepository.findByUuid(uuid.toLowerCase()).orElse(null);
+                }
+            }
+            
             if (factura != null) {
+                logger.info("Factura encontrada en Oracle, actualizando a EMITIDA (0)");
+                logger.info("Estado anterior: {} - {}, EstatusFactura anterior: {}", 
+                        factura.getEstado(), factura.getEstadoDescripcion(), factura.getEstatusFactura());
+                // Actualizar el UUID con el oficial de Finkok
+                factura.setUuid(uuidFinkok);
                 factura.setEstado(EstadoFactura.EMITIDA.getCodigo());
                 factura.setEstadoDescripcion(EstadoFactura.EMITIDA.getDescripcion());
                 factura.setEstatusFactura(Integer.valueOf(EstadoFactura.EMITIDA.getCodigo()));
@@ -180,17 +234,69 @@ public class FacturaTimbradoService {
                 factura.setSerie(pacResponse.getSerie());
                 factura.setFolio(pacResponse.getFolio());
                 facturaRepository.save(factura);
+                
+                logger.info("✓✓✓ Factura actualizada en Oracle - UUID: {}, Estado: {}, EstatusFactura: {}, StatusSat: {}", 
+                        uuidFinkok,
+                        EstadoFactura.EMITIDA.getCodigo(), 
+                        EstadoFactura.EMITIDA.getCodigo(), 
+                        EstadoFactura.EMITIDA.getDescripcion());
+                
+                // Verificar inmediatamente después de guardar usando el UUID de Finkok
+                Factura facturaVerificada = facturaRepository.findByUuid(uuidFinkok).orElse(null);
+                if (facturaVerificada == null) {
+                    facturaVerificada = facturaRepository.findByUuid(uuidFinkok.toUpperCase()).orElse(null);
+                }
+                if (facturaVerificada == null) {
+                    facturaVerificada = facturaRepository.findByUuid(uuidFinkok.toLowerCase()).orElse(null);
+                }
+                if (facturaVerificada != null) {
+                    logger.info("✓ VERIFICACIÓN POST-ACTUALIZACIÓN - UUID: {}, Estado: {}, EstatusFactura: {}, StatusSat: {}", 
+                            uuidFinkok, facturaVerificada.getEstado(), facturaVerificada.getEstatusFactura(), facturaVerificada.getStatusSat());
+                    if (!EstadoFactura.EMITIDA.getCodigo().equals(facturaVerificada.getEstado())) {
+                        logger.error("✗✗✗ ERROR: La factura NO se actualizó correctamente. Estado esperado: {}, Estado actual: {}", 
+                                EstadoFactura.EMITIDA.getCodigo(), facturaVerificada.getEstado());
+                    }
+                } else {
+                    logger.error("✗✗✗ ERROR: No se pudo verificar la actualización - Factura no encontrada después de guardar con UUID: {}", uuidFinkok);
+                }
+            } else {
+                logger.error("✗✗✗ Factura no encontrada en Oracle con UUID: {} (ni con variaciones)", uuid);
+                // Intentar buscar por UUID sin guiones o en mayúsculas
+                // Intentar buscar con UUID en mayúsculas o minúsculas
+                logger.warn("Intentando buscar factura con UUID alternativo (case-insensitive)...");
+                Factura facturaAlt = facturaRepository.findByUuid(uuid.toUpperCase()).orElse(null);
+                if (facturaAlt == null) {
+                    facturaAlt = facturaRepository.findByUuid(uuid.toLowerCase()).orElse(null);
+                }
+                if (facturaAlt != null) {
+                    logger.info("Factura encontrada con UUID alternativo (case-insensitive), actualizando...");
+                    facturaAlt.setEstado(EstadoFactura.EMITIDA.getCodigo());
+                    facturaAlt.setEstadoDescripcion(EstadoFactura.EMITIDA.getDescripcion());
+                    facturaAlt.setEstatusFactura(Integer.valueOf(EstadoFactura.EMITIDA.getCodigo()));
+                    facturaAlt.setStatusSat(EstadoFactura.EMITIDA.getDescripcion());
+                    facturaAlt.setFechaTimbrado(pacResponse.getFechaTimbrado());
+                    facturaAlt.setXmlContent(pacResponse.getXmlTimbrado());
+                    facturaAlt.setCadenaOriginal(pacResponse.getCadenaOriginal());
+                    facturaAlt.setSelloDigital(pacResponse.getSelloDigital());
+                    facturaAlt.setCertificado(pacResponse.getCertificado());
+                    facturaAlt.setSerie(pacResponse.getSerie());
+                    facturaAlt.setFolio(pacResponse.getFolio());
+                    facturaRepository.save(facturaAlt);
+                    logger.info("✓ Factura actualizada con UUID alternativo");
+                } else {
+                    logger.error("✗ No se encontró factura con UUID: {} (ni con variaciones)", uuid);
+                }
             }
         }
+        logger.info("=== FIN ACTUALIZACIÓN FACTURA TIMBRADA ===");
     }
 
     /**
      * Construye la solicitud para el PAC
      */
-    private PacTimbradoRequest construirPacTimbradoRequest(FacturaRequest request, String xml, BigDecimal total,
-            String uuid) {
+    private PacTimbradoRequest construirPacTimbradoRequest(FacturaRequest request, String xml, BigDecimal total) {
         return PacTimbradoRequest.builder()
-                .uuid(uuid) // Incluir el UUID generado por el backend
+                .uuid(null) // No se envía UUID, Finkok lo genera al timbrar
                 .xmlContent(xml)
                 .rfcEmisor(request.getRfcEmisor())
                 .rfcReceptor(request.getRfcReceptor())
@@ -212,7 +318,75 @@ public class FacturaTimbradoService {
     }
 
     /**
-     * Guarda la factura en estado POR_TIMBRAR
+     * Guarda la factura directamente con UUID de Finkok y estado EMITIDA
+     */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
+    private void guardarFacturaTimbrada(FacturaRequest request, PacTimbradoResponse pacResponse,
+            BigDecimal subtotal, BigDecimal iva, BigDecimal total, String uuidFinkok) {
+        logger.info("=== GUARDANDO FACTURA TIMBRADA ===");
+        logger.info("UUID de Finkok: {}", uuidFinkok);
+        logger.info("Perfil activo: {}", environment.getActiveProfiles().length > 0 ? environment.getActiveProfiles()[0] : "oracle");
+        
+        String activeProfile = environment.getActiveProfiles().length > 0 ? environment.getActiveProfiles()[0]
+                : "oracle";
+
+        if ("mongo".equals(activeProfile)) {
+            FacturaMongo facturaMongo = FacturaMongo.builder()
+                    .uuid(uuidFinkok)
+                    .xmlContent(pacResponse.getXmlTimbrado())
+                    .fechaGeneracion(LocalDateTime.now())
+                    .fechaTimbrado(pacResponse.getFechaTimbrado())
+                    .subtotal(subtotal)
+                    .iva(iva)
+                    .total(total)
+                    .estado(EstadoFactura.EMITIDA.getCodigo())
+                    .estadoDescripcion(EstadoFactura.EMITIDA.getDescripcion())
+                    .serie(pacResponse.getSerie())
+                    .folio(pacResponse.getFolio())
+                    .cadenaOriginal(pacResponse.getCadenaOriginal())
+                    .selloDigital(pacResponse.getSelloDigital())
+                    .certificado(pacResponse.getCertificado())
+                    .tienda("TIENDA-001") // Valor por defecto
+                    .medioPago(request.getMetodoPago())
+                    .formaPago(request.getFormaPago())
+                    .build();
+            facturaMongoRepository.save(facturaMongo);
+            logger.info("✓ Factura guardada en MongoDB - UUID: {}, Estado: EMITIDA (0)", uuidFinkok);
+        } else {
+            Factura factura = Factura.builder()
+                    .uuid(uuidFinkok)
+                    .xmlContent(pacResponse.getXmlTimbrado())
+                    .fechaGeneracion(LocalDateTime.now())
+                    .fechaTimbrado(pacResponse.getFechaTimbrado())
+                    .emisorRfc(request.getRfcEmisor())
+                    .emisorRazonSocial(request.getNombreEmisor())
+                    .receptorRfc(request.getRfcReceptor())
+                    .receptorRazonSocial(request.getNombreReceptor())
+                    .subtotal(subtotal)
+                    .iva(iva)
+                    .iepsDesglosado(false)
+                    .total(total)
+                    .estado(EstadoFactura.EMITIDA.getCodigo())
+                    .estadoDescripcion(EstadoFactura.EMITIDA.getDescripcion())
+                    .estatusFactura(Integer.valueOf(EstadoFactura.EMITIDA.getCodigo()))
+                    .statusSat(EstadoFactura.EMITIDA.getDescripcion())
+                    .serie(pacResponse.getSerie())
+                    .folio(pacResponse.getFolio())
+                    .cadenaOriginal(pacResponse.getCadenaOriginal())
+                    .selloDigital(pacResponse.getSelloDigital())
+                    .certificado(pacResponse.getCertificado())
+                    .tienda("TIENDA-001") // Valor por defecto
+                    .medioPago(request.getMetodoPago())
+                    .formaPago(request.getFormaPago())
+                    .build();
+            facturaRepository.save(factura);
+            facturaRepository.flush();
+            logger.info("✓✓✓ Factura guardada en Oracle - UUID: {}, Estado: EMITIDA (0)", uuidFinkok);
+        }
+    }
+
+    /**
+     * Guarda la factura en estado POR_TIMBRAR (solo para casos asíncronos)
      */
     @Transactional
     private void guardarFacturaEnProceso(FacturaRequest request, String xml, String uuid,
@@ -278,7 +452,7 @@ public class FacturaTimbradoService {
                 facturaMongoRepository.save(facturaMongo);
             }
         } else {
-            Factura factura = facturaRepository.findById(uuid).orElse(null);
+            Factura factura = facturaRepository.findByUuid(uuid).orElse(null);
             if (factura != null) {
                 factura.setEstado(EstadoFactura.EN_PROCESO_EMISION.getCodigo());
                 factura.setEstadoDescripcion(EstadoFactura.EN_PROCESO_EMISION.getDescripcion());
@@ -305,7 +479,7 @@ public class FacturaTimbradoService {
                 facturaMongoRepository.save(facturaMongo);
             }
         } else {
-            Factura factura = facturaRepository.findById(uuid).orElse(null);
+            Factura factura = facturaRepository.findByUuid(uuid).orElse(null);
             if (factura != null) {
                 factura.setEstado(EstadoFactura.CANCELADA_SAT.getCodigo());
                 factura.setEstadoDescripcion(EstadoFactura.CANCELADA_SAT.getDescripcion());
@@ -332,7 +506,7 @@ public class FacturaTimbradoService {
                 facturaMongoRepository.save(facturaMongo);
             }
         } else {
-            Factura factura = facturaRepository.findById(uuid).orElse(null);
+            Factura factura = facturaRepository.findByUuid(uuid).orElse(null);
             if (factura != null) {
                 factura.setEstado(EstadoFactura.FACTURA_TEMPORAL.getCodigo());
                 factura.setEstadoDescripcion(EstadoFactura.FACTURA_TEMPORAL.getDescripcion());
@@ -416,12 +590,20 @@ public class FacturaTimbradoService {
         xml.append("RegimenFiscal=\"").append(request.getRegimenFiscalEmisor()).append("\"/>\n");
 
         // Receptor
+        // CRÍTICO: Validar y corregir UsoCFDI según tipo de persona y régimen fiscal
+        String rfcReceptor = request.getRfcReceptor();
+        String usoCfdiOriginal = request.getUsoCFDI();
+        String usoCfdiFinal = validarYCorregirUsoCFDI(usoCfdiOriginal, rfcReceptor, request.getRegimenFiscalReceptor());
+        if (!usoCfdiOriginal.equals(usoCfdiFinal)) {
+            logger.warn("⚠️ UsoCFDI corregido de '{}' a '{}' para RFC {} (régimen: {})", 
+                    usoCfdiOriginal, usoCfdiFinal, rfcReceptor, request.getRegimenFiscalReceptor());
+        }
         xml.append("  <cfdi:Receptor ");
-        xml.append("Rfc=\"").append(request.getRfcReceptor()).append("\" ");
+        xml.append("Rfc=\"").append(rfcReceptor).append("\" ");
         xml.append("Nombre=\"").append(request.getNombreReceptor()).append("\" ");
         xml.append("DomicilioFiscalReceptor=\"").append(request.getCodigoPostalReceptor()).append("\" ");
         xml.append("RegimenFiscalReceptor=\"").append(request.getRegimenFiscalReceptor()).append("\" ");
-        xml.append("UsoCFDI=\"").append(request.getUsoCFDI()).append("\"/>\n");
+        xml.append("UsoCFDI=\"").append(usoCfdiFinal).append("\"/>\n");
 
         // Conceptos
         xml.append("  <cfdi:Conceptos>\n");
@@ -468,5 +650,124 @@ public class FacturaTimbradoService {
         xml.append("</cfdi:Comprobante>");
 
         return xml.toString();
+    }
+
+    /**
+     * Normaliza un UUID asegurando que tenga el formato estándar con guiones (8-4-4-4-12)
+     * Si el UUID viene sin guiones, los agrega. Si ya los tiene, solo normaliza a mayúsculas.
+     * 
+     * @param uuid UUID que puede venir con o sin guiones
+     * @return UUID normalizado con guiones en formato estándar: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+     */
+    private String normalizarUUIDConGuiones(String uuid) {
+        if (uuid == null || uuid.trim().isEmpty()) {
+            return uuid;
+        }
+        
+        // Normalizar a mayúsculas y remover espacios
+        String uuidLimpio = uuid.trim().toUpperCase().replace(" ", "");
+        
+        // Si ya tiene guiones, solo verificar formato y normalizar
+        if (uuidLimpio.contains("-")) {
+            // Remover guiones existentes para normalizar
+            String sinGuiones = uuidLimpio.replace("-", "");
+            if (sinGuiones.length() != 32) {
+                logger.warn("⚠️ UUID con longitud inválida: {} (esperado: 32 caracteres). Se mantendrá tal cual.", uuidLimpio);
+                return uuidLimpio; // Retornar original si no tiene formato válido
+            }
+            // Re-formatear con guiones en posiciones correctas
+            return sinGuiones.substring(0, 8) + "-" +
+                   sinGuiones.substring(8, 12) + "-" +
+                   sinGuiones.substring(12, 16) + "-" +
+                   sinGuiones.substring(16, 20) + "-" +
+                   sinGuiones.substring(20, 32);
+        } else {
+            // No tiene guiones, agregarlos
+            if (uuidLimpio.length() != 32) {
+                logger.warn("⚠️ UUID con longitud inválida: {} (esperado: 32 caracteres). Se mantendrá tal cual.", uuidLimpio);
+                return uuidLimpio; // Retornar original si no tiene formato válido
+            }
+            // Formatear con guiones en formato estándar (8-4-4-4-12)
+            return uuidLimpio.substring(0, 8) + "-" +
+                   uuidLimpio.substring(8, 12) + "-" +
+                   uuidLimpio.substring(12, 16) + "-" +
+                   uuidLimpio.substring(16, 20) + "-" +
+                   uuidLimpio.substring(20, 32);
+        }
+    }
+
+    /**
+     * Valida y corrige el UsoCFDI según el tipo de persona (física o moral) y régimen fiscal
+     * CRÍTICO: El UsoCFDI debe corresponder con el tipo de persona y régimen conforme al catálogo c_UsoCFDI
+     * 
+     * @param usoCfdi UsoCFDI proporcionado
+     * @param rfc RFC del receptor (para determinar tipo de persona)
+     * @param regimenFiscal Régimen fiscal del receptor
+     * @return UsoCFDI válido corregido si es necesario
+     */
+    private String validarYCorregirUsoCFDI(String usoCfdi, String rfc, String regimenFiscal) {
+        if (usoCfdi == null || usoCfdi.trim().isEmpty()) {
+            logger.warn("⚠️ UsoCFDI vacío, usando valor por defecto según tipo de persona");
+            // Determinar tipo de persona por longitud del RFC
+            boolean esPersonaFisica = rfc != null && rfc.length() == 13;
+            return esPersonaFisica ? "D01" : "G01"; // D01 para física, G01 para moral
+        }
+
+        String usoCfdiUpper = usoCfdi.trim().toUpperCase();
+        
+        // Determinar tipo de persona por longitud del RFC
+        boolean esPersonaFisica = rfc != null && rfc.length() == 13;
+        boolean esPersonaMoral = rfc != null && rfc.length() == 12;
+        
+        // Regímenes fiscales de persona física (principalmente)
+        String[] regimenesPersonaFisica = {"605", "606", "607", "608", "610", "611", "612", "614", "615", "616", "621", "625", "626"};
+        boolean esRegimenPersonaFisica = false;
+        if (regimenFiscal != null) {
+            for (String regimen : regimenesPersonaFisica) {
+                if (regimen.equals(regimenFiscal)) {
+                    esRegimenPersonaFisica = true;
+                    break;
+                }
+            }
+        }
+
+        // Validar UsoCFDI según tipo de persona
+        if (esPersonaFisica || esRegimenPersonaFisica) {
+            // Persona Física: UsoCFDI válidos son principalmente D01-D10 y algunos G específicos (NO G01)
+            if (usoCfdiUpper.startsWith("D") || 
+                usoCfdiUpper.equals("G02") || usoCfdiUpper.equals("G03") || 
+                usoCfdiUpper.equals("CP01") || usoCfdiUpper.equals("CN01")) {
+                logger.debug("✓ UsoCFDI válido para persona física: {}", usoCfdiUpper);
+                return usoCfdiUpper;
+            } else if (usoCfdiUpper.equals("G01")) {
+                // G01 NO es válido para persona física
+                logger.warn("⚠️ UsoCFDI G01 no es válido para persona física. Corrigiendo a D01 (Gastos en general).");
+                logger.warn("⚠️ Para persona física con régimen {}, los UsoCFDI válidos son: D01-D10, G02, G03, CP01, CN01", regimenFiscal);
+                return "D01"; // Valor por defecto seguro para persona física
+            } else {
+                logger.warn("⚠️ UsoCFDI '{}' puede no ser válido para persona física. Verificando...", usoCfdiUpper);
+                // Permitir otros códigos pero advertir
+                return usoCfdiUpper;
+            }
+        } else if (esPersonaMoral) {
+            // Persona Moral: UsoCFDI válidos son principalmente G01, G02, G03, etc.
+            if (usoCfdiUpper.startsWith("G") || 
+                usoCfdiUpper.equals("CP01") || usoCfdiUpper.equals("CN01")) {
+                logger.debug("✓ UsoCFDI válido para persona moral: {}", usoCfdiUpper);
+                return usoCfdiUpper;
+            } else if (usoCfdiUpper.startsWith("D")) {
+                // D01-D10 son principalmente para persona física
+                logger.warn("⚠️ UsoCFDI '{}' (deducciones) generalmente es para persona física. Para persona moral se recomienda G01, G02, G03.", usoCfdiUpper);
+                // Permitir pero advertir
+                return usoCfdiUpper;
+            } else {
+                logger.warn("⚠️ UsoCFDI '{}' puede no ser válido para persona moral. Verificando...", usoCfdiUpper);
+                return usoCfdiUpper;
+            }
+        } else {
+            // Tipo de persona no determinado, usar el valor proporcionado pero advertir
+            logger.warn("⚠️ No se pudo determinar el tipo de persona del RFC: {}. Usando UsoCFDI proporcionado: {}", rfc, usoCfdiUpper);
+            return usoCfdiUpper;
+        }
     }
 }

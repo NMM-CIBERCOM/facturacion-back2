@@ -120,6 +120,9 @@ public class Factura {
     
     @Transient
     private Boolean iepsDesglosado;
+
+    @Column(name = "TIPO_FACTURA")
+    private Integer tipoFactura;
     
     // Totales
     @Column(name = "SUBTOTAL", precision = 15, scale = 2)

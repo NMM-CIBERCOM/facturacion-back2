@@ -30,6 +30,9 @@ public class PacTimbradoRequest {
     private String regimenFiscalReceptor;
     // NUEVO: UUIDs de CFDIs relacionados (separados por coma)
     private String relacionadosUuids;
+    // Credenciales de Finkok (opcionales, se pueden obtener de configuración)
+    private String username;
+    private String password;
 
     // Getters explícitos para compatibilidad cuando Lombok falle
     public String getUuid() { return uuid; }
@@ -51,6 +54,8 @@ public class PacTimbradoRequest {
     public String getRegimenFiscalEmisor() { return regimenFiscalEmisor; }
     public String getRegimenFiscalReceptor() { return regimenFiscalReceptor; }
     public String getRelacionadosUuids() { return relacionadosUuids; }
+    public String getUsername() { return username; }
+    public String getPassword() { return password; }
 
     // Builder manual para compatibilidad cuando Lombok no esté activo
     public static PacTimbradoRequestBuilder builder() { return new PacTimbradoRequestBuilder(); }
@@ -75,6 +80,8 @@ public class PacTimbradoRequest {
         public PacTimbradoRequestBuilder regimenFiscalEmisor(String regimenFiscalEmisor) { r.regimenFiscalEmisor = regimenFiscalEmisor; return this; }
         public PacTimbradoRequestBuilder regimenFiscalReceptor(String regimenFiscalReceptor) { r.regimenFiscalReceptor = regimenFiscalReceptor; return this; }
         public PacTimbradoRequestBuilder relacionadosUuids(String relacionadosUuids) { r.relacionadosUuids = relacionadosUuids; return this; }
+        public PacTimbradoRequestBuilder username(String username) { r.username = username; return this; }
+        public PacTimbradoRequestBuilder password(String password) { r.password = password; return this; }
         public PacTimbradoRequest build() { return r; }
     }
 }

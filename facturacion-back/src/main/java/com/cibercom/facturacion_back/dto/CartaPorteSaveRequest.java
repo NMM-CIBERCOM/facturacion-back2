@@ -1,11 +1,16 @@
 package com.cibercom.facturacion_back.dto;
 
+import com.cibercom.facturacion_back.dto.cartaporte.CartaPorteComplement;
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
-import java.time.LocalDateTime;
 
 public class CartaPorteSaveRequest {
     
+    @JsonProperty("versionComplemento")
+    @JsonAlias({"versionCartaPorte"})
+    private String versionComplemento;
+
     // Datos fiscales receptor
     @JsonProperty("rfcIniciales")
     private String rfcIniciales;
@@ -32,12 +37,6 @@ public class CartaPorteSaveRequest {
     private String materno;
     
     // Campos adicionales que envía el frontend
-    @JsonProperty("apellidoPaterno")
-    private String apellidoPaterno;
-    
-    @JsonProperty("apellidoMaterno")
-    private String apellidoMaterno;
-    
     @JsonProperty("pais")
     private String pais;
     
@@ -55,6 +54,9 @@ public class CartaPorteSaveRequest {
     
     @JsonProperty("usoCfdi")
     private String usoCfdi;
+
+    @JsonProperty("tipoPersona")
+    private String tipoPersona;
     
     // Información general
     @JsonProperty("descripcion")
@@ -123,8 +125,30 @@ public class CartaPorteSaveRequest {
     
     @JsonProperty("fechaLlegada")
     private String fechaLlegada;
+
+    // Campos adicionales para transporte ferroviario
+    @JsonProperty("tipoEstacionOrigen")
+    private String tipoEstacionOrigen;
+
+    @JsonProperty("tipoEstacionDestino")
+    private String tipoEstacionDestino;
+    
+    // CP137: DistanciaRecorrida solo para Destino con Autotransporte o Ferroviario
+    @JsonProperty("distanciaRecorrida")
+    private String distanciaRecorrida;
+
+    @JsonProperty("complemento")
+    private CartaPorteComplement complemento;
     
     // Getters y Setters
+    public String getVersionComplemento() {
+        return versionComplemento;
+    }
+
+    public void setVersionComplemento(String versionComplemento) {
+        this.versionComplemento = versionComplemento;
+    }
+
     public String getRfcIniciales() {
         return rfcIniciales;
     }
@@ -188,6 +212,16 @@ public class CartaPorteSaveRequest {
     public void setMaterno(String materno) {
         this.materno = materno;
     }
+
+    @JsonProperty("apellidoPaterno")
+    public void setApellidoPaterno(String apellido) {
+        this.paterno = apellido;
+    }
+
+    @JsonProperty("apellidoMaterno")
+    public void setApellidoMaterno(String apellido) {
+        this.materno = apellido;
+    }
     
     public String getPais() {
         return pais;
@@ -227,6 +261,14 @@ public class CartaPorteSaveRequest {
     
     public void setUsoCfdi(String usoCfdi) {
         this.usoCfdi = usoCfdi;
+    }
+
+    public String getTipoPersona() {
+        return tipoPersona;
+    }
+
+    public void setTipoPersona(String tipoPersona) {
+        this.tipoPersona = tipoPersona;
     }
     
     public String getDescripcion() {
@@ -375,19 +417,11 @@ public class CartaPorteSaveRequest {
     
     // Getters y setters para campos adicionales
     public String getApellidoPaterno() {
-        return apellidoPaterno;
+        return paterno;
     }
-    
-    public void setApellidoPaterno(String apellidoPaterno) {
-        this.apellidoPaterno = apellidoPaterno;
-    }
-    
+
     public String getApellidoMaterno() {
-        return apellidoMaterno;
-    }
-    
-    public void setApellidoMaterno(String apellidoMaterno) {
-        this.apellidoMaterno = apellidoMaterno;
+        return materno;
     }
     
     public String getNoRegistroTrib() {
@@ -428,6 +462,38 @@ public class CartaPorteSaveRequest {
     
     public void setDestinoDomicilio(String destinoDomicilio) {
         this.destinoDomicilio = destinoDomicilio;
+    }
+
+    public String getTipoEstacionOrigen() {
+        return tipoEstacionOrigen;
+    }
+
+    public void setTipoEstacionOrigen(String tipoEstacionOrigen) {
+        this.tipoEstacionOrigen = tipoEstacionOrigen;
+    }
+
+    public String getTipoEstacionDestino() {
+        return tipoEstacionDestino;
+    }
+
+    public void setTipoEstacionDestino(String tipoEstacionDestino) {
+        this.tipoEstacionDestino = tipoEstacionDestino;
+    }
+    
+    public String getDistanciaRecorrida() {
+        return distanciaRecorrida;
+    }
+
+    public void setDistanciaRecorrida(String distanciaRecorrida) {
+        this.distanciaRecorrida = distanciaRecorrida;
+    }
+
+    public CartaPorteComplement getComplemento() {
+        return complemento;
+    }
+
+    public void setComplemento(CartaPorteComplement complemento) {
+        this.complemento = complemento;
     }
     
     // Método auxiliar para obtener RFC completo

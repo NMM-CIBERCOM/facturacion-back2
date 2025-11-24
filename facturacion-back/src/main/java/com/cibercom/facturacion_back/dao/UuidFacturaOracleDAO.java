@@ -11,7 +11,6 @@ import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -329,7 +328,7 @@ public class UuidFacturaOracleDAO {
                                   String rfcReceptor,
                                   String rfcEmisor) {
         return insertarBasicoConIdReceptor(uuid, xmlContent, serie, folio, subtotal, iva, ieps, total,
-                formaPago, usoCfdi, estado, estadoDescripcion, medioPago, rfcReceptor, rfcEmisor, null);
+                formaPago, usoCfdi, estado, estadoDescripcion, medioPago, rfcReceptor, rfcEmisor, null, null, null);
     }
 
     /** Variante que permite especificar ID_RECEPTOR explícitamente si el esquema lo requiere como NOT NULL. */
@@ -349,6 +348,29 @@ public class UuidFacturaOracleDAO {
                                                String rfcReceptor,
                                                String rfcEmisor,
                                                Long idReceptor) {
+        return insertarBasicoConIdReceptor(uuid, xmlContent, serie, folio, subtotal, iva, ieps, total,
+                formaPago, usoCfdi, estado, estadoDescripcion, medioPago, rfcReceptor, rfcEmisor, null, idReceptor, null);
+    }
+
+    /** Variante extendida que permite indicar explícitamente el TIPO_FACTURA (ej. 2 = egreso). */
+    public boolean insertarBasicoConIdReceptor(String uuid,
+                                               String xmlContent,
+                                               String serie,
+                                               String folio,
+                                               BigDecimal subtotal,
+                                               BigDecimal iva,
+                                               BigDecimal ieps,
+                                               BigDecimal total,
+                                               String formaPago,
+                                               String usoCfdi,
+                                               String estado,
+                                               String estadoDescripcion,
+                                              String medioPago,
+                                              String rfcReceptor,
+                                              String rfcEmisor,
+                                              String correoReceptor,
+                                              Long idReceptor,
+                                              Integer tipoFactura) {
         lastInsertError = null;
         try {
             String tableName = detectFacturaTableName();
@@ -383,6 +405,7 @@ public class UuidFacturaOracleDAO {
             String medioPagoFallback = medioPago != null ? medioPago : "PUE";
             String rfcReceptorFallback = rfcReceptor != null ? rfcReceptor : "XAXX010101000";
             String rfcEmisorFallback = rfcEmisor != null ? rfcEmisor : "AAA010101AAA";
+            String correoReceptorFallback = correoReceptor != null ? correoReceptor : "";
             java.sql.Timestamp nowTs = new java.sql.Timestamp(System.currentTimeMillis());
 
             // Agregar columnas consideradas comunes con fallback si son NOT NULL
@@ -401,6 +424,9 @@ public class UuidFacturaOracleDAO {
             // USO CFDI puede estar como USO_CFDI o RECEPTOR_USO_CFDI
             addIfPresentWithFallback(meta, avail, cols, vals, "USO_CFDI", usoCfdi, usoCfdiFallback);
             addIfPresentWithFallback(meta, avail, cols, vals, "RECEPTOR_USO_CFDI", usoCfdi, usoCfdiFallback);
+            if (tipoFactura != null) {
+                addIfPresentWithFallback(meta, avail, cols, vals, "TIPO_FACTURA", tipoFactura, tipoFactura);
+            }
             addIfPresentWithFallback(meta, avail, cols, vals, "ESTADO", estado, estadoFallback);
             addIfPresentWithFallback(meta, avail, cols, vals, "ESTADO_DESCRIPCION", estadoDescripcion, estadoDescFallback);
             // Medio/Metodo de pago puede variar
@@ -411,6 +437,9 @@ public class UuidFacturaOracleDAO {
             addIfPresentWithFallback(meta, avail, cols, vals, "RFC_RECEPTOR", rfcReceptor, rfcReceptorFallback);
             addIfPresentWithFallback(meta, avail, cols, vals, "RFC_E", rfcEmisor, rfcEmisorFallback);
             addIfPresentWithFallback(meta, avail, cols, vals, "RFC_EMISOR", rfcEmisor, rfcEmisorFallback);
+            addIfPresentWithFallback(meta, avail, cols, vals, "CORREO_ELECTRONICO", correoReceptor, correoReceptorFallback);
+            addIfPresentWithFallback(meta, avail, cols, vals, "CORREO", correoReceptor, correoReceptorFallback);
+            addIfPresentWithFallback(meta, avail, cols, vals, "EMAIL", correoReceptor, correoReceptorFallback);
             // ID_RECEPTOR si el esquema lo tiene y lo exige como NOT NULL
             if (avail.contains("ID_RECEPTOR")) {
                 ColumnMeta cm = meta.get("ID_RECEPTOR");

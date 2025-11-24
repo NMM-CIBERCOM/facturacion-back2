@@ -219,3 +219,10 @@ public class ConsultaFacturaResponse {
 
 
 
+
+
+
+
+
+
+

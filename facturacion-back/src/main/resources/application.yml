@@ -21,6 +21,36 @@ spring:
 server:
   port: 8080
 
+# Configuración de Finkok (PAC)
+finkok:
+  enabled: true
+  username: nm9282672@gmail.com
+  password: N1C0LASm_  # Esta contraseña se usa para encriptar la llave privada en DES3
+  stamp:
+    # URL del endpoint SOAP (sin .wsdl - el .wsdl es solo para describir el servicio)
+    url: https://demo-facturacion.finkok.com/servicios/soap/stamp
+  cancel:
+    # URL del endpoint SOAP para cancelación (sin .wsdl)
+    url: https://demo-facturacion.finkok.com/servicios/soap/cancel
+  retentions:
+    # URL del endpoint SOAP para retenciones (sin .wsdl)
+    url: https://demo-facturacion.finkok.com/servicios/soap/retentions
+
+# Configuración del Emisor (valores por defecto para CFDI)
+facturacion:
+  emisor:
+    rfc: IVD920810GU2
+    nombre: INNOVACION VALOR Y DESARROLLO SA
+    regimen: 601
+    cp: 58000
+    registroPatronal: "VADA800927HSRSRL05"  # Registro Patronal del IMSS (requerido para nóminas)
+  csd:
+    enabled: true
+    certificado:
+      path: classpath:certificados/CSD_Sucursal_1_IVD920810GU2_20230518_062554.cer
+    llave:
+      path: classpath:certificados/CSD_Sucursal_1_IVD920810GU2_20230518_062554.key
+      password: "12345678a"
 ---
 
 spring:

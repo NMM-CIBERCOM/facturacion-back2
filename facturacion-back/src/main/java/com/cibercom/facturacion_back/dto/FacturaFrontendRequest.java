@@ -16,9 +16,12 @@ public class FacturaFrontendRequest {
     @Email(message = "El formato del correo electrónico no es válido")
     private String correoElectronico;
 
-    @NotBlank(message = "La razón social es obligatoria")
+    // razonSocial es obligatorio solo para personas morales (RFC de 12 caracteres)
+    // Se valida condicionalmente en el servicio según el tipo de persona
     private String razonSocial;
 
+    // nombre y paterno son obligatorios solo para personas físicas (RFC de 13 caracteres)
+    // Se valida condicionalmente en el servicio según el tipo de persona
     private String nombre;
     private String paterno;
     private String materno;

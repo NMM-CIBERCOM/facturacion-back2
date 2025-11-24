@@ -4,7 +4,6 @@ import com.cibercom.facturacion_back.dao.NotasCreditoOracleDAO;
 import com.cibercom.facturacion_back.dao.UuidFacturaOracleDAO;
 import com.cibercom.facturacion_back.dto.CreditNoteSaveRequest;
 import com.cibercom.facturacion_back.model.ClienteCatalogo;
-import com.cibercom.facturacion_back.service.ClienteCatalogoService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Profile;
@@ -71,7 +70,9 @@ public class CreditNoteOracleSaveService {
                 req.getMetodoPago(),
                 req.getRfcReceptor(),
                 req.getRfcEmisor(),
-                idReceptor
+                null,
+                idReceptor,
+                Integer.valueOf(2)
         );
         if (!okFactura) {
             String err = uuidFacturaOracleDAO.getLastInsertError();
@@ -102,7 +103,9 @@ public class CreditNoteOracleSaveService {
                             req.getMetodoPago(),
                             req.getRfcReceptor(),
                             req.getRfcEmisor(),
-                            idReceptor
+                            null,
+                            idReceptor,
+                            null
                     );
                     if (!okFacturaOrig) {
                         String err = uuidFacturaOracleDAO.getLastInsertError();

@@ -7,6 +7,8 @@ import com.cibercom.facturacion_back.dto.FacturaGlobalConsultaResponse;
 import com.cibercom.facturacion_back.dto.FacturaGlobalRegistro;
 import com.cibercom.facturacion_back.dto.FacturaGlobalFacturaDTO;
 import com.cibercom.facturacion_back.dto.FacturaGlobalTicketDTO;
+import com.cibercom.facturacion_back.dto.FacturaGlobalGuardarRequest;
+import com.cibercom.facturacion_back.dto.FacturaGlobalGuardarResponse;
 import com.cibercom.facturacion_back.dto.ConsultaFacturaRequest;
 import com.cibercom.facturacion_back.dto.ConsultaFacturaResponse.FacturaConsultaDTO;
 import com.cibercom.facturacion_back.dto.TicketDto;
@@ -15,12 +17,15 @@ import com.cibercom.facturacion_back.dto.TicketSearchRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.*;
 import java.time.LocalDate;
 import java.time.temporal.TemporalAdjusters;
+import java.util.UUID;
 
 @Service
 public class FacturacionGlobalService {
@@ -40,6 +45,9 @@ public class FacturacionGlobalService {
 
     @Autowired(required = false)
     private com.cibercom.facturacion_back.dao.ConceptoOracleDAO conceptoOracleDAO;
+
+    @Autowired(required = false)
+    private JdbcTemplate jdbcTemplate;
 
     /**
      * Calcula preview agregando totales de TICKETS y TICKETS_DETALLE por fecha/tienda.
@@ -379,6 +387,164 @@ public class FacturacionGlobalService {
     }
 
     private BigDecimal safeBD(BigDecimal v) { return v != null ? v : BigDecimal.ZERO; }
+
+    /**
+     * Guarda una factura global en la base de datos y relaciona las facturas hijas.
+     */
+    @Transactional
+    public FacturaGlobalGuardarResponse guardarFacturaGlobal(FacturaGlobalGuardarRequest request) {
+        if (jdbcTemplate == null || conceptoOracleDAO == null) {
+            throw new IllegalStateException("Servicios de base de datos no disponibles (perfil Oracle no activo)");
+        }
+
+        FacturaGlobalGuardarResponse response = new FacturaGlobalGuardarResponse();
+
+        try {
+            // Generar UUID para la factura global
+            String uuidGlobal = UUID.randomUUID().toString().toUpperCase().replace("-", "");
+
+            // Insertar factura global en FACTURAS
+            // Usar SYSDATE para FECHA como en otros inserts de la aplicación
+            String insertSql = "INSERT INTO FACTURAS (" +
+                    "RFC_E, RFC_R, ID_RECEPTOR, SERIE, FOLIO, FECHA, UUID, " +
+                    "IMPORTE, TIPO_FACTURA, ESTATUS_FACTURA, SUBTOTAL, " +
+                    "TIENDA_ORIGEN, USUARIO, COMENTARIOS, RAZON_SOCIAL, " +
+                    "SISTEMA_ORIGEN, USO_CFDI, METODO_PAGO, FORMA_PAGO) " +
+                    "VALUES (?, ?, ?, ?, ?, SYSDATE, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+            // Valores por defecto para factura global
+            String rfcEmisor = "XAXX010101000"; // RFC genérico para resúmenes
+            String rfcReceptor = "XAXX010101000";
+            Long idReceptor = 1L; // ID por defecto, ajustar según tu esquema
+            Integer tipoFactura = 3; // TIPO_FACTURA = 3 para factura global (ajustar según tu código)
+            Integer estatusFactura = 1; // 1 = Pendiente/Activa (ajustar según tu código)
+            Integer usuario = 1; // Usuario sistema o obtener del contexto
+            Integer tiendaOrigen = request.getCodigoTienda() != null ? 
+                    Integer.parseInt(request.getCodigoTienda()) : null;
+            String sistemaOrigen = "GLOBAL"; // Sistema origen para facturas globales
+            String usoCFDI = "G03"; // Uso CFDI genérico para resúmenes
+            String metodoPago = "PUE"; // Pago en una sola exhibición
+            String formaPago = "99"; // Por definir
+            
+            // Convertir folio a número (FOLIO es NUMBER en la tabla)
+            // Usar hash del folio string como número o timestamp
+            Long folioNumber;
+            String folioString = request.getFolio() != null ? request.getFolio() : 
+                    (request.getPeriodo() + "_" + request.getFecha().toString());
+            try {
+                // Intentar parsear como número si es posible
+                folioNumber = Long.parseLong(folioString);
+            } catch (NumberFormatException e) {
+                // Si no es número, usar hash del string como identificador único
+                // Convertir explícitamente de int a Long
+                folioNumber = Long.valueOf(Math.abs(folioString.hashCode()));
+            }
+
+            // Convertir importe y subtotal a BigDecimal para compatibilidad con Oracle
+            BigDecimal importe = request.getImporte() != null ? 
+                    BigDecimal.valueOf(request.getImporte()) : BigDecimal.ZERO;
+            BigDecimal subtotal = request.getSubtotal() != null ? 
+                    BigDecimal.valueOf(request.getSubtotal()) : BigDecimal.ZERO;
+
+            // Insertar factura global (Oracle generará el ID automáticamente si ID_FACTURA es GENERATED ALWAYS AS IDENTITY)
+            logger.info("Insertando factura global con UUID: {}, Serie: {}, Folio: {}, Importe: {}", 
+                    uuidGlobal, request.getSerie() != null ? request.getSerie() : "RG", folioNumber, importe);
+            
+            try {
+                int rowsInserted = jdbcTemplate.update(insertSql,
+                        rfcEmisor,
+                        rfcReceptor,
+                        idReceptor,
+                        request.getSerie() != null ? request.getSerie() : "RG",
+                        folioNumber,
+                        // FECHA se maneja con SYSDATE en el SQL, no se pasa como parámetro
+                        uuidGlobal,
+                        importe,
+                        tipoFactura,
+                        estatusFactura,
+                        subtotal,
+                        tiendaOrigen,
+                        usuario,
+                        request.getDescripcion(),
+                        request.getDescripcion() != null ? request.getDescripcion() : "Facturación Global",
+                        sistemaOrigen,
+                        usoCFDI,
+                        metodoPago,
+                        formaPago
+                );
+                
+                if (rowsInserted == 0) {
+                    throw new RuntimeException("No se insertó ninguna fila en FACTURAS");
+                }
+                
+                logger.info("Factura global insertada correctamente. Filas afectadas: {}", rowsInserted);
+            } catch (Exception e) {
+                logger.error("Error al insertar factura global en BD: {}", e.getMessage(), e);
+                throw new RuntimeException("Error al insertar factura global en la base de datos: " + e.getMessage(), e);
+            }
+
+            // Obtener el ID generado después de la inserción usando el UUID
+            String selectIdSql = "SELECT ID_FACTURA FROM FACTURAS WHERE UUID = ?";
+            Long idFacturaGlobal;
+            try {
+                idFacturaGlobal = jdbcTemplate.queryForObject(selectIdSql, Long.class, uuidGlobal);
+            } catch (Exception e) {
+                logger.error("Error al obtener ID de factura global después de inserción: {}", e.getMessage());
+                throw new RuntimeException("No se pudo obtener el ID de la factura global recién insertada", e);
+            }
+
+            // Relacionar facturas hijas: actualizar ID_FACTURA_GLOBAL en las facturas hijas
+            Integer facturasRelacionadas = 0;
+            if (request.getFacturasHijasUuid() != null && !request.getFacturasHijasUuid().isEmpty()) {
+                for (String uuidHija : request.getFacturasHijasUuid()) {
+                    try {
+                        // Obtener ID de la factura hija por UUID
+                        Optional<Long> idHijaOpt = conceptoOracleDAO.obtenerIdFacturaPorUuid(uuidHija);
+                        
+                        if (idHijaOpt.isPresent() && idHijaOpt.get() != null) {
+                            Long idHija = idHijaOpt.get();
+                            
+                            // Actualizar factura hija para relacionarla con la global
+                            String updateSql = "UPDATE FACTURAS SET ID_FACTURA_GLOBAL = ? WHERE ID_FACTURA = ?";
+                            int rowsUpdated = jdbcTemplate.update(updateSql, idFacturaGlobal, idHija);
+                            
+                            if (rowsUpdated > 0) {
+                                facturasRelacionadas = facturasRelacionadas + 1;
+                            }
+                        } else {
+                            logger.warn("No se encontró factura con UUID: {}", uuidHija);
+                        }
+                    } catch (Exception e) {
+                        logger.error("Error al relacionar factura hija con UUID {}: {}", uuidHija, e.getMessage());
+                    }
+                }
+            }
+
+            response.setSuccess(true);
+            response.setMessage("Factura global guardada exitosamente");
+            response.setIdFacturaGlobal(idFacturaGlobal);
+            response.setUuid(uuidGlobal);
+            response.setSerie(request.getSerie() != null ? request.getSerie() : "RG");
+            // Devolver el folio como string para mantener consistencia con el frontend
+            response.setFolio(folioString);
+            response.setFacturasRelacionadas(facturasRelacionadas);
+
+            logger.info("Factura global guardada exitosamente. ID: {}, UUID: {}, Facturas relacionadas: {}", 
+                    idFacturaGlobal, uuidGlobal, facturasRelacionadas);
+
+        } catch (Exception e) {
+            logger.error("Error al guardar factura global: {}", e.getMessage(), e);
+            logger.error("Stack trace completo:", e);
+            response.setSuccess(false);
+            String errorMessage = e.getMessage() != null ? e.getMessage() : "Error desconocido al guardar factura global";
+            response.setMessage("Error al guardar factura global: " + errorMessage);
+            // No lanzar RuntimeException aquí, devolver la respuesta con el error
+            // para que el controlador pueda manejarlo apropiadamente
+            return response;
+        }
+
+        return response;
+    }
 
     static class MontoAcumulado {
         BigDecimal base = BigDecimal.ZERO;

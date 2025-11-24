@@ -287,21 +287,21 @@ public class CreditNoteService {
 
     private PacTimbradoResponse solicitarTimbradoConReintento(PacTimbradoRequest req) {
         final int MAX_RETRIES = 3;
-        bitacoraClient.registrarEvento("CreditNotes", "Timbrado", "INICIO", "Solicitud de timbrado", Map.of(
-                "uuid", req.getUuid(),
-                "tipo", req.getTipo(),
-                "total", req.getTotal(),
-                "relacionadosUuids", req.getRelacionadosUuids()
-        ));
+        Map<String, Object> inicioData = new LinkedHashMap<>();
+        inicioData.put("uuid", req.getUuid());
+        inicioData.put("tipo", req.getTipo());
+        inicioData.put("total", req.getTotal());
+        inicioData.put("relacionadosUuids", req.getRelacionadosUuids());
+        bitacoraClient.registrarEvento("CreditNotes", "Timbrado", "INICIO", "Solicitud de timbrado", inicioData);
         PacTimbradoResponse resp = pacClient.solicitarTimbrado(req);
         int intentos = 1;
         while (intentos < MAX_RETRIES && (resp == null || resp.getOk() == null || !resp.getOk() || (resp.getStatus() != null && !"0".equals(resp.getStatus())))) {
-            bitacoraClient.registrarEvento("CreditNotes", "Timbrado", "REINTENTO", "Intento de timbrado", Map.of(
-                    "intento", intentos + 1,
-                    "maxRetries", MAX_RETRIES,
-                    "status", resp != null ? resp.getStatus() : null,
-                    "message", resp != null ? resp.getMessage() : null
-            ));
+            Map<String, Object> reintentoData = new LinkedHashMap<>();
+            reintentoData.put("intento", intentos + 1);
+            reintentoData.put("maxRetries", MAX_RETRIES);
+            reintentoData.put("status", resp != null ? resp.getStatus() : null);
+            reintentoData.put("message", resp != null ? resp.getMessage() : null);
+            bitacoraClient.registrarEvento("CreditNotes", "Timbrado", "REINTENTO", "Intento de timbrado", reintentoData);
             logger.warn("Reintentando timbrado PAC intento {}/{} - status={} - message={}", intentos + 1, MAX_RETRIES, resp != null ? resp.getStatus() : null, resp != null ? resp.getMessage() : null);
             try { Thread.sleep(1000L); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
             resp = pacClient.solicitarTimbrado(req);
@@ -310,12 +310,12 @@ public class CreditNoteService {
         if (resp == null) {
             resp = PacTimbradoResponse.builder().ok(false).status("ERROR").message("PAC sin respuesta").build();
         }
-        bitacoraClient.registrarEvento("CreditNotes", "Timbrado", "FIN", "Resultado de timbrado", Map.of(
-                "ok", resp.getOk(),
-                "status", resp.getStatus(),
-                "uuid", resp.getUuid(),
-                "message", resp.getMessage()
-        ));
+        Map<String, Object> finData = new LinkedHashMap<>();
+        finData.put("ok", resp.getOk());
+        finData.put("status", resp.getStatus());
+        finData.put("uuid", resp.getUuid());
+        finData.put("message", resp.getMessage());
+        bitacoraClient.registrarEvento("CreditNotes", "Timbrado", "FIN", "Resultado de timbrado", finData);
         return resp;
     }
 

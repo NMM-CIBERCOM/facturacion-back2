@@ -42,6 +42,10 @@ public class CreditNoteSaveRequest {
     private String estatusSat;       // opcional
     private Integer codeSat;         // opcional
 
+    // Receptor
+    private String nombreReceptor;
+    private String domicilioFiscalReceptor;
+
     // Emisor/Receptor básicos para FACTURAS
     private String rfcEmisor;
     private String rfcReceptor;
@@ -104,6 +108,12 @@ public class CreditNoteSaveRequest {
     public void setEstatusSat(String estatusSat) { this.estatusSat = estatusSat; }
     public Integer getCodeSat() { return codeSat; }
     public void setCodeSat(Integer codeSat) { this.codeSat = codeSat; }
+
+    // Receptor
+    public String getNombreReceptor() { return nombreReceptor; }
+    public void setNombreReceptor(String nombreReceptor) { this.nombreReceptor = nombreReceptor; }
+    public String getDomicilioFiscalReceptor() { return domicilioFiscalReceptor; }
+    public void setDomicilioFiscalReceptor(String domicilioFiscalReceptor) { this.domicilioFiscalReceptor = domicilioFiscalReceptor; }
 
     // Emisor/Receptor básicos para FACTURAS
     public String getRfcEmisor() { return rfcEmisor; }

@@ -8,13 +8,16 @@ import com.cibercom.facturacion_back.service.CreditNoteOracleSaveService;
 import com.cibercom.facturacion_back.dto.CreditNoteSaveRequest;
 import com.cibercom.facturacion_back.dto.PacTimbradoRequest;
 import com.cibercom.facturacion_back.dto.PacTimbradoResponse;
+import com.cibercom.facturacion_back.service.CreditNoteXmlBuilder;
 import lombok.Data;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -30,10 +33,18 @@ public class CreditNoteController {
 
     private final CreditNoteService service;
     private final ObjectProvider<CreditNoteOracleSaveService> oracleSaveProvider;
+    private final CreditNoteXmlBuilder creditNoteXmlBuilder;
+    @Value("${facturacion.regimenFiscalEmisor:601}")
+    private String regimenFiscalEmisorDefault;
+    @Value("${facturacion.regimenFiscalReceptor:601}")
+    private String regimenFiscalReceptorDefault;
+
     public CreditNoteController(CreditNoteService service,
-                                ObjectProvider<CreditNoteOracleSaveService> oracleSaveProvider) {
+                                ObjectProvider<CreditNoteOracleSaveService> oracleSaveProvider,
+                                CreditNoteXmlBuilder creditNoteXmlBuilder) {
         this.service = service;
         this.oracleSaveProvider = oracleSaveProvider;
+        this.creditNoteXmlBuilder = creditNoteXmlBuilder;
     }
 
     @Data
@@ -103,6 +114,7 @@ public class CreditNoteController {
     /** Guardar Nota de Crédito en Oracle: FACTURAS y NOTAS_CREDITO */
     @PostMapping("/guardar")
     public ResponseEntity<?> guardar(@RequestBody CreditNoteSaveRequest request) {
+        ensureXmlContent(request);
         CreditNoteOracleSaveService svc = oracleSaveProvider.getIfAvailable();
         if (svc == null) {
             Map<String, Object> m = new LinkedHashMap<>();
@@ -124,6 +136,7 @@ public class CreditNoteController {
     @PostMapping("/timbrar")
     public ResponseEntity<?> timbrar(@RequestBody CreditNoteSaveRequest request) {
         try {
+            String xmlGenerado = ensureXmlContent(request);
             logger.info("NC Controller Timbrar: solicitud uuidNc={} rfcEmisor={} rfcReceptor={} total={} serie={} folio={} uuidFacturaOrig={}",
                     request.getUuidNc(), request.getRfcEmisor(), request.getRfcReceptor(), request.getTotal(), request.getSerieNc(), request.getFolioNc(), request.getUuidFacturaOrig());
             // Construir solicitud al PAC usando los datos de la Nota de Crédito del frontend
@@ -137,7 +150,7 @@ public class CreditNoteController {
 
             PacTimbradoRequest req = PacTimbradoRequest.builder()
                     .uuid(uuid)
-                    .xmlContent(request.getXmlContent())
+                    .xmlContent(xmlGenerado)
                     .rfcEmisor(request.getRfcEmisor())
                     .rfcReceptor(request.getRfcReceptor())
                     .total(request.getTotal() != null ? request.getTotal().doubleValue() : null)
@@ -149,12 +162,22 @@ public class CreditNoteController {
                     .medioPago(request.getMetodoPago())
                     .formaPago(request.getFormaPago())
                     .usoCFDI(request.getUsoCfdi())
-                    .regimenFiscalEmisor(request.getRegimenFiscal())
-                    .regimenFiscalReceptor("601")
+                    .regimenFiscalEmisor(StringUtils.hasText(regimenFiscalEmisorDefault) ? regimenFiscalEmisorDefault : "601")
+                    .regimenFiscalReceptor(StringUtils.hasText(request.getRegimenFiscal())
+                            ? request.getRegimenFiscal()
+                            : (StringUtils.hasText(regimenFiscalReceptorDefault) ? regimenFiscalReceptorDefault : "601"))
                     .relacionadosUuids(request.getUuidFacturaOrig())
                     .build();
 
             PacTimbradoResponse resp = service.timbrarManual(req);
+            if (resp == null) {
+                logger.error("NC Controller Timbrar: el servicio devolvió una respuesta nula para uuid={}", uuid);
+                return ResponseEntity.status(502).body(Map.of(
+                        "ok", false,
+                        "error", "El PAC no regresó respuesta",
+                        "uuid", uuid
+                ));
+            }
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("ok", resp.getOk());
             m.put("status", resp.getStatus());
@@ -162,6 +185,7 @@ public class CreditNoteController {
             m.put("serie", resp.getSerie() != null ? resp.getSerie() : serie);
             m.put("folio", resp.getFolio() != null ? resp.getFolio() : folio);
             m.put("xmlTimbrado", resp.getXmlTimbrado());
+            m.put("xmlGenerado", xmlGenerado);
             m.put("message", resp.getMessage());
             logger.info("NC Controller Timbrar: respuesta ok={} status={} uuid={} message={}", resp.getOk(), resp.getStatus(), resp.getUuid(), resp.getMessage());
             return ResponseEntity.ok(m);
@@ -169,6 +193,18 @@ public class CreditNoteController {
             logger.error("Error timbrando nota de crédito: {}", e.getMessage());
             return ResponseEntity.status(500).body(Map.of("ok", false, "error", e.getMessage()));
         }
+    }
+
+    private String ensureXmlContent(CreditNoteSaveRequest request) {
+        if (request == null) {
+            return null;
+        }
+        if (StringUtils.hasText(request.getXmlContent())) {
+            return request.getXmlContent();
+        }
+        String xml = creditNoteXmlBuilder.buildXml(request);
+        request.setXmlContent(xml);
+        return xml;
     }
 
     private LocalDate parsePeriodo(String periodo) {

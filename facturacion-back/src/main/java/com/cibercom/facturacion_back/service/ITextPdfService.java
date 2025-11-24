@@ -11,11 +11,8 @@ import com.itextpdf.layout.element.*;
 import com.itextpdf.layout.properties.TextAlignment;
 import com.itextpdf.layout.properties.UnitValue;
 import com.itextpdf.layout.properties.HorizontalAlignment;
+import com.itextpdf.layout.borders.Border;
 import com.itextpdf.layout.borders.SolidBorder;
-import com.itextpdf.io.font.constants.StandardFonts;
-import com.itextpdf.io.font.PdfEncodings;
-import com.itextpdf.kernel.font.PdfFont;
-import com.itextpdf.kernel.font.PdfFontFactory;
 import org.apache.batik.transcoder.TranscoderInput;
 import org.apache.batik.transcoder.TranscoderOutput;
 import org.apache.batik.transcoder.image.PNGTranscoder;
@@ -31,13 +28,18 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Base64;
 import java.util.Map;
+import java.util.List;
 
 @Service
+@SuppressWarnings({"unused", "unchecked"})
 public class ITextPdfService {
     
     private static final Logger logger = LoggerFactory.getLogger(ITextPdfService.class);
+    private static final DateTimeFormatter FECHA_HORA = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
     
     public byte[] generarPdf(Map<String, Object> facturaData) throws IOException {
         // Llamamos al método existente con un logoConfig vacío
@@ -56,26 +58,34 @@ public class ITextPdfService {
             // Configurar márgenes más compactos
             document.setMargins(20, 20, 20, 20);
             
+            boolean esComplementoPago = esComplementoPago(facturaData);
+            boolean esNomina = tieneNomina(facturaData);
+
             // Agregar encabezado moderno
             agregarEncabezadoModerno(document, facturaData, logoConfig);
             
             // Agregar información de empresa y cliente
             agregarInformacionEmpresaCliente(document, facturaData, logoConfig);
             
-            // Si es nómina, agregar sección específica; de lo contrario, conceptos
-            if (tieneNomina(facturaData)) {
+            if (esComplementoPago) {
+                agregarSeccionComplementoPago(document, facturaData, logoConfig);
+            } else if (esNomina) {
                 agregarSeccionNomina(document, facturaData, logoConfig);
             } else {
                 // Agregar conceptos con diseño moderno
                 agregarConceptosModerno(document, facturaData, logoConfig);
             }
             
-            // Agregar complemento Carta Porte
-            agregarComplementoCartaPorte(document, facturaData, logoConfig);
+            // Agregar complemento Carta Porte solo si no es complemento de pago
+            if (!esComplementoPago) {
+                agregarComplementoCartaPorte(document, facturaData, logoConfig);
+            }
             
             // Totales: nómina o factura clásica
-            if (tieneNomina(facturaData)) {
+            if (esNomina) {
                 agregarTotalesNomina(document, facturaData, logoConfig);
+            } else if (esComplementoPago) {
+                agregarTotalesComplementoPago(document, facturaData, logoConfig);
             } else {
                 agregarTotalesModerno(document, facturaData, logoConfig);
             }
@@ -177,7 +187,6 @@ public class ITextPdfService {
     }
     
     private void agregarEncabezadoModerno(Document document, Map<String, Object> facturaData, Map<String, Object> logoConfig) {
-        Map<String, Object> factura = facturaData;
         try {
             // Agregar encabezado con fondo
             agregarEncabezadoConFondo(document, facturaData, logoConfig);
@@ -212,7 +221,20 @@ public class ITextPdfService {
                 .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE)
                 .setWidth(UnitValue.createPercentValue(70));
             
-            String tituloTexto = tieneNomina(factura) ? "RECIBO DE NÓMINA" : "FACTURA ELECTRÓNICA";
+            String tituloTexto;
+            if (tieneNomina(factura)) {
+                tituloTexto = "RECIBO DE NÓMINA";
+            } else {
+                String tipoComprobante = getString(factura, "tipoComprobante", "").toUpperCase();
+                switch (tipoComprobante) {
+                    case "I" -> tituloTexto = "COMPROBANTE DE INGRESO";
+                    case "E" -> tituloTexto = "COMPROBANTE DE EGRESO";
+                    case "T" -> tituloTexto = "COMPROBANTE DE TRASLADO";
+                    case "R" -> tituloTexto = "COMPROBANTE DE RETENCIÓN DE PAGOS";
+                    case "P" -> tituloTexto = "COMPLEMENTO DE PAGO";
+                    default -> tituloTexto = "FACTURA ELECTRÓNICA";
+                }
+            }
             Paragraph titulo = new Paragraph(tituloTexto)
                 .setBold()
                 .setFontSize(16)
@@ -623,10 +645,307 @@ public class ITextPdfService {
         return null;
     }
 
+    private boolean esComplementoPago(Map<String, Object> facturaData) {
+        String tipo = getString(facturaData, "tipoComprobante", "");
+        if ("P".equalsIgnoreCase(tipo)) {
+            return true;
+        }
+        java.util.List<java.util.Map<String, Object>> pagos = getListValue(facturaData, "pagosComplemento");
+        return pagos != null && !pagos.isEmpty();
+    }
+
+    private void agregarSeccionComplementoPago(Document document, Map<String, Object> facturaData, Map<String, Object> logoConfig) {
+        try {
+            java.util.List<java.util.Map<String, Object>> pagos = getListValue(facturaData, "pagosComplemento");
+            if (pagos == null || pagos.isEmpty()) {
+                return;
+            }
+
+            DeviceRgb primaryColor = extraerColorPrimario(logoConfig);
+
+            // Título de la sección de pagos
+            Paragraph tituloPagos = new Paragraph("INFORMACIÓN DEL PAGO")
+                .setBold()
+                .setFontSize(11)
+                .setFontColor(primaryColor)
+                .setMarginBottom(6)
+                .setMarginTop(8);
+            document.add(tituloPagos);
+
+            // Tabla de pagos con el mismo diseño que los conceptos
+            Table pagosTable = new Table(4);
+            pagosTable.setWidth(UnitValue.createPercentValue(100));
+            pagosTable.setMarginBottom(12);
+
+            // Encabezados de la tabla de pagos
+            String[] headers = {"Fecha de pago", "Forma de pago", "Moneda", "Monto pagado"};
+            for (String header : headers) {
+                Cell headerCell = new Cell()
+                    .add(new Paragraph(header).setBold().setFontSize(8))
+                    .setBackgroundColor(primaryColor)
+                    .setFontColor(ColorConstants.WHITE)
+                    .setPadding(6)
+                    .setTextAlignment(TextAlignment.CENTER);
+                pagosTable.addHeaderCell(headerCell);
+            }
+
+            // Agregar filas de pagos
+            for (java.util.Map<String, Object> pago : pagos) {
+                // Fecha de pago (extraer solo la fecha si viene con hora)
+                String fechaPago = getString(pago, "fechaPago", "");
+                if (fechaPago != null && !fechaPago.isEmpty()) {
+                    // Si la fecha tiene más de 10 caracteres, extraer solo la parte de la fecha
+                    if (fechaPago.length() > 10 && fechaPago.contains("T")) {
+                        fechaPago = fechaPago.substring(0, 10); // Solo fecha, sin hora
+                    } else if (fechaPago.length() > 10 && fechaPago.contains(" ")) {
+                        fechaPago = fechaPago.substring(0, 10); // Solo fecha, sin hora
+                    }
+                } else {
+                    fechaPago = java.time.LocalDate.now().toString(); // Fecha por defecto
+                }
+                pagosTable.addCell(new Cell()
+                    .add(new Paragraph(fechaPago).setFontSize(8))
+                    .setPadding(6)
+                    .setTextAlignment(TextAlignment.CENTER));
+
+                // Forma de pago (con descripción si está disponible)
+                String formaPago = getString(pago, "formaPago", "");
+                String formaPagoDesc = obtenerDescripcionFormaPago(formaPago);
+                pagosTable.addCell(new Cell()
+                    .add(new Paragraph(formaPagoDesc).setFontSize(8))
+                    .setPadding(6));
+
+                // Moneda
+                String moneda = getString(pago, "moneda", "MXN");
+                pagosTable.addCell(new Cell()
+                    .add(new Paragraph(moneda).setFontSize(8))
+                    .setPadding(6)
+                    .setTextAlignment(TextAlignment.CENTER));
+
+                // Monto pagado
+                String monto = formatearMonto(getString(pago, "monto", "0.00"));
+                pagosTable.addCell(new Cell()
+                    .add(new Paragraph("$" + monto).setFontSize(8))
+                    .setPadding(6)
+                    .setTextAlignment(TextAlignment.RIGHT));
+            }
+
+            document.add(pagosTable);
+
+            // Sección de documento relacionado
+            if (!pagos.isEmpty()) {
+                java.util.Map<String, Object> primerPago = pagos.get(0);
+                String uuidRelacionado = getString(primerPago, "uuidRelacionado", "");
+                
+                if (uuidRelacionado != null && !uuidRelacionado.isEmpty()) {
+                    Paragraph tituloDoc = new Paragraph("DOCUMENTO RELACIONADO")
+                        .setBold()
+                        .setFontSize(11)
+                        .setFontColor(primaryColor)
+                        .setMarginBottom(6)
+                        .setMarginTop(8);
+                    document.add(tituloDoc);
+
+                    // Tabla de documento relacionado
+                    Table docTable = new Table(5);
+                    docTable.setWidth(UnitValue.createPercentValue(100));
+                    docTable.setMarginBottom(12);
+
+                    // Encabezados
+                    String[] docHeaders = {"UUID relacionado", "Parcialidad", "Saldo anterior", "Importe pagado", "Saldo insoluto"};
+                    for (String header : docHeaders) {
+                        Cell headerCell = new Cell()
+                            .add(new Paragraph(header).setBold().setFontSize(8))
+                            .setBackgroundColor(primaryColor)
+                            .setFontColor(ColorConstants.WHITE)
+                            .setPadding(6)
+                            .setTextAlignment(TextAlignment.CENTER);
+                        docTable.addHeaderCell(headerCell);
+                    }
+
+                    // Agregar filas de documentos relacionados
+                    int parcialidad = 1;
+                    for (java.util.Map<String, Object> pago : pagos) {
+                        // UUID relacionado
+                        docTable.addCell(new Cell()
+                            .add(new Paragraph(getString(pago, "uuidRelacionado", uuidRelacionado)).setFontSize(7))
+                            .setPadding(6));
+
+                        // Parcialidad
+                        Object parcObj = pago.get("parcialidad");
+                        String parcialidadStr = parcObj != null ? String.valueOf(parcObj) : String.valueOf(parcialidad++);
+                        docTable.addCell(new Cell()
+                            .add(new Paragraph(parcialidadStr).setFontSize(8))
+                            .setPadding(6)
+                            .setTextAlignment(TextAlignment.CENTER));
+
+                        // Saldo anterior
+                        String saldoAnterior = formatearMonto(getString(pago, "saldoAnterior", "0.00"));
+                        docTable.addCell(new Cell()
+                            .add(new Paragraph("$" + saldoAnterior).setFontSize(8))
+                            .setPadding(6)
+                            .setTextAlignment(TextAlignment.RIGHT));
+
+                        // Importe pagado
+                        String importePagado = formatearMonto(getString(pago, "importePagado", getString(pago, "monto", "0.00")));
+                        docTable.addCell(new Cell()
+                            .add(new Paragraph("$" + importePagado).setFontSize(8))
+                            .setPadding(6)
+                            .setTextAlignment(TextAlignment.RIGHT));
+
+                        // Saldo insoluto
+                        String saldoInsoluto = formatearMonto(getString(pago, "saldoInsoluto", "0.00"));
+                        docTable.addCell(new Cell()
+                            .add(new Paragraph("$" + saldoInsoluto).setFontSize(8))
+                            .setPadding(6)
+                            .setTextAlignment(TextAlignment.RIGHT));
+                    }
+
+                    document.add(docTable);
+                }
+            }
+
+        } catch (Exception e) {
+            logger.error("Error agregando sección de complemento de pago: ", e);
+        }
+    }
+
+    private String formatearMonto(String monto) {
+        try {
+            if (monto == null || monto.trim().isEmpty()) {
+                return "0.00";
+            }
+            BigDecimal bd = new BigDecimal(monto.trim());
+            return bd.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString();
+        } catch (Exception e) {
+            return monto != null ? monto : "0.00";
+        }
+    }
+
+    private String obtenerDescripcionFormaPago(String clave) {
+        if (clave == null || clave.trim().isEmpty()) {
+            return "N/A";
+        }
+        String claveTrim = clave.trim();
+        
+        // Si ya viene la descripción completa (contiene " - "), usarla directamente
+        if (claveTrim.contains(" - ")) {
+            return claveTrim;
+        }
+        
+        // Si solo viene el código, convertir a descripción
+        java.util.Map<String, String> formas = new java.util.HashMap<>();
+        formas.put("01", "01 - Efectivo");
+        formas.put("02", "02 - Cheque nominativo");
+        formas.put("03", "03 - Transferencia electrónica");
+        formas.put("04", "04 - Tarjeta de crédito");
+        formas.put("05", "05 - Monedero electrónico");
+        formas.put("06", "06 - Dinero electrónico");
+        formas.put("08", "08 - Vales de despensa");
+        formas.put("12", "12 - Dación en pago");
+        formas.put("13", "13 - Pago por subrogación");
+        formas.put("14", "14 - Pago por consignación");
+        formas.put("15", "15 - Condonación");
+        formas.put("17", "17 - Compensación");
+        formas.put("23", "23 - Novación");
+        formas.put("24", "24 - Confusión");
+        formas.put("25", "25 - Remisión de deuda");
+        formas.put("26", "26 - Prescripción o caducidad");
+        formas.put("27", "27 - A satisfacción del acreedor");
+        formas.put("28", "28 - Tarjeta de débito");
+        formas.put("29", "29 - Tarjeta de servicios");
+        formas.put("30", "30 - Aplicación de anticipos");
+        formas.put("31", "31 - Intermediario pagos");
+        formas.put("99", "99 - Por definir");
+        
+        return formas.getOrDefault(claveTrim, claveTrim + " - Forma de pago");
+    }
+
+    private void agregarTotalesComplementoPago(Document document, Map<String, Object> facturaData, Map<String, Object> logoConfig) {
+        try {
+            DeviceRgb primaryColor = extraerColorPrimario(logoConfig);
+            
+            // Calcular el total pagado sumando todos los pagos si no viene en los datos
+            BigDecimal totalPagado = getBigDecimal(facturaData, "totalPagadoComplemento", BigDecimal.ZERO);
+            if (totalPagado.compareTo(BigDecimal.ZERO) == 0) {
+                java.util.List<java.util.Map<String, Object>> pagos = getListValue(facturaData, "pagosComplemento");
+                if (pagos != null && !pagos.isEmpty()) {
+                    for (java.util.Map<String, Object> pago : pagos) {
+                        BigDecimal monto = getBigDecimal(pago, "monto", BigDecimal.ZERO);
+                        totalPagado = totalPagado.add(monto);
+                    }
+                }
+            }
+            
+            String moneda = getString(facturaData, "monedaComplemento", "MXN");
+            if (moneda == null || moneda.trim().isEmpty()) {
+                moneda = "MXN";
+            }
+            
+            // Contenedor del resumen con el mismo diseño que los totales modernos
+            Table resumenContainer = new Table(2);
+            resumenContainer.setWidth(UnitValue.createPercentValue(100));
+            resumenContainer.setMarginTop(8);
+            
+            // Celda vacía para alinear a la derecha (mismo diseño que agregarTotalesModerno)
+            Cell espacioCell = new Cell()
+                .setBorder(null)
+                .setWidth(UnitValue.createPercentValue(65));
+            resumenContainer.addCell(espacioCell);
+            
+            // Celda con los totales (mismo diseño que agregarTotalesModerno)
+            Cell totalesCell = new Cell()
+                .setBorder(new SolidBorder(primaryColor, 1))
+                .setBackgroundColor(new DeviceRgb(248, 250, 252))
+                .setPadding(8)
+                .setWidth(UnitValue.createPercentValue(35));
+            
+            // Total pagado (mismo estilo que el TOTAL en agregarTotalesModerno)
+            String totalTexto = formatearMonto(totalPagado.toPlainString());
+            Paragraph totalParrafo = new Paragraph("TOTAL PAGADO: $" + totalTexto)
+                .setBold()
+                .setFontSize(11)
+                .setFontColor(primaryColor)
+                .setTextAlignment(TextAlignment.RIGHT)
+                .setMarginTop(3);
+            totalesCell.add(totalParrafo);
+            
+            // Moneda (opcional, más pequeña)
+            if (!"MXN".equalsIgnoreCase(moneda.trim())) {
+                Paragraph monedaParrafo = new Paragraph("Moneda: " + moneda)
+                    .setFontSize(8)
+                    .setTextAlignment(TextAlignment.RIGHT)
+                    .setMarginTop(2);
+                totalesCell.add(monedaParrafo);
+            }
+
+            resumenContainer.addCell(totalesCell);
+            document.add(resumenContainer);
+        } catch (Exception e) {
+            logger.error("Error agregando totales de complemento de pago: ", e);
+        }
+    }
+
+    private BigDecimal getBigDecimal(Map<String, Object> map, String key, BigDecimal defaultValue) {
+        Object value = map.get(key);
+        if (value instanceof BigDecimal) {
+            return (BigDecimal) value;
+        }
+        if (value instanceof Number) {
+            return BigDecimal.valueOf(((Number) value).doubleValue());
+        }
+        if (value != null) {
+            try {
+                return new BigDecimal(value.toString());
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return defaultValue;
+    }
+
     /**
      * Sección específica para recibo de nómina.
      */
-    @SuppressWarnings("unchecked")
     private void agregarSeccionNomina(Document document, Map<String, Object> facturaData, Map<String, Object> logoConfig) {
         try {
             DeviceRgb primaryColor = extraerColorPrimario(logoConfig);
@@ -745,7 +1064,6 @@ public class ITextPdfService {
         }
     }
 
-    @SuppressWarnings("unchecked")
     private boolean tieneNomina(Map<String, Object> facturaData) {
         try {
             Object n = facturaData != null ? facturaData.get("nomina") : null;
@@ -757,7 +1075,6 @@ public class ITextPdfService {
         }
     }
 
-    @SuppressWarnings("unchecked")
     private String getNominaString(Map<String, Object> facturaData, String key, String defaultValue) {
         try {
             Object n = facturaData != null ? facturaData.get("nomina") : null;
@@ -771,7 +1088,6 @@ public class ITextPdfService {
         }
     }
 
-    @SuppressWarnings("unchecked")
     private BigDecimal getNominaBigDecimal(Map<String, Object> facturaData, String key, BigDecimal defaultValue) {
         try {
             Object n = facturaData != null ? facturaData.get("nomina") : null;
@@ -845,7 +1161,6 @@ public class ITextPdfService {
     private void agregarComplementoCartaPorte(Document document, Map<String, Object> facturaData, Map<String, Object> logoConfig) {
         try {
             DeviceRgb primaryColor = extraerColorPrimario(logoConfig);
-            @SuppressWarnings("unchecked")
             Map<String, Object> complemento = (Map<String, Object>) facturaData.get("complementoCartaPorte");
             if (complemento == null) {
                 logger.info("Factura sin complemento Carta Porte, se omite sección.");
@@ -877,7 +1192,6 @@ public class ITextPdfService {
             cell.add(folioInfo);
 
             // Sección MERCANCÍAS
-            @SuppressWarnings("unchecked")
             Map<String, Object> mercancia = (Map<String, Object>) complemento.get("mercancia");
             java.util.List<java.util.Map<String, Object>> conceptos = getListValue(facturaData, "conceptos");
             String descripcion = null;
@@ -1117,7 +1431,6 @@ private DeviceRgb getColorFromHex(String hex) {
 }
 
 
-@SuppressWarnings("unchecked")
 private DeviceRgb extraerColorPrimario(Map<String, Object> logoConfig) {
     try {
         if (logoConfig == null) {
@@ -1143,4 +1456,96 @@ private DeviceRgb extraerColorPrimario(Map<String, Object> logoConfig) {
     }
     return new DeviceRgb(30, 64, 175);
 }
+
+    public byte[] generarPdfComplementoPago(ComplementoPagoPdfData data) throws IOException {
+        // Mantener compatibilidad: llamar al método con logoConfig usando configuración vacía
+        return generarPdfComplementoPago(data, Map.of());
+    }
+
+    public byte[] generarPdfComplementoPago(ComplementoPagoPdfData data, Map<String, Object> logoConfig) throws IOException {
+        if (data == null) {
+            throw new IOException("Datos del complemento vacíos");
+        }
+
+        java.util.Map<String, Object> facturaData = new java.util.HashMap<>();
+        facturaData.put("tipoComprobante", "P");
+        facturaData.put("uuid", valorO(data.uuidComplemento, ""));
+        facturaData.put("facturaUuid", valorO(data.facturaUuid, ""));
+        facturaData.put("serie", valorO(data.serieComplemento, "REP"));
+        facturaData.put("folio", valorO(data.folioComplemento, ""));
+        facturaData.put("fechaEmision", valorO(data.fechaTimbrado, java.time.LocalDateTime.now().format(FECHA_HORA)));
+        facturaData.put("nombreEmisor", valorO(data.nombreEmisor, valorO(data.rfcEmisor, "AAA010101AAA")));
+        facturaData.put("rfcEmisor", valorO(data.rfcEmisor, "AAA010101AAA"));
+        facturaData.put("nombreReceptor", valorO(data.nombreReceptor, valorO(data.rfcReceptor, "XAXX010101000")));
+        facturaData.put("rfcReceptor", valorO(data.rfcReceptor, "XAXX010101000"));
+        facturaData.put("metodoPago", valorO(data.metodoCfdi, "PPD"));
+        facturaData.put("formaPago", valorO(data.formaCfdi, "99"));
+        facturaData.put("correoReceptor", valorO(data.correoReceptor, ""));
+        facturaData.put("cadenaOriginal", valorO(data.cadenaOriginal, ""));
+        facturaData.put("selloDigital", valorO(data.selloDigital, ""));
+        facturaData.put("certificado", valorO(data.selloSat, ""));
+        facturaData.put("totalPagadoComplemento", valorO(data.totalPagado, "0.00"));
+        facturaData.put("monedaComplemento", valorO(data.moneda, "MXN"));
+
+        java.util.List<java.util.Map<String, Object>> pagos = new java.util.ArrayList<>();
+        if (data.pagos != null) {
+            for (ComplementoPagoPdfData.PagoDetalle detalle : data.pagos) {
+                java.util.Map<String, Object> pagoMap = new java.util.HashMap<>();
+                pagoMap.put("fechaPago", valorO(detalle.fechaPago, ""));
+                pagoMap.put("formaPago", valorO(detalle.formaPago, ""));
+                pagoMap.put("moneda", valorO(detalle.moneda, "MXN"));
+                pagoMap.put("monto", valorO(detalle.monto, "0.00"));
+                pagoMap.put("uuidRelacionado", valorO(detalle.uuidRelacionado, ""));
+                pagoMap.put("parcialidad", detalle.parcialidad);
+                pagoMap.put("saldoAnterior", valorO(detalle.saldoAnterior, "0.00"));
+                pagoMap.put("importePagado", valorO(detalle.importePagado, "0.00"));
+                pagoMap.put("saldoInsoluto", valorO(detalle.saldoInsoluto, "0.00"));
+                pagos.add(pagoMap);
+            }
+        }
+        facturaData.put("pagosComplemento", pagos);
+
+        return generarPdfConLogo(facturaData, logoConfig != null ? logoConfig : Map.of());
+    }
+
+    private String valorO(String valor, String fallback) {
+        if (valor == null) {
+            return fallback;
+        }
+        String trimmed = valor.trim();
+        return trimmed.isEmpty() ? fallback : trimmed;
+    }
+
+    public static class ComplementoPagoPdfData {
+        public String uuidComplemento;
+        public String facturaUuid;
+        public String serieComplemento;
+        public String folioComplemento;
+        public String fechaTimbrado;
+        public String rfcEmisor;
+        public String rfcReceptor;
+        public String correoReceptor;
+        public String totalPagado;
+        public String nombreEmisor;
+        public String nombreReceptor;
+        public String metodoCfdi;
+        public String formaCfdi;
+        public String cadenaOriginal;
+        public String selloDigital;
+        public String selloSat;
+        public String moneda;
+        public List<PagoDetalle> pagos = new java.util.ArrayList<>();
+
+        public static class PagoDetalle {
+            public String fechaPago;
+            public String formaPago;
+            public String moneda;
+            public String monto;
+            public int parcialidad;
+            public String saldoAnterior;
+            public String importePagado;
+            public String saldoInsoluto;
+            public String uuidRelacionado;
+        }
+    }
 }

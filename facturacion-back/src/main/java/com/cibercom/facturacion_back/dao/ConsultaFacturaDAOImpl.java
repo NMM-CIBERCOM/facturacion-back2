@@ -421,8 +421,11 @@ public class ConsultaFacturaDAOImpl implements ConsultaFacturaDAO {
             sql.append(" WHERE UUID=?");
             params.add(request.getUuid());
 
-            // Filtro por estados permisibles sólo si hay columna de estado
-            if (statusCol != null) {
+            // Filtro por estados permisibles según FEC_CAT_ESTATUS
+            // Solo cancelar si ESTATUS_FACTURA es 0 (EMITIDA) o 1 (EN PROCESO DE CANCELACION)
+            if (hasEstatusFacturaNum) {
+                sql.append(" AND ESTATUS_FACTURA IN (0, 1)");
+            } else if (statusCol != null) {
                 sql.append(" AND UPPER(").append(statusCol).append(") IN ('VIGENTE','ACTIVA','EMITIDA')");
             } else {
                 logger.warn("No se aplicará filtro de estado al cancelar UUID {} por falta de columna de estado", request.getUuid());
@@ -457,26 +460,57 @@ public class ConsultaFacturaDAOImpl implements ConsultaFacturaDAO {
     @Override
     public boolean marcarEnProceso(String uuid) {
         try (Connection conn = dataSource.getConnection()) {
-            // Detectar columna de estado disponible (tipo texto)
-            String statusCol = null;
-            if (columnExists(conn, "FACTURAS", "ESTADO")) {
-                statusCol = "ESTADO";
-            } else if (columnExists(conn, "FACTURAS", "STATUS_SAT")) {
-                statusCol = "STATUS_SAT";
-            } else if (columnExists(conn, "FACTURAS", "ESTATUS_SAT")) {
-                statusCol = "ESTATUS_SAT";
-            }
-            if (statusCol == null) {
-                logger.warn("No existe columna de estado; se omite marcar EN_PROCESO para UUID {}", uuid);
+            // Según FEC_CAT_ESTATUS: 1 = EN PROCESO DE CANCELACION
+            // Actualizar ESTATUS_FACTURA (numérico) a 1
+            boolean hasEstatusFactura = columnExists(conn, "FACTURAS", "ESTATUS_FACTURA");
+            
+            if (!hasEstatusFactura) {
+                logger.warn("No existe columna ESTATUS_FACTURA; se omite marcar EN_PROCESO para UUID {}", uuid);
                 return false;
             }
-            String sql = "UPDATE FACTURAS SET " + statusCol + "='EN PROCESO DE CANCELACION' WHERE UUID=? AND UPPER(" + statusCol + ") IN ('VIGENTE','ACTIVA','EMITIDA')";
+            
+            // Primero consultar el estatus actual para logging
+            Integer estatusActual = null;
+            try (PreparedStatement psSelect = conn.prepareStatement("SELECT ESTATUS_FACTURA FROM FACTURAS WHERE UUID = ?")) {
+                psSelect.setString(1, uuid);
+                try (ResultSet rs = psSelect.executeQuery()) {
+                    if (rs.next()) {
+                        estatusActual = rs.getInt("ESTATUS_FACTURA");
+                    } else {
+                        logger.warn("Factura {} no encontrada", uuid);
+                        return false;
+                    }
+                }
+            }
+            
+            // Si ya está en proceso (1), retornar true sin actualizar
+            if (estatusActual != null && estatusActual == 1) {
+                logger.info("Factura {} ya está en proceso de cancelación (ESTATUS_FACTURA=1)", uuid);
+                return true;
+            }
+            
+            // Si ya está cancelada (2), no actualizar
+            if (estatusActual != null && estatusActual == 2) {
+                logger.warn("Factura {} ya está cancelada (ESTATUS_FACTURA=2), no se puede marcar en proceso", uuid);
+                return false;
+            }
+            
+            // Actualizar ESTATUS_FACTURA a 1 (EN PROCESO DE CANCELACION)
+            // Permitir actualizar desde cualquier estatus excepto 1 (ya en proceso) y 2 (cancelada)
+            String sql = "UPDATE FACTURAS SET ESTATUS_FACTURA = 1 WHERE UUID = ? AND ESTATUS_FACTURA NOT IN (1, 2)";
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setString(1, uuid);
-                return ps.executeUpdate() > 0;
+                int updated = ps.executeUpdate();
+                if (updated > 0) {
+                    logger.info("Factura {} marcada como EN PROCESO DE CANCELACION (ESTATUS_FACTURA: {} -> 1)", uuid, estatusActual);
+                    return true;
+                } else {
+                    logger.warn("No se pudo actualizar factura {} a EN_PROCESO. Estatus actual: {}", uuid, estatusActual);
+                    return false;
+                }
             }
         } catch (SQLException e) {
-            logger.error("Error al marcar EN_PROCESO {}: {}", uuid, e.getMessage());
+            logger.error("Error al marcar EN_PROCESO {}: {}", uuid, e.getMessage(), e);
             throw new RuntimeException("Error marcando EN_PROCESO: " + e.getMessage(), e);
         }
     }

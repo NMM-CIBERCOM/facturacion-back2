@@ -1,0 +1,12 @@
+# Ignorar todos los archivos de certificados y llaves privadas
+# Estos archivos contienen información sensible y NO deben subirse al repositorio
+
+# Ignorar todos los archivos excepto README.md
+*
+!README.md
+!.gitignore
+
+
+
+
+

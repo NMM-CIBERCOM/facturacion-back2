@@ -28,12 +28,17 @@ public class CartaPorteController {
         try {
             logger.info("Guardando carta porte con RFC: {}", request.getRfcCompleto());
             
-            Long idGenerado = cartaPorteService.guardar(request);
+            CartaPorteService.SaveResult result = cartaPorteService.guardar(request);
             
             Map<String, Object> response = new LinkedHashMap<>();
             response.put("ok", true);
-            response.put("id", idGenerado);
-            response.put("message", "Carta porte guardada exitosamente");
+            response.put("id", result.getCartaPorteId());
+            response.put("uuid", result.getUuidTimbrado());
+            response.put("xmlTimbrado", result.getPacResponse() != null ? result.getPacResponse().getXmlTimbrado() : null);
+            response.put("message", result.getPacResponse() != null && Boolean.TRUE.equals(result.getPacResponse().getOk())
+                    ? "Carta porte timbrada exitosamente"
+                    : "Carta porte guardada");
+            response.put("pacResponse", result.getPacResponse());
             
             return ResponseEntity.ok(response);
             
@@ -47,4 +52,22 @@ public class CartaPorteController {
             return ResponseEntity.status(500).body(response);
         }
     }
+
+    @PostMapping("/preview-xml")
+    public ResponseEntity<?> preview(@RequestBody CartaPorteSaveRequest request) {
+        try {
+            String xml = cartaPorteService.renderXml(request);
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("ok", true);
+            response.put("xml", xml);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Error generando XML de vista previa: {}", e.getMessage(), e);
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("ok", false);
+            response.put("error", e.getMessage());
+            return ResponseEntity.status(500).body(response);
+        }
+    }
+
 }

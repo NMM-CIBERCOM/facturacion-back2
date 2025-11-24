@@ -50,6 +50,25 @@ public class NominaSaveRequest {
     @JsonProperty("correoElectronico")
     private String correoElectronico;
 
+    @JsonProperty("domicilioFiscalReceptor")
+    private String domicilioFiscalReceptor; // Código postal del receptor
+
+    // CRÍTICO NOM44: Campos requeridos cuando existe RegistroPatronal
+    @JsonProperty("numSeguridadSocial")
+    private String numSeguridadSocial; // Número de Seguridad Social (IMSS)
+    
+    @JsonProperty("fechaInicioRelLaboral")
+    private String fechaInicioRelLaboral; // Fecha de inicio de relación laboral (YYYY-MM-DD)
+    
+    @JsonProperty("antiguedad")
+    private String antiguedad; // Antigüedad en formato PnYnMnDn (ej: P1Y2M15D)
+    
+    @JsonProperty("riesgoPuesto")
+    private String riesgoPuesto; // Clave de riesgo del puesto (ej: 1, 2, 3, etc.)
+    
+    @JsonProperty("salarioDiarioIntegrado")
+    private String salarioDiarioIntegrado; // Salario diario integrado (decimal string)
+
     @JsonProperty("usuarioCreacion")
     private String usuarioCreacion;
 
@@ -98,6 +117,24 @@ public class NominaSaveRequest {
 
     public String getCorreoElectronico() { return correoElectronico; }
     public void setCorreoElectronico(String correoElectronico) { this.correoElectronico = correoElectronico; }
+
+    public String getDomicilioFiscalReceptor() { return domicilioFiscalReceptor; }
+    public void setDomicilioFiscalReceptor(String domicilioFiscalReceptor) { this.domicilioFiscalReceptor = domicilioFiscalReceptor; }
+
+    public String getNumSeguridadSocial() { return numSeguridadSocial; }
+    public void setNumSeguridadSocial(String numSeguridadSocial) { this.numSeguridadSocial = numSeguridadSocial; }
+
+    public String getFechaInicioRelLaboral() { return fechaInicioRelLaboral; }
+    public void setFechaInicioRelLaboral(String fechaInicioRelLaboral) { this.fechaInicioRelLaboral = fechaInicioRelLaboral; }
+
+    public String getAntiguedad() { return antiguedad; }
+    public void setAntiguedad(String antiguedad) { this.antiguedad = antiguedad; }
+
+    public String getRiesgoPuesto() { return riesgoPuesto; }
+    public void setRiesgoPuesto(String riesgoPuesto) { this.riesgoPuesto = riesgoPuesto; }
+
+    public String getSalarioDiarioIntegrado() { return salarioDiarioIntegrado; }
+    public void setSalarioDiarioIntegrado(String salarioDiarioIntegrado) { this.salarioDiarioIntegrado = salarioDiarioIntegrado; }
 
     public String getUsuarioCreacion() { return usuarioCreacion; }
     public void setUsuarioCreacion(String usuarioCreacion) { this.usuarioCreacion = usuarioCreacion; }

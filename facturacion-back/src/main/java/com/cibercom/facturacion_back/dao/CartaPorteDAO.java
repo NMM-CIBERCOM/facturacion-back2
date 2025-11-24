@@ -1,6 +1,7 @@
 package com.cibercom.facturacion_back.dao;
 
 import com.cibercom.facturacion_back.dto.CartaPorteSaveRequest;
+import com.cibercom.facturacion_back.dto.cartaporte.CartaPorteComplement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,6 +18,11 @@ import java.sql.Statement;
 import java.sql.Timestamp;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Date;
 
 @Repository
@@ -56,6 +62,14 @@ public class CartaPorteDAO {
         KeyHolder keyHolder = new GeneratedKeyHolder();
         
         try {
+            final CartaPorteComplement complemento = request.getComplemento();
+            final CartaPorteComplement.Ubicacion ubicacionOrigen = findUbicacion(complemento, "Origen");
+            final CartaPorteComplement.Ubicacion ubicacionDestino = findUbicacion(complemento, "Destino");
+            final String origenLabel = firstNonBlank(request.getOrigen(), resumenUbicacion(ubicacionOrigen));
+            final String destinoLabel = firstNonBlank(request.getDestino(), resumenUbicacion(ubicacionDestino));
+            final String fechaSalida = firstNonBlank(request.getFechaSalida(), ubicacionOrigen != null ? ubicacionOrigen.getFechaHoraSalidaLlegada() : null);
+            final String fechaLlegada = firstNonBlank(request.getFechaLlegada(), ubicacionDestino != null ? ubicacionDestino.getFechaHoraSalidaLlegada() : null);
+
             jdbcTemplate.update(connection -> {
                 PreparedStatement ps = connection.prepareStatement(sql, new String[]{"ID_DATO_FISCAL"});
                 
@@ -92,10 +106,10 @@ public class CartaPorteDAO {
                 ps.setString(24, request.getBienesTransportados());
                 
                 // Origen y destino
-                ps.setString(25, request.getOrigen());
-                ps.setString(26, request.getDestino());
-                ps.setTimestamp(27, parseDate(request.getFechaSalida()));
-                ps.setTimestamp(28, parseDate(request.getFechaLlegada()));
+                ps.setString(25, origenLabel);
+                ps.setString(26, destinoLabel);
+                ps.setTimestamp(27, parseDate(fechaSalida));
+                ps.setTimestamp(28, parseDate(fechaLlegada));
                 
                 // Usuario de creación (por ahora hardcodeado, se puede mejorar con autenticación)
                 ps.setString(29, "SISTEMA");
@@ -136,12 +150,87 @@ public class CartaPorteDAO {
         if (fecha == null || fecha.trim().isEmpty()) {
             return null;
         }
+        String normalized = fecha.trim();
         try {
-            Date parsedDate = dateFormat.parse(fecha);
+            if (normalized.endsWith("Z")) {
+                Instant instant = Instant.parse(normalized);
+                return Timestamp.from(instant);
+            }
+            if (normalized.contains("T")) {
+                String iso = normalized;
+                if (iso.length() == 16) {
+                    iso = iso + ":00";
+                }
+                try {
+                    LocalDateTime ldt = LocalDateTime.parse(iso, DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+                    return Timestamp.valueOf(ldt);
+                } catch (Exception ex) {
+                    OffsetDateTime odt = OffsetDateTime.parse(iso, DateTimeFormatter.ISO_DATE_TIME);
+                    return Timestamp.from(odt.toInstant());
+                }
+            }
+            if (normalized.length() == 10) {
+                LocalDate date = LocalDate.parse(normalized, DateTimeFormatter.ISO_LOCAL_DATE);
+                return Timestamp.valueOf(date.atStartOfDay());
+            }
+            Date parsedDate = dateFormat.parse(normalized);
             return new Timestamp(parsedDate.getTime());
-        } catch (ParseException e) {
+        } catch (Exception e) {
             logger.warn("Error al parsear fecha '{}', usando null", fecha);
             return null;
         }
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (value != null && !value.trim().isEmpty()) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private CartaPorteComplement.Ubicacion findUbicacion(CartaPorteComplement complemento, String tipo) {
+        if (complemento == null || complemento.getUbicaciones() == null || tipo == null) {
+            return null;
+        }
+        return complemento.getUbicaciones().stream()
+                .filter(u -> u.getTipoUbicacion() != null && u.getTipoUbicacion().equalsIgnoreCase(tipo))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private String resumenUbicacion(CartaPorteComplement.Ubicacion ubicacion) {
+        if (ubicacion == null) {
+            return null;
+        }
+        CartaPorteComplement.Domicilio dom = ubicacion.getDomicilio();
+        if (dom != null) {
+            StringBuilder sb = new StringBuilder();
+            appendSegment(sb, dom.getCalle());
+            appendSegment(sb, dom.getMunicipio());
+            appendSegment(sb, dom.getEstado());
+            appendSegment(sb, dom.getCodigoPostal());
+            if (sb.length() > 0) {
+                return sb.toString();
+            }
+        }
+        if (ubicacion.getNombreRemitenteDestinatario() != null && !ubicacion.getNombreRemitenteDestinatario().isBlank()) {
+            return ubicacion.getNombreRemitenteDestinatario();
+        }
+        return ubicacion.getRfcRemitenteDestinatario();
+    }
+
+    private void appendSegment(StringBuilder sb, String value) {
+        if (value == null || value.isBlank()) {
+            return;
+        }
+        if (sb.length() > 0) {
+            sb.append(", ");
+        }
+        sb.append(value.trim());
     }
 }

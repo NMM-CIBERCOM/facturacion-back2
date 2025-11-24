@@ -38,6 +38,8 @@ import com.cibercom.facturacion_back.service.CorreoService;
 import com.cibercom.facturacion_back.dto.ConfiguracionCorreoResponseDto;
 import com.cibercom.facturacion_back.service.PDFParsingService;
 import com.cibercom.facturacion_back.model.FacturaInfo;
+import com.cibercom.facturacion_back.integration.PacClient;
+import com.cibercom.facturacion_back.dto.PacTimbradoRequest;
 
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -67,6 +69,9 @@ public class FacturaController {
 
     @Autowired
     private Environment environment;
+    
+    @Autowired
+    private PacClient pacClient;
 
     @Autowired
     private ITextPdfService iTextPdfService;
@@ -545,33 +550,65 @@ public class FacturaController {
                 }
                 xmlContent = facturaMongo.getXmlContent();
             } else {
+                // Verificar que uuidFacturaOracleDAO esté disponible
+                if (uuidFacturaOracleDAO == null) {
+                    logger.error("UuidFacturaOracleDAO no está disponible para obtener XML del UUID: {}", uuid);
+                    return ResponseEntity.status(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR).build();
+                }
 
-                java.util.Optional<com.cibercom.facturacion_back.dao.UuidFacturaOracleDAO.Result> opt = uuidFacturaOracleDAO.obtenerBasicosPorUuid(uuid);
-                if (!opt.isPresent()) {
-                    logger.warn("Factura no encontrada en Oracle para UUID: {}", uuid);
-                    // No encontrada en FACTURAS: intentar CONSULTAS
-                    if (consultaXmlOracleDAO != null) {
-                        java.util.Optional<String> xmlOpt = consultaXmlOracleDAO.obtenerXmlPorUuid(uuid);
-                        if (xmlOpt.isPresent()) {
-                            xmlContent = xmlOpt.get();
+                try {
+                    java.util.Optional<com.cibercom.facturacion_back.dao.UuidFacturaOracleDAO.Result> opt = uuidFacturaOracleDAO.obtenerBasicosPorUuid(uuid);
+                    if (!opt.isPresent()) {
+                        logger.warn("Factura no encontrada en Oracle para UUID: {}", uuid);
+                        // No encontrada en FACTURAS: intentar CONSULTAS
+                        if (consultaXmlOracleDAO != null) {
+                            try {
+                                java.util.Optional<String> xmlOpt = consultaXmlOracleDAO.obtenerXmlPorUuid(uuid);
+                                if (xmlOpt.isPresent()) {
+                                    xmlContent = xmlOpt.get();
+                                }
+                            } catch (Exception e) {
+                                logger.error("Error al obtener XML desde CONSULTAS para UUID {}: {}", uuid, e.getMessage(), e);
+                            }
+                        }
+                    } else {
+                        xmlContent = opt.get().xmlContent;
+                        // Si FACTURAS no tiene XML, intentar CONSULTAS como fallback
+                        if (xmlContent == null || xmlContent.isEmpty()) {
+                            if (consultaXmlOracleDAO != null) {
+                                try {
+                                    java.util.Optional<String> xmlOpt = consultaXmlOracleDAO.obtenerXmlPorUuid(uuid);
+                                    if (xmlOpt.isPresent()) {
+                                        xmlContent = xmlOpt.get();
+                                    }
+                                } catch (Exception e) {
+                                    logger.error("Error al obtener XML desde CONSULTAS para UUID {}: {}", uuid, e.getMessage(), e);
+                                }
+                            }
+                            // Fallback final: intentar construir un XML mínimo con datos disponibles
+                            if (xmlContent == null || xmlContent.isEmpty()) {
+                                try {
+                                    String generado = construirXmlMinimo(uuid, opt.get());
+                                    if (generado != null && !generado.isEmpty()) {
+                                        xmlContent = generado;
+                                    }
+                                } catch (Exception e) {
+                                    logger.error("Error al construir XML mínimo para UUID {}: {}", uuid, e.getMessage(), e);
+                                }
+                            }
                         }
                     }
-                } else {
-                    xmlContent = opt.get().xmlContent;
-                    // Si FACTURAS no tiene XML, intentar CONSULTAS como fallback
-                    if (xmlContent == null || xmlContent.isEmpty()) {
-                        if (consultaXmlOracleDAO != null) {
+                } catch (Exception e) {
+                    logger.error("Error al obtener datos de Oracle para UUID {}: {}", uuid, e.getMessage(), e);
+                    // Intentar obtener desde CONSULTAS como último recurso
+                    if (consultaXmlOracleDAO != null) {
+                        try {
                             java.util.Optional<String> xmlOpt = consultaXmlOracleDAO.obtenerXmlPorUuid(uuid);
                             if (xmlOpt.isPresent()) {
                                 xmlContent = xmlOpt.get();
                             }
-                        }
-                        // Fallback final: intentar construir un XML mínimo con datos disponibles
-                        if (xmlContent == null || xmlContent.isEmpty()) {
-                            String generado = construirXmlMinimo(uuid, opt.get());
-                            if (generado != null && !generado.isEmpty()) {
-                                xmlContent = generado;
-                            }
+                        } catch (Exception e2) {
+                            logger.error("Error al obtener XML desde CONSULTAS como último recurso para UUID {}: {}", uuid, e2.getMessage(), e2);
                         }
                     }
                 }
@@ -594,8 +631,11 @@ public class FacturaController {
                     .headers(headers)
                     .body(xmlBytes);
 
+        } catch (NullPointerException e) {
+            logger.error("Error NullPointerException al descargar XML para UUID {}: {}", uuid, e.getMessage(), e);
+            return ResponseEntity.status(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR).build();
         } catch (Exception e) {
-            logger.error("Error al descargar XML para UUID: {}", uuid, e);
+            logger.error("Error inesperado al descargar XML para UUID {}: {}", uuid, e.getMessage(), e);
             return ResponseEntity.status(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
     }
@@ -660,6 +700,97 @@ public class FacturaController {
                     "message", "Error consultando ID_FACTURA",
                     "error", e.getMessage()
             ));
+        }
+    }
+
+    @PostMapping("/test-finkok")
+    public ResponseEntity<Map<String, Object>> testFinkok(@RequestBody Map<String, String> request) {
+        Map<String, Object> response = new HashMap<>();
+        try {
+            String xmlContent = request.get("xmlContent");
+            if (xmlContent == null || xmlContent.isBlank()) {
+                response.put("error", "xmlContent es requerido");
+                return ResponseEntity.badRequest().body(response);
+            }
+            
+            // Crear request para Finkok
+            PacTimbradoRequest pacRequest = PacTimbradoRequest.builder()
+                    .xmlContent(xmlContent)
+                    .build();
+            
+            // Llamar a Finkok
+            PacTimbradoResponse pacResponse = pacClient.solicitarTimbrado(pacRequest);
+            
+            response.put("ok", pacResponse.getOk());
+            response.put("status", pacResponse.getStatus());
+            response.put("codEstatus", pacResponse.getCodEstatus());
+            response.put("uuid", pacResponse.getUuid());
+            response.put("fecha", pacResponse.getFecha());
+            response.put("satSeal", pacResponse.getSatSeal());
+            response.put("noCertificadoSAT", pacResponse.getNoCertificadoSAT());
+            response.put("xmlTimbrado", pacResponse.getXmlTimbrado());
+            response.put("message", pacResponse.getMessage());
+            response.put("codigoError", pacResponse.getCodigoError());
+            response.put("mensajeIncidencia", pacResponse.getMensajeIncidencia());
+            
+            if (pacResponse.getOk()) {
+                return ResponseEntity.ok(response);
+            } else {
+                return ResponseEntity.badRequest().body(response);
+            }
+        } catch (Exception e) {
+            logger.error("Error probando Finkok: {}", e.getMessage(), e);
+            response.put("error", e.getMessage());
+            return ResponseEntity.internalServerError().body(response);
+        }
+    }
+    
+    /**
+     * Endpoint para probar Finkok enviando XML directamente (sin JSON)
+     * Acepta Content-Type: application/xml o text/xml
+     */
+    @PostMapping(value = "/test-finkok-xml", consumes = {MediaType.APPLICATION_XML_VALUE, MediaType.TEXT_XML_VALUE})
+    public ResponseEntity<Map<String, Object>> testFinkokXml(@RequestBody String xmlContent) {
+        Map<String, Object> response = new HashMap<>();
+        try {
+            if (xmlContent == null || xmlContent.isBlank()) {
+                response.put("error", "XML es requerido");
+                return ResponseEntity.badRequest().body(response);
+            }
+            
+            logger.info("Recibido XML directo para timbrado: {} caracteres", xmlContent.length());
+            
+            // Crear request para Finkok
+            PacTimbradoRequest pacRequest = PacTimbradoRequest.builder()
+                    .xmlContent(xmlContent)
+                    .build();
+            
+            // Llamar a Finkok
+            PacTimbradoResponse pacResponse = pacClient.solicitarTimbrado(pacRequest);
+            
+            response.put("ok", pacResponse.getOk());
+            response.put("status", pacResponse.getStatus());
+            response.put("codEstatus", pacResponse.getCodEstatus());
+            response.put("uuid", pacResponse.getUuid());
+            response.put("fecha", pacResponse.getFecha());
+            response.put("satSeal", pacResponse.getSatSeal());
+            response.put("noCertificadoSAT", pacResponse.getNoCertificadoSAT());
+            response.put("xmlTimbrado", pacResponse.getXmlTimbrado());
+            response.put("message", pacResponse.getMessage());
+            response.put("codigoError", pacResponse.getCodigoError());
+            response.put("mensajeIncidencia", pacResponse.getMensajeIncidencia());
+            
+            if (pacResponse.getOk()) {
+                return ResponseEntity.ok(response);
+            } else {
+                return ResponseEntity.badRequest().body(response);
+            }
+        } catch (Exception e) {
+            logger.error("Error probando Finkok con XML directo: {}", e.getMessage(), e);
+            response.put("error", e.getMessage());
+            response.put("ok", false);
+            response.put("status", "ERROR");
+            return ResponseEntity.status(500).body(response);
         }
     }
 
@@ -1065,6 +1196,39 @@ public ResponseEntity<CfdiConsultaResponse> consultarPorUuid(
         } catch (Exception e) {
             logger.error("Error en consulta de factura global: {}", e.getMessage(), e);
             return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    @PostMapping("/global/guardar")
+    public ResponseEntity<com.cibercom.facturacion_back.dto.FacturaGlobalGuardarResponse> guardarFacturaGlobal(
+            @RequestBody com.cibercom.facturacion_back.dto.FacturaGlobalGuardarRequest request) {
+        try {
+            if (facturacionGlobalService == null) {
+                logger.error("FacturacionGlobalService no está disponible");
+                com.cibercom.facturacion_back.dto.FacturaGlobalGuardarResponse errorResp = 
+                        new com.cibercom.facturacion_back.dto.FacturaGlobalGuardarResponse();
+                errorResp.setSuccess(false);
+                errorResp.setMessage("Servicio de facturación global no disponible");
+                return ResponseEntity.badRequest().body(errorResp);
+            }
+            logger.info("Guardando factura global para periodo: {}, fecha: {}, facturas hijas: {}", 
+                    request.getPeriodo(), request.getFecha(), 
+                    request.getFacturasHijasUuid() != null ? request.getFacturasHijasUuid().size() : 0);
+            var resp = facturacionGlobalService.guardarFacturaGlobal(request);
+            
+            if (resp.getSuccess() != null && !resp.getSuccess()) {
+                logger.error("El servicio reportó error al guardar: {}", resp.getMessage());
+                return ResponseEntity.internalServerError().body(resp);
+            }
+            
+            return ResponseEntity.ok(resp);
+        } catch (Exception e) {
+            logger.error("Error al guardar factura global en controlador: {}", e.getMessage(), e);
+            com.cibercom.facturacion_back.dto.FacturaGlobalGuardarResponse errorResp = 
+                    new com.cibercom.facturacion_back.dto.FacturaGlobalGuardarResponse();
+            errorResp.setSuccess(false);
+            errorResp.setMessage("Error al guardar factura global: " + e.getMessage());
+            return ResponseEntity.internalServerError().body(errorResp);
         }
     }
 }
