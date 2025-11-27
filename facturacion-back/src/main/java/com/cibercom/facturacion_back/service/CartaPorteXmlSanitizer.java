@@ -389,10 +389,44 @@ public class CartaPorteXmlSanitizer {
                 }
             }
 
+            // CRÍTICO: Eliminar atributos Colonia, Localidad y Municipio de todos los nodos Domicilio cuando el país es MEX
+            // El SAT requiere que Colonia sea una clave válida del catálogo c_Colonia cuando país es MEX.
+            // El SAT requiere que Localidad sea una clave válida del catálogo c_Localidad cuando país es MEX.
+            // El SAT requiere que Municipio sea una clave válida del catálogo c_Municipio cuando país es MEX.
+            // Para evitar errores, eliminamos los atributos Colonia, Localidad y Municipio de todos los Domicilio con país MEX.
+            removeColoniaAttributeFromDomicilioNodes(document);
+            
             // Normalizar y retornar el XML sanitizado
             boolean hadDeclaration = xml.stripLeading().startsWith("<?xml");
             String sanitized = transformToString(document, hadDeclaration);
             if (sanitized != null) {
+                // Verificación adicional: eliminar atributos Colonia, Localidad y Municipio usando regex si aún existen
+                // Buscar todos los patrones posibles de Pais="MEX" o Pais='MEX'
+                if (sanitized.contains("Pais=\"MEX\"") || sanitized.contains("Pais='MEX'") || 
+                    sanitized.contains("Pais=\"MEX\"") || sanitized.contains("Pais='MEX'") ||
+                    sanitized.matches(".*Pais\\s*=\\s*[\"']MEX[\"'].*")) {
+                    // Eliminar atributos Colonia, Localidad y Municipio de todos los nodos Domicilio cuando país es MEX
+                    // Usar múltiples patrones para asegurar eliminación completa
+                    String antesRegex = sanitized;
+                    // Eliminar Colonia
+                    sanitized = sanitized.replaceAll(" Colonia=\"[^\"]*\"", "");
+                    sanitized = sanitized.replaceAll(" Colonia='[^']*'", "");
+                    sanitized = sanitized.replaceAll(" Colonia\\s*=\\s*\"[^\"]*\"", "");
+                    sanitized = sanitized.replaceAll(" Colonia\\s*=\\s*'[^']*'", "");
+                    // Eliminar Localidad
+                    sanitized = sanitized.replaceAll(" Localidad=\"[^\"]*\"", "");
+                    sanitized = sanitized.replaceAll(" Localidad='[^']*'", "");
+                    sanitized = sanitized.replaceAll(" Localidad\\s*=\\s*\"[^\"]*\"", "");
+                    sanitized = sanitized.replaceAll(" Localidad\\s*=\\s*'[^']*'", "");
+                    // Eliminar Municipio
+                    sanitized = sanitized.replaceAll(" Municipio=\"[^\"]*\"", "");
+                    sanitized = sanitized.replaceAll(" Municipio='[^']*'", "");
+                    sanitized = sanitized.replaceAll(" Municipio\\s*=\\s*\"[^\"]*\"", "");
+                    sanitized = sanitized.replaceAll(" Municipio\\s*=\\s*'[^']*'", "");
+                    if (!sanitized.equals(antesRegex)) {
+                        logger.info("✓ Eliminados atributos Colonia, Localidad y Municipio de nodos Domicilio con país MEX usando regex");
+                    }
+                }
                 // Verificación final exhaustiva: asegurarse de que no queden nodos Domicilio
                 if (tieneTransporteFerroviario && sanitized.contains("TipoEstacion=\"02\"")) {
                     // Buscar cualquier patrón de Domicilio cerca de TipoEstacion="02"
@@ -673,6 +707,91 @@ public class CartaPorteXmlSanitizer {
             for (Node child : childrenList) {
                 eliminarDomiciliosRecursivo(child, ubicacionIndex, depth + 1);
             }
+        }
+    }
+
+    /**
+     * Elimina los atributos Colonia, Localidad y Municipio de todos los nodos Domicilio que tengan país MEX.
+     * El SAT requiere que Colonia sea una clave válida del catálogo c_Colonia cuando el país es MEX.
+     * El SAT requiere que Localidad sea una clave válida del catálogo c_Localidad cuando el país es MEX.
+     * El SAT requiere que Municipio sea una clave válida del catálogo c_Municipio cuando el país es MEX.
+     */
+    private void removeColoniaAttributeFromDomicilioNodes(Document document) {
+        try {
+            // Buscar todos los nodos Domicilio en el documento
+            NodeList domicilios = (NodeList) xpath.evaluate(
+                    "//*[local-name()='Domicilio']",
+                    document,
+                    XPathConstants.NODESET
+            );
+            
+            if (domicilios == null || domicilios.getLength() == 0) {
+                return;
+            }
+            
+            int coloniasEliminadas = 0;
+            int localidadesEliminadas = 0;
+            int municipiosEliminados = 0;
+            for (int i = 0; i < domicilios.getLength(); i++) {
+                Node domicilio = domicilios.item(i);
+                
+                if (domicilio.getAttributes() == null) {
+                    continue;
+                }
+                
+                // Verificar si el nodo Domicilio tiene atributo Pais con valor MEX
+                Node paisAttr = domicilio.getAttributes().getNamedItem("Pais");
+                String paisValue = null;
+                if (paisAttr != null) {
+                    paisValue = paisAttr.getNodeValue();
+                }
+                
+                // Si el país es MEX, eliminar los atributos Colonia, Localidad y Municipio
+                if (paisValue != null && "MEX".equalsIgnoreCase(paisValue.trim())) {
+                    // Eliminar Colonia
+                    Node coloniaAttr = domicilio.getAttributes().getNamedItem("Colonia");
+                    if (coloniaAttr != null) {
+                        try {
+                            domicilio.getAttributes().removeNamedItem("Colonia");
+                            coloniasEliminadas++;
+                            logger.info("✓ Eliminado atributo Colonia de nodo Domicilio con país MEX");
+                        } catch (Exception e) {
+                            logger.warn("Error al eliminar atributo Colonia: {}", e.getMessage());
+                        }
+                    }
+                    
+                    // Eliminar Localidad
+                    Node localidadAttr = domicilio.getAttributes().getNamedItem("Localidad");
+                    if (localidadAttr != null) {
+                        try {
+                            domicilio.getAttributes().removeNamedItem("Localidad");
+                            localidadesEliminadas++;
+                            logger.info("✓ Eliminado atributo Localidad de nodo Domicilio con país MEX");
+                        } catch (Exception e) {
+                            logger.warn("Error al eliminar atributo Localidad: {}", e.getMessage());
+                        }
+                    }
+                    
+                    // Eliminar Municipio
+                    Node municipioAttr = domicilio.getAttributes().getNamedItem("Municipio");
+                    if (municipioAttr != null) {
+                        try {
+                            domicilio.getAttributes().removeNamedItem("Municipio");
+                            municipiosEliminados++;
+                            logger.info("✓ Eliminado atributo Municipio de nodo Domicilio con país MEX");
+                        } catch (Exception e) {
+                            logger.warn("Error al eliminar atributo Municipio: {}", e.getMessage());
+                        }
+                    }
+                }
+            }
+            
+            if (coloniasEliminadas > 0 || localidadesEliminadas > 0 || municipiosEliminados > 0) {
+                logger.info("✓✓ Eliminados {} atributos Colonia, {} atributos Localidad y {} atributos Municipio de nodos Domicilio con país MEX", 
+                        coloniasEliminadas, localidadesEliminadas, municipiosEliminados);
+            }
+        } catch (Exception e) {
+            logger.warn("Error al eliminar atributos Colonia/Localidad/Municipio: {}", e.getMessage());
         }
     }
 

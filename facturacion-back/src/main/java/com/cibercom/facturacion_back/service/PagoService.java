@@ -54,6 +54,7 @@ public class PagoService {
     private final CorreoService correoService;
     private final FormatoCorreoService formatoCorreoService;
     private final Environment environment;
+    private final CfdiFirmaService cfdiFirmaService;
 
     // Inyectar valores de application.yml usando @Value (igual que FacturaService)
     @Value("${facturacion.emisor.rfc:IVD920810GU2}")
@@ -76,7 +77,8 @@ public class PagoService {
                        ITextPdfService iTextPdfService,
                        CorreoService correoService,
                        FormatoCorreoService formatoCorreoService,
-                       Environment environment) {
+                       Environment environment,
+                       org.springframework.beans.factory.ObjectProvider<CfdiFirmaService> cfdiFirmaServiceProvider) {
         this.conceptoOracleDAO = conceptoOracleDAO;
         this.pagoOracleDAO = pagoOracleDAO;
         this.uuidFacturaOracleDAO = uuidFacturaOracleDAO;
@@ -86,6 +88,7 @@ public class PagoService {
         this.correoService = correoService;
         this.formatoCorreoService = formatoCorreoService;
         this.environment = environment;
+        this.cfdiFirmaService = cfdiFirmaServiceProvider.getIfAvailable();
     }
 
     public Optional<Long> buscarFacturaIdPorUuid(String uuid) {
@@ -175,9 +178,31 @@ public class PagoService {
 
         String uuidComplemento = UUID.randomUUID().toString().toUpperCase();
 
-        // Usar valores de application.yml (igual que FacturaService)
-        // RFC del emisor: del request o usar el default de application.yml
-        String rfcEmisor = defaultString(facturaOriginal.rfcEmisor, rfcEmisorDefault);
+        // Obtener RFC del emisor: primero del certificado, luego de application.yml, luego de la factura original
+        String rfcEmisor = null;
+        try {
+            if (cfdiFirmaService != null) {
+                java.security.cert.X509Certificate certificado = cfdiFirmaService.cargarCertificado();
+                if (certificado != null) {
+                    String subjectDN = certificado.getSubjectX500Principal().getName();
+                    // Extraer RFC del SubjectDN (formato: CN=XXXX123456XXX, O=..., etc.)
+                    String rfcCertificado = extraerRFCDeSubjectDN(subjectDN);
+                    if (rfcCertificado != null && !rfcCertificado.trim().isEmpty()) {
+                        rfcEmisor = rfcCertificado.trim();
+                        logger.info("✓ RFC del emisor obtenido del certificado: {}", rfcEmisor);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("No se pudo obtener RFC del certificado: {}", e.getMessage());
+        }
+        
+        // Si no se obtuvo del certificado, usar el de application.yml o de la factura original
+        if (rfcEmisor == null || rfcEmisor.isEmpty()) {
+            rfcEmisor = defaultString(facturaOriginal.rfcEmisor, rfcEmisorDefault);
+            logger.info("✓ RFC del emisor obtenido de configuración/factura: {}", rfcEmisor);
+        }
+        
         String rfcReceptor = defaultString(facturaOriginal.rfcReceptor, "XAXX010101000");
 
         // Extraer datos del receptor desde el XML original
@@ -185,6 +210,14 @@ public class PagoService {
         String nombreReceptorReal = datosCfdi != null ? datosCfdi.receptorNombre : null;
         String regimenReceptorReal = datosCfdi != null ? datosCfdi.receptorRegimen : null;
         String domicilioReceptorReal = datosCfdi != null ? datosCfdi.receptorDomicilio : null;
+        
+        // Extraer moneda de la factura original del XML
+        String monedaFacturaOriginal = extraerMonedaDesdeXml(facturaOriginal.xmlContent);
+        if (monedaFacturaOriginal == null || monedaFacturaOriginal.isEmpty()) {
+            // Si no se encuentra, asumir MXN (moneda nacional por defecto)
+            monedaFacturaOriginal = "MXN";
+        }
+        logger.info("Moneda de la factura original: {}", monedaFacturaOriginal);
 
         // CRÍTICO: Usar nombre del emisor desde @Value (application.yml) - igual que FacturaService
         // El nombre debe coincidir EXACTAMENTE con el registrado en Finkok (demo) o SAT (producción)
@@ -206,6 +239,7 @@ public class PagoService {
         logger.info("  Régimen Fiscal: {}", regimenEmisorFinal);
         logger.info("═══════════════════════════════════════════════════════════════");
 
+        // Construir XML del complemento de pago según XSD Pagos20.xsd.xml
         String xmlComplemento = construirXmlComplementoPago(
                 uuidComplemento,
                 serieComplemento,
@@ -224,11 +258,22 @@ public class PagoService {
                 totalPagos,
                 facturaOriginal.total,
                 facturaUuid,
+                monedaFacturaOriginal,
                 pagos,
                 null,
                 null
         );
+        
+        logger.info("═══════════════════════════════════════════════════════════════");
+        logger.info("📋 XML COMPLEMENTO DE PAGO GENERADO (antes de firmar)");
+        logger.info("  UUID Complemento: {}", uuidComplemento);
+        logger.info("  Serie: {}, Folio: {}", serieComplemento, folioComplemento);
+        logger.info("  Total Pagos: {}", totalPagos);
+        logger.info("  UUID Factura Relacionada: {}", facturaUuid);
+        logger.info("═══════════════════════════════════════════════════════════════");
 
+        // Preparar request para timbrado con Finkok
+        // El PacClient se encargará de firmar el XML antes de enviarlo a Finkok
         PacTimbradoRequest pacRequest = PacTimbradoRequest.builder()
                 .xmlContent(xmlComplemento)
                 .rfcEmisor(defaultString(facturaOriginal.rfcEmisor, "AAA010101AAA"))
@@ -240,11 +285,12 @@ public class PagoService {
                 .serie(serieComplemento)
                 .folio(folioComplemento)
                 .medioPago(metodoCfdi)
-                .formaPago(null)
+                .formaPago(null) // No incluir FormaPago en el Comprobante principal para TipoDeComprobante="P"
                 .usoCFDI(usoCfdi)
                 .relacionadosUuids(facturaUuid)
                 .build();
 
+        logger.info("Enviando complemento de pago a Finkok para timbrado...");
         PacTimbradoResponse pacResp = pacClient.solicitarTimbrado(pacRequest);
         if (pacResp == null || Boolean.FALSE.equals(pacResp.getOk())) {
             errores.add(pacResp != null && pacResp.getMessage() != null
@@ -285,6 +331,7 @@ public class PagoService {
                     totalPagos,
                     facturaOriginal.total,
                     facturaUuid,
+                    monedaFacturaOriginal,
                     pagos,
                     pacResp,
                     fechaTimbrado
@@ -618,6 +665,7 @@ public class PagoService {
                                                BigDecimal totalPagos,
                                                BigDecimal totalFacturaOriginal,
                                                String uuidRelacionado,
+                                               String monedaFacturaOriginal,
                                                List<PagoDetalleRequest> pagos,
                                                PacTimbradoResponse pacResp,
                                                LocalDateTime fechaTimbrado) {
@@ -638,6 +686,8 @@ public class PagoService {
 
         for (PagoDetalleRequest det : pagos) {
             LocalDate fechaPago = parseFecha(det.getFechaPago()).orElse(LocalDate.now());
+            // Según XSD: FechaPago debe ser formato ISO 8601 aaaa-mm-ddThh:mm:ss
+            // Si no se proporciona hora, usar 12:00:00 según documentación del XSD
             String fechaPagoStr = fechaPago.atTime(12, 0, 0).format(FECHA_HORA);
             BigDecimal monto = det.getMonto() != null ? det.getMonto() : BigDecimal.ZERO;
             monto = monto.setScale(2, RoundingMode.HALF_UP);
@@ -651,21 +701,54 @@ public class PagoService {
             }
             saldoInsoluto = saldoInsoluto.setScale(2, RoundingMode.HALF_UP);
             String monedaPago = defaultString(safeTrim(det.getMoneda()), "MXN");
+            
+            // CRÍTICO: Según Finkok, TipoCambioP debe ser "1" cuando MonedaP es MXN
+            // Cuando MonedaP es diferente de MXN, TipoCambioP es requerido con el tipo de cambio real
+            String tipoCambioAttr;
+            if ("MXN".equalsIgnoreCase(monedaPago)) {
+                // Finkok requiere TipoCambioP="1" cuando la moneda es MXN
+                tipoCambioAttr = " TipoCambioP=\"1\"";
+            } else {
+                // Si la moneda no es MXN, TipoCambioP es requerido con el tipo de cambio real
+                // Por defecto usar 1.000000 si no se proporciona (debería calcularse según tipo de cambio real)
+                tipoCambioAttr = " TipoCambioP=\"1.000000\"";
+            }
 
+            // Moneda del documento relacionado (factura original)
+            String monedaDR = defaultString(monedaFacturaOriginal, "MXN");
+            
             pagosXml.append("      <pago20:Pago FechaPago=\"")
                     .append(fechaPagoStr)
                     .append("\" FormaDePagoP=\"")
                     .append(safeTrim(det.getFormaPago()))
                     .append("\" MonedaP=\"")
                     .append(monedaPago)
-                    .append("\" TipoCambioP=\"1\" Monto=\"")
+                    .append("\"")
+                    .append(tipoCambioAttr)
+                    .append(" Monto=\"")
                     .append(formatMonto(monto))
                     .append("\">\n")
                     .append("        <pago20:DoctoRelacionado IdDocumento=\"")
                     .append(uuidRelacionado)
                     .append("\" MonedaDR=\"")
-                    .append(monedaPago)
-                    .append("\" EquivalenciaDR=\"1\" NumParcialidad=\"")
+                    .append(monedaDR)
+                    .append("\"");
+            
+            // CRÍTICO: Según Finkok, EquivalenciaDR debe ser "1" (sin decimales) cuando 
+            // la moneda del documento relacionado es igual a la moneda de pago
+            // Si son diferentes, EquivalenciaDR debe tener el tipo de cambio con 10 decimales
+            String equivalenciaDR;
+            if (monedaDR.equalsIgnoreCase(monedaPago)) {
+                // Monedas iguales: usar "1" sin decimales (requerido por Finkok)
+                equivalenciaDR = "1";
+            } else {
+                // Monedas diferentes: usar tipo de cambio con 10 decimales (por defecto 1.0000000000)
+                // NOTA: En producción debería calcularse el tipo de cambio real
+                equivalenciaDR = "1.0000000000";
+            }
+            pagosXml.append(" EquivalenciaDR=\"").append(equivalenciaDR).append("\"");
+            
+            pagosXml.append(" NumParcialidad=\"")
                     .append(parcialidad++)
                     .append("\" ImpSaldoAnt=\"")
                     .append(formatMonto(saldoAnt))
@@ -680,6 +763,8 @@ public class PagoService {
         }
 
         if (pagosXml.length() == 0) {
+            // Caso fallback: si no hay pagos, crear un pago por defecto
+            // Nota: Este caso no debería ocurrir en producción ya que se valida antes
             pagosXml.append("      <pago20:Pago FechaPago=\"")
                     .append(fechaEmision)
                     .append("\" FormaDePagoP=\"99\" MonedaP=\"MXN\" TipoCambioP=\"1\" Monto=\"0.00\">\n")
@@ -726,7 +811,9 @@ public class PagoService {
         xml.append("  </cfdi:Conceptos>\n");
         xml.append("  <cfdi:Complemento>\n");
         xml.append("    <pago20:Pagos Version=\"2.0\">\n");
-        xml.append("      <pago20:Totales TotalPagos=\"").append(totalPagosStr).append("\"/>\n");
+        // Según XSD: MontoTotalPagos es requerido y debe expresarse en MXN
+        // Convertir totalPagos a MXN si es necesario (por ahora asumimos que ya está en MXN)
+        xml.append("      <pago20:Totales MontoTotalPagos=\"").append(totalPagosStr).append("\"/>\n");
         xml.append(pagosXml);
         xml.append("    </pago20:Pagos>\n");
 
@@ -892,6 +979,35 @@ public class PagoService {
         }
     }
 
+    /**
+     * Extrae la moneda del CFDI desde el XML
+     */
+    private String extraerMonedaDesdeXml(String xmlContent) {
+        String xml = safeTrim(xmlContent);
+        if (xml == null) {
+            return null;
+        }
+        try {
+            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+            factory.setNamespaceAware(true);
+            DocumentBuilder builder = factory.newDocumentBuilder();
+            Document doc = builder.parse(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)));
+
+            // Buscar el elemento Comprobante
+            Element comprobante = obtenerPrimerElemento(doc, "Comprobante");
+            if (comprobante != null) {
+                String moneda = safeTrim(comprobante.getAttribute("Moneda"));
+                if (moneda != null && !moneda.isEmpty()) {
+                    return moneda;
+                }
+            }
+            return null;
+        } catch (Exception e) {
+            logger.warn("No se pudo extraer la moneda del CFDI original: {}", e.getMessage());
+            return null;
+        }
+    }
+
     private Element obtenerPrimerElemento(Document doc, String localName) {
         org.w3c.dom.NodeList list = doc.getElementsByTagNameNS("http://www.sat.gob.mx/cfd/4", localName);
         if (list == null || list.getLength() == 0) {
@@ -901,10 +1017,66 @@ public class PagoService {
     }
 
     private static class CfdiDatosBasicos {
+        @SuppressWarnings("unused")
         String emisorNombre;
+        @SuppressWarnings("unused")
         String emisorRegimen;
         String receptorNombre;
         String receptorRegimen;
         String receptorDomicilio;
+    }
+
+    /**
+     * Extrae el RFC del SubjectDN del certificado
+     * Basado en el método de CfdiFirmaService
+     */
+    private String extraerRFCDeSubjectDN(String subjectDN) {
+        if (subjectDN == null || subjectDN.isEmpty()) {
+            return null;
+        }
+        
+        // Buscar RFC en formato 2.5.4.45 (RFC del SAT)
+        java.util.regex.Pattern pattern1 = java.util.regex.Pattern.compile("2\\.5\\.4\\.45=#([0-9A-Fa-f]+)");
+        java.util.regex.Matcher matcher1 = pattern1.matcher(subjectDN);
+        if (matcher1.find()) {
+            String hexRfc = matcher1.group(1);
+            // Convertir de hexadecimal a ASCII
+            try {
+                StringBuilder rfc = new StringBuilder();
+                for (int i = 0; i < hexRfc.length(); i += 2) {
+                    String hex = hexRfc.substring(i, Math.min(i + 2, hexRfc.length()));
+                    int charCode = Integer.parseInt(hex, 16);
+                    if (charCode >= 32 && charCode <= 126) { // Caracteres imprimibles ASCII
+                        rfc.append((char) charCode);
+                    }
+                }
+                String rfcStr = rfc.toString().trim();
+                // Extraer RFC (normalmente está al inicio y tiene 12-13 caracteres)
+                java.util.regex.Pattern rfcPattern = java.util.regex.Pattern.compile("([A-Z&Ñ]{3,4}\\d{6}[A-Z0-9]{3})");
+                java.util.regex.Matcher rfcMatcher = rfcPattern.matcher(rfcStr);
+                if (rfcMatcher.find()) {
+                    return rfcMatcher.group(1);
+                }
+                return rfcStr;
+            } catch (Exception e) {
+                logger.debug("Error al convertir hex a ASCII para RFC: {}", e.getMessage());
+            }
+        }
+        
+        // Buscar RFC en formato estándar (RFC=...)
+        java.util.regex.Pattern pattern2 = java.util.regex.Pattern.compile("RFC=([A-Z&Ñ0-9]{12,13})", java.util.regex.Pattern.CASE_INSENSITIVE);
+        java.util.regex.Matcher matcher2 = pattern2.matcher(subjectDN);
+        if (matcher2.find()) {
+            return matcher2.group(1).toUpperCase();
+        }
+        
+        // Buscar RFC en formato CN o OU (puede estar como XIA190128J61)
+        java.util.regex.Pattern pattern3 = java.util.regex.Pattern.compile("([A-Z&Ñ]{3,4}\\d{6}[A-Z0-9]{3})");
+        java.util.regex.Matcher matcher3 = pattern3.matcher(subjectDN);
+        if (matcher3.find()) {
+            return matcher3.group(1).toUpperCase();
+        }
+        
+        return null;
     }
 }

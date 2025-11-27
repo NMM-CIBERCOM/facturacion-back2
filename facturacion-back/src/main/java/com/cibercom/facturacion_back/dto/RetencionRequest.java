@@ -20,6 +20,7 @@ public class RetencionRequest {
     
     // Información de la retención
     private String tipoRetencion; // ISR_SERVICIOS, ISR_ARRENDAMIENTO, IVA, etc.
+    private String cveRetenc; // Clave de retención directamente del formulario (01-28)
     private BigDecimal montoBase;
     private BigDecimal isrRetenido;
     private BigDecimal ivaRetenido;
@@ -40,5 +41,9 @@ public class RetencionRequest {
     
     // Usuario que registra
     private String usuarioRegistro;
+    
+    // CRÍTICO: Código postal del receptor (DomicilioFiscalR) - requerido según XSD
+    // Debe ser un código postal válido del catálogo c_CodigoPostal del SAT (5 dígitos)
+    private String codigoPostalReceptor;
 }
 

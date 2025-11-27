@@ -204,6 +204,39 @@ public class RetentionsPacClient {
                 logger.warn("No se pudo validar el XML antes de enviar (continuando de todas formas): {}", e.getMessage());
             }
             
+            // 5. Verificar complemento en XML firmado (especialmente para clave 14)
+            if (xmlPlainText.contains("CveRetenc=\"14\"")) {
+                logger.info("═══════════════════════════════════════════════════════════════");
+                logger.info("🔍 VERIFICACIÓN DE COMPLEMENTO PARA CLAVE 14 EN XML FIRMADO:");
+                logger.info("═══════════════════════════════════════════════════════════════");
+                boolean tieneComplemento = xmlPlainText.contains("<retenciones:Complemento>");
+                boolean tieneSectorFinanciero = xmlPlainText.contains("sectorfinanciero:SectorFinanciero");
+                boolean tieneNamespace = xmlPlainText.contains("xmlns:sectorfinanciero=");
+                boolean tieneSchemaLocation = xmlPlainText.contains("sectorfinanciero.xsd");
+                
+                logger.info("  ¿Tiene nodo <retenciones:Complemento>? {}", tieneComplemento);
+                logger.info("  ¿Tiene sectorfinanciero:SectorFinanciero? {}", tieneSectorFinanciero);
+                logger.info("  ¿Tiene namespace xmlns:sectorfinanciero? {}", tieneNamespace);
+                logger.info("  ¿Tiene schemaLocation sectorfinanciero.xsd? {}", tieneSchemaLocation);
+                
+                if (tieneComplemento && tieneSectorFinanciero) {
+                    // Extraer sección del complemento del XML firmado
+                    int startIndex = xmlPlainText.indexOf("<retenciones:Complemento>");
+                    int endIndex = xmlPlainText.indexOf("</retenciones:Complemento>", startIndex);
+                    if (startIndex != -1 && endIndex != -1) {
+                        String complementoSection = xmlPlainText.substring(startIndex, endIndex + "</retenciones:Complemento>".length());
+                        logger.info("═══════════════════════════════════════════════════════════════");
+                        logger.info("📋 SECCIÓN COMPLEMENTO EN XML FIRMADO (antes de enviar a Finkok):");
+                        logger.info("{}", complementoSection);
+                        logger.info("═══════════════════════════════════════════════════════════════");
+                    }
+                } else {
+                    logger.error("✗✗✗ ERROR CRÍTICO: El complemento NO está presente en el XML firmado");
+                    logger.error("✗✗✗ Esto causará Reten20107 en Finkok");
+                }
+                logger.info("═══════════════════════════════════════════════════════════════");
+            }
+            
             // 5. Convertir XML a Base64 (Finkok requiere Base64)
             String xmlBase64 = Base64.getEncoder().encodeToString(xmlPlainText.getBytes(StandardCharsets.UTF_8));
             logger.info("XML codificado a Base64: {} caracteres", xmlBase64.length());

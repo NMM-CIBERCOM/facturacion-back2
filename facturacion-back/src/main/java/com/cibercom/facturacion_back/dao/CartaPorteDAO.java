@@ -14,9 +14,7 @@ import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
 import java.sql.PreparedStatement;
-import java.sql.Statement;
 import java.sql.Timestamp;
-import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -232,5 +230,30 @@ public class CartaPorteDAO {
             sb.append(", ");
         }
         sb.append(value.trim());
+    }
+
+    /**
+     * Actualiza el ID_FACTURA en la tabla CARTA_PORTE
+     * @param idCartaPorte ID de la carta porte a actualizar
+     * @param idFactura ID de la factura relacionada
+     */
+    public void actualizarIdFactura(Long idCartaPorte, Long idFactura) {
+        if (idCartaPorte == null || idFactura == null) {
+            logger.warn("No se puede actualizar ID_FACTURA: idCartaPorte={}, idFactura={}", idCartaPorte, idFactura);
+            return;
+        }
+        
+        String sql = "UPDATE CARTA_PORTE SET ID_FACTURA = ? WHERE ID_DATO_FISCAL = ?";
+        try {
+            int updated = jdbcTemplate.update(sql, idFactura, idCartaPorte);
+            if (updated > 0) {
+                logger.info("ID_FACTURA actualizado exitosamente: idCartaPorte={}, idFactura={}", idCartaPorte, idFactura);
+            } else {
+                logger.warn("No se encontró registro en CARTA_PORTE con ID: {}", idCartaPorte);
+            }
+        } catch (Exception e) {
+            logger.error("Error al actualizar ID_FACTURA en CARTA_PORTE: {}", e.getMessage(), e);
+            throw new DataAccessException("Error al actualizar ID_FACTURA: " + e.getMessage(), e) {};
+        }
     }
 }

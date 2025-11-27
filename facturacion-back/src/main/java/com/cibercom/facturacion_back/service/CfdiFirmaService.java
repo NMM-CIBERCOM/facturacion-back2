@@ -603,7 +603,14 @@ public class CfdiFirmaService {
                 }
             }
             
-            // 5. Generar cadena original
+            // 5. Reordenar atributos del elemento raíz ANTES de generar la cadena original
+            // CRÍTICO: El orden de los atributos DEBE coincidir con el orden del XSLT para que la cadena original sea correcta
+            if (esRetencion && elementoRaiz != null) {
+                reordenarAtributosRetencion(elementoRaiz);
+                logger.debug("✓ Atributos reordenados antes de generar cadena original");
+            }
+            
+            // 6. Generar cadena original
             logger.info("Generando cadena original...");
             
             // DEBUG: Log del XML que se usará para generar la cadena original (sin Certificado ni Sello)
@@ -767,7 +774,14 @@ public class CfdiFirmaService {
                 throw new IllegalStateException("No se encontró el elemento " + (esRetencion ? "Retenciones" : "Comprobante") + " en el XML");
             }
             
-            // 8. Convertir Document a String
+            // 8. Reordenar atributos del elemento raíz DESPUÉS de agregar Certificado y Sello
+            // CRÍTICO: Reordenar nuevamente para asegurar que el orden sea correcto en el XML final
+            if (esRetencion && elementoRaiz != null) {
+                reordenarAtributosRetencion(elementoRaiz);
+                logger.debug("✓ Atributos reordenados después de agregar Certificado y Sello");
+            }
+            
+            // 9. Convertir Document a String
             logger.info("Convirtiendo Document firmado a String...");
             String xmlFirmado;
             try {
@@ -1601,26 +1615,29 @@ public class CfdiFirmaService {
                     
                     // Buscar en múltiples ubicaciones con diferentes variantes
                     // CRÍTICO: Priorizar la carpeta base (donde está el XSLT principal) sobre otras ubicaciones
-                    // IMPORTANTE: Para retenciones, también buscar en carpeta RETEN
+                    // IMPORTANTE: Para retenciones, también buscar en carpeta RETEN y "Retenciones complementos"
                     String[] searchPaths = {
                         // PRIMERO: Buscar en la carpeta base (donde está el XSLT principal)
                         baseFolder + "/complements/" + fileName,
                         baseFolder + "/" + cleanHref,
-                        // SEGUNDO: Para retenciones, buscar en carpeta RETEN
+                        // SEGUNDO: Para retenciones, buscar en carpeta "Retenciones complementos" (donde están los XSLT de complementos)
+                        "librerias/Retenciones complementos/" + fileName,
+                        "librerias/Retenciones complementos/" + cleanHref,
+                        // TERCERO: Para retenciones, buscar en carpeta RETEN
                         "librerias/RETEN/" + fileName,
                         "librerias/RETEN/" + cleanHref,
                         baseFolder + "/RETEN/" + fileName,
                         baseFolder + "/RETEN/" + cleanHref,
-                        // TERCERO: Buscar en librerias/ (archivos oficiales de Finkok descargados)
+                        // CUARTO: Buscar en librerias/ (archivos oficiales de Finkok descargados)
                         "librerias/complements/" + fileName,
                         "librerias/" + cleanHref,
-                        // CUARTO: Buscar en certificados/ (fallback)
+                        // QUINTO: Buscar en certificados/ (fallback)
                         "certificados/complements/" + fileName,
                         "certificados/" + cleanHref,
-                        // QUINTO: Buscar en xslt/complements/ (solo como fallback)
+                        // SEXTO: Buscar en xslt/complements/ (solo como fallback)
                         "xslt/complements/" + fileName,
                         "xslt/" + cleanHref,
-                        // SEXTO: Otras ubicaciones
+                        // SÉPTIMO: Otras ubicaciones
                         cleanHref,
                         "complements/" + fileName,
                         // Si cleanHref ya incluye complements/, buscar directamente
@@ -1797,6 +1814,109 @@ public class CfdiFirmaService {
         xmlString = xmlString.trim();
         
         return xmlString;
+    }
+    
+    /**
+     * Reordena los atributos del elemento raíz de retención según el orden esperado por el XSLT
+     * Orden esperado por el XSLT: Version, NoCertificado, FolioInt, FechaExp, LugarExpRetenc, CveRetenc, DescRetenc
+     * Luego: namespaces, Certificado, Sello, xsi:schemaLocation
+     * 
+     * @param elementoRaiz El elemento Retenciones
+     */
+    private void reordenarAtributosRetencion(Element elementoRaiz) {
+        try {
+            // Obtener todos los atributos y sus valores
+            java.util.Map<String, String> atributos = new java.util.LinkedHashMap<>();
+            org.w3c.dom.NamedNodeMap attrs = elementoRaiz.getAttributes();
+            
+            // Guardar todos los atributos
+            for (int i = 0; i < attrs.getLength(); i++) {
+                org.w3c.dom.Node attr = attrs.item(i);
+                atributos.put(attr.getNodeName(), attr.getNodeValue());
+            }
+            
+            // Remover todos los atributos
+            while (attrs.getLength() > 0) {
+                elementoRaiz.removeAttribute(attrs.item(0).getNodeName());
+            }
+            
+            // Orden esperado por el XSLT para retenciones:
+            // 1. Version
+            // 2. NoCertificado
+            // 3. FolioInt
+            // 4. FechaExp
+            // 5. LugarExpRetenc
+            // 6. CveRetenc
+            // 7. DescRetenc
+            // Luego: namespaces, Certificado, Sello, xsi:schemaLocation
+            
+            // Agregar atributos en el orden correcto
+            String[] ordenAtributos = {
+                "Version",
+                "NoCertificado",
+                "FolioInt",
+                "FechaExp",
+                "LugarExpRetenc",
+                "CveRetenc",
+                "DescRetenc"
+            };
+            
+            // Agregar atributos en el orden esperado por el XSLT
+            for (String nombreAttr : ordenAtributos) {
+                if (atributos.containsKey(nombreAttr)) {
+                    elementoRaiz.setAttribute(nombreAttr, atributos.get(nombreAttr));
+                }
+            }
+            
+            // Agregar namespaces en el orden correcto (importante para la cadena original)
+            // Orden: xmlns:retenciones, xmlns:xsi, luego otros namespaces de complementos
+            String[] ordenNamespaces = {
+                "xmlns:retenciones",
+                "xmlns:xsi"
+            };
+            
+            // Agregar namespaces principales primero
+            for (String nombreNs : ordenNamespaces) {
+                if (atributos.containsKey(nombreNs)) {
+                    elementoRaiz.setAttribute(nombreNs, atributos.get(nombreNs));
+                }
+            }
+            
+            // Agregar otros namespaces de complementos (xmlns:sectorfinanciero, etc.)
+            for (java.util.Map.Entry<String, String> entry : atributos.entrySet()) {
+                String nombre = entry.getKey();
+                if ((nombre.startsWith("xmlns:") || nombre.equals("xmlns")) && 
+                    !nombre.equals("xmlns:retenciones") && !nombre.equals("xmlns:xsi")) {
+                    elementoRaiz.setAttribute(nombre, entry.getValue());
+                }
+            }
+            
+            // Agregar Certificado y Sello (si existen)
+            if (atributos.containsKey("Certificado")) {
+                elementoRaiz.setAttribute("Certificado", atributos.get("Certificado"));
+            }
+            if (atributos.containsKey("Sello")) {
+                elementoRaiz.setAttribute("Sello", atributos.get("Sello"));
+            }
+            
+            // Agregar xsi:schemaLocation al final
+            if (atributos.containsKey("xsi:schemaLocation")) {
+                elementoRaiz.setAttribute("xsi:schemaLocation", atributos.get("xsi:schemaLocation"));
+            }
+            
+            // Agregar cualquier otro atributo que no haya sido procesado
+            for (java.util.Map.Entry<String, String> entry : atributos.entrySet()) {
+                String nombre = entry.getKey();
+                if (!elementoRaiz.hasAttribute(nombre)) {
+                    elementoRaiz.setAttribute(nombre, entry.getValue());
+                }
+            }
+            
+            logger.debug("✓ Atributos del elemento Retenciones reordenados según el orden del XSLT");
+        } catch (Exception e) {
+            logger.warn("⚠️ No se pudo reordenar los atributos: {}", e.getMessage());
+            // Continuar sin reordenar si hay error
+        }
     }
     
     

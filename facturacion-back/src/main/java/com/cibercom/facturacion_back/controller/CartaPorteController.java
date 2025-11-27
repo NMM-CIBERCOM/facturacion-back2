@@ -28,6 +28,24 @@ public class CartaPorteController {
         try {
             logger.info("Guardando carta porte con RFC: {}", request.getRfcCompleto());
             
+            // DEBUG: Verificar remolques en el request
+            if (request.getComplemento() != null && 
+                request.getComplemento().getMercancias() != null &&
+                request.getComplemento().getMercancias().getAutotransporte() != null) {
+                var autotransporte = request.getComplemento().getMercancias().getAutotransporte();
+                var remolques = autotransporte.getRemolques();
+                logger.info("DEBUG - Remolques recibidos: {}", remolques == null ? "null" : remolques.size());
+                if (remolques != null) {
+                    for (int i = 0; i < remolques.size(); i++) {
+                        var r = remolques.get(i);
+                        logger.info("DEBUG - Remolque[{}]: subTipoRem={}, placa={}", 
+                            i, 
+                            r == null ? "null" : r.getSubTipoRem(),
+                            r == null ? "null" : r.getPlaca());
+                    }
+                }
+            }
+            
             CartaPorteService.SaveResult result = cartaPorteService.guardar(request);
             
             Map<String, Object> response = new LinkedHashMap<>();

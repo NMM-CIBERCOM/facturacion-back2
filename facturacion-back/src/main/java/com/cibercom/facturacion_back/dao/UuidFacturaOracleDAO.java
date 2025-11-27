@@ -429,6 +429,18 @@ public class UuidFacturaOracleDAO {
             }
             addIfPresentWithFallback(meta, avail, cols, vals, "ESTADO", estado, estadoFallback);
             addIfPresentWithFallback(meta, avail, cols, vals, "ESTADO_DESCRIPCION", estadoDescripcion, estadoDescFallback);
+            // ESTATUS_FACTURA como número (0 = EMITIDA, 1 = EN PROCESO, 2 = CANCELADA, etc.)
+            // Si el estado es "0" (EMITIDA), también establecer ESTATUS_FACTURA = 0
+            if ("0".equals(estado) && avail.contains("ESTATUS_FACTURA")) {
+                cols.add("ESTATUS_FACTURA");
+                vals.add(Integer.valueOf(0));
+            }
+            // STATUS_SAT también debe ser "0" cuando el estado es EMITIDA
+            if ("0".equals(estado)) {
+                addIfPresentWithFallback(meta, avail, cols, vals, "STATUS_SAT", "0", "0");
+                addIfPresentWithFallback(meta, avail, cols, vals, "STATUSSAT", "0", "0");
+                addIfPresentWithFallback(meta, avail, cols, vals, "ESTATUS_SAT", "0", "0");
+            }
             // Medio/Metodo de pago puede variar
             addIfPresentWithFallback(meta, avail, cols, vals, "MEDIO_PAGO", medioPago, medioPagoFallback);
             addIfPresentWithFallback(meta, avail, cols, vals, "METODO_PAGO", medioPago, medioPagoFallback);
@@ -503,6 +515,45 @@ public class UuidFacturaOracleDAO {
         } catch (Exception e) {
             lastInsertError = rootCauseMessage(e);
             logger.error("Error al insertar en tabla de facturas: {}", lastInsertError, e);
+            return false;
+        }
+    }
+
+    /**
+     * Actualiza el UUID en la tabla FACTURAS
+     * @param uuidAnterior UUID actual en la base de datos
+     * @param uuidNuevo Nuevo UUID a actualizar (del PAC/Finkok)
+     * @return true si se actualizó correctamente, false en caso contrario
+     */
+    public boolean actualizarUuid(String uuidAnterior, String uuidNuevo) {
+        if (uuidAnterior == null || uuidAnterior.trim().isEmpty() || 
+            uuidNuevo == null || uuidNuevo.trim().isEmpty()) {
+            logger.warn("No se puede actualizar UUID: uuidAnterior={}, uuidNuevo={}", uuidAnterior, uuidNuevo);
+            return false;
+        }
+        
+        try {
+            String tableName = detectFacturaTableName();
+            java.util.Map<String, ColumnMeta> meta = fetchColumnsMeta(tableName);
+            java.util.Set<String> avail = availableNames(meta);
+            String uuidCol = pickFirst(avail, "UUID", "FOLIO_FISCAL", "FOLIO_FISCAL_SAT", "UUID_CFDI", "FOLIO_FISCAL_UUID");
+            if (uuidCol == null) {
+                logger.error("No se encontró columna UUID compatible en {}", tableName);
+                return false;
+            }
+            
+            String sql = "UPDATE " + tableName + " SET " + uuidCol + " = ? WHERE " + uuidCol + " = ?";
+            int updated = jdbcTemplate.update(sql, uuidNuevo.trim().toUpperCase(), uuidAnterior.trim().toUpperCase());
+            
+            if (updated > 0) {
+                logger.info("UUID actualizado exitosamente: {} -> {}", uuidAnterior, uuidNuevo);
+                return true;
+            } else {
+                logger.warn("No se encontró registro con UUID: {}", uuidAnterior);
+                return false;
+            }
+        } catch (Exception e) {
+            logger.error("Error al actualizar UUID en FACTURAS: {}", e.getMessage(), e);
             return false;
         }
     }

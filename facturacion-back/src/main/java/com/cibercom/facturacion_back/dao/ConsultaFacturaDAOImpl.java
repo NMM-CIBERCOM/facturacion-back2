@@ -3,8 +3,6 @@ package com.cibercom.facturacion_back.dao;
 import com.cibercom.facturacion_back.dto.ConsultaFacturaRequest;
 import com.cibercom.facturacion_back.dto.ConsultaFacturaResponse.FacturaConsultaDTO;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,7 +11,6 @@ import oracle.jdbc.OracleTypes;
 import javax.sql.DataSource;
 import java.math.BigDecimal;
 import java.sql.*;
-import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -214,6 +211,7 @@ public class ConsultaFacturaDAOImpl implements ConsultaFacturaDAO {
         boolean hasTienda = columnExists(conn, "FACTURAS", "TIENDA");
         boolean hasEmisorRfc = columnExists(conn, "FACTURAS", "EMISOR_RFC");
         boolean hasReceptorRfc = columnExists(conn, "FACTURAS", "RFC_R");
+        boolean hasTipoFactura = columnExists(conn, "FACTURAS", "TIPO_FACTURA");
         // Resolver columna de fecha disponible para evitar ORA-00904
         String dateCol = null;
         String[] dateCandidates = new String[] {"FECHA_FACTURA", "FECHA_EMISION", "FECHA", "FECHA_TIMBRADO", "FECHA_CREACION"};
@@ -242,6 +240,8 @@ public class ConsultaFacturaDAOImpl implements ConsultaFacturaDAO {
         // SAT status si existe
         if (hasEstatusSat) selectCols.append(", ESTATUS_SAT");
         else if (hasStatusSat) selectCols.append(", STATUS_SAT");
+        // TIPO_FACTURA si existe
+        if (hasTipoFactura) selectCols.append(", TIPO_FACTURA");
 
         sb.append("SELECT ").append(selectCols.length() > 0 ? selectCols.toString() : "UUID")
           .append(" FROM FACTURAS WHERE 1=1");
@@ -330,6 +330,13 @@ public class ConsultaFacturaDAOImpl implements ConsultaFacturaDAO {
                         dto.setEstatusSat(rs.getString("ESTADO"));
                     }
                     if (labels.contains("TIENDA")) dto.setTienda(rs.getString("TIENDA"));
+                    // TIPO_FACTURA si existe
+                    if (labels.contains("TIPO_FACTURA")) {
+                        Integer tipoFactura = rs.getInt("TIPO_FACTURA");
+                        if (!rs.wasNull()) {
+                            dto.setTipoFactura(tipoFactura);
+                        }
+                    }
                     // ALMACEN/USUARIO podrían no existir; se dejan nulos
                     list.add(dto);
                 }
@@ -722,6 +729,14 @@ public class ConsultaFacturaDAOImpl implements ConsultaFacturaDAO {
         factura.setTienda(rs.getString("TIENDA"));
         factura.setAlmacen(rs.getString("ALMACEN"));
         factura.setUsuario(rs.getString("USUARIO"));
+
+        // Mapear TIPO_FACTURA si existe
+        if (labels.contains("TIPO_FACTURA")) {
+            Integer tipoFactura = rs.getInt("TIPO_FACTURA");
+            if (!rs.wasNull()) {
+                factura.setTipoFactura(tipoFactura);
+            }
+        }
 
         String permiteCancelacion = rs.getString("PERMITE_CANCELACION");
         factura.setPermiteCancelacion("SI".equals(permiteCancelacion));

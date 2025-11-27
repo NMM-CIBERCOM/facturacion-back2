@@ -99,6 +99,7 @@ public class ConsultaFacturaResponse {
         private String usuario;
         private boolean permiteCancelacion;
         private String motivoNoCancelacion;
+        private Integer tipoFactura;
 
         public FacturaConsultaDTO() {
         }
@@ -213,6 +214,14 @@ public class ConsultaFacturaResponse {
 
         public void setMotivoNoCancelacion(String motivoNoCancelacion) {
             this.motivoNoCancelacion = motivoNoCancelacion;
+        }
+
+        public Integer getTipoFactura() {
+            return tipoFactura;
+        }
+
+        public void setTipoFactura(Integer tipoFactura) {
+            this.tipoFactura = tipoFactura;
         }
     }
 }
