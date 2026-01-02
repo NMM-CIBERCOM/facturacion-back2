@@ -45,10 +45,32 @@ public class CorreoUtil {
         try {
             // Configuración de propiedades para el servidor SMTP
             Properties props = new Properties();
-            props.put("mail.smtp.auth", "true");
-            props.put("mail.smtp.starttls.enable", "true");
-            props.put("mail.smtp.host", correo.getSmtpHost());
-            props.put("mail.smtp.port", correo.getPort());
+            int port = Integer.parseInt(correo.getPort());
+            
+            // Si el puerto es 465, usar SMTPS (SSL directo)
+            if (port == 465) {
+                // Configuración para SMTPS (puerto 465 con SSL directo)
+                props.put("mail.smtps.auth", "true");
+                props.put("mail.smtps.host", correo.getSmtpHost());
+                props.put("mail.smtps.port", correo.getPort());
+                props.put("mail.smtps.ssl.enable", "true");
+                props.put("mail.smtps.ssl.trust", "*");
+                props.put("mail.smtps.connectiontimeout", "30000");
+                props.put("mail.smtps.timeout", "30000");
+                props.put("mail.smtps.writetimeout", "30000");
+                logger.info("Configurando SMTPS (SSL directo) para puerto 465");
+            } else {
+                // Configuración para STARTTLS (puerto 587)
+                props.put("mail.smtp.auth", "true");
+                props.put("mail.smtp.host", correo.getSmtpHost());
+                props.put("mail.smtp.port", correo.getPort());
+                props.put("mail.smtp.starttls.enable", "true");
+                props.put("mail.smtp.starttls.required", "true");
+                props.put("mail.smtp.connectiontimeout", "30000");
+                props.put("mail.smtp.timeout", "30000");
+                props.put("mail.smtp.writetimeout", "30000");
+                logger.info("Configurando STARTTLS para puerto {}", port);
+            }
             
             // Crear sesión con autenticación
             Session session = Session.getInstance(props, new Authenticator() {
@@ -94,8 +116,22 @@ public class CorreoUtil {
                 message.setContent(correo.getMensaje(), "text/html; charset=utf-8");
             }
             
-            // Enviar mensaje
-            Transport.send(message);
+            // Enviar mensaje - usar Transport apropiado según el puerto
+            Transport transport;
+            if (port == 465) {
+                transport = session.getTransport("smtps");
+            } else {
+                transport = session.getTransport("smtp");
+            }
+            
+            try {
+                transport.connect(correo.getSmtpHost(), Integer.parseInt(correo.getPort()), 
+                                 correo.getUsername(), correo.getPassword());
+                transport.sendMessage(message, message.getAllRecipients());
+                logger.info("Correo enviado exitosamente a {}", correo.getTo());
+            } finally {
+                transport.close();
+            }
             logger.info("Correo enviado exitosamente a {}", correo.getTo());
         } catch (Exception e) {
             logger.error("Error al enviar correo: {}", e.getMessage(), e);

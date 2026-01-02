@@ -23,7 +23,9 @@ import java.time.LocalDateTime;
 import java.time.Period;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -40,6 +42,9 @@ public class NominaService {
     private final ClienteCatalogoService clienteCatalogoService;
     private final PacClient pacClient;
     private final Environment environment;
+    private final ITextPdfService iTextPdfService;
+    private final CorreoService correoService;
+    private final FormatoCorreoService formatoCorreoService;
 
     // Inyectar valores de application.yml usando @Value (igual que FacturaService y PagoService)
     @Value("${facturacion.emisor.rfc:IVD920810GU2}")
@@ -57,21 +62,30 @@ public class NominaService {
     @Value("${facturacion.emisor.registroPatronal:VADA800927HSRSRL05}")
     private String registroPatronalDefault;
 
+    @Value("${server.base-url:http://localhost:8080}")
+    private String serverBaseUrl;
+
     public NominaService(UuidFacturaOracleDAO uuidFacturaOracleDAO,
                          ConceptoOracleDAO conceptoOracleDAO,
                          NominaOracleDAO nominaOracleDAO,
                          ClienteCatalogoService clienteCatalogoService,
                          PacClient pacClient,
-                         Environment environment) {
+                         Environment environment,
+                         ITextPdfService iTextPdfService,
+                         CorreoService correoService,
+                         FormatoCorreoService formatoCorreoService) {
         this.uuidFacturaOracleDAO = uuidFacturaOracleDAO;
         this.conceptoOracleDAO = conceptoOracleDAO;
         this.nominaOracleDAO = nominaOracleDAO;
         this.clienteCatalogoService = clienteCatalogoService;
         this.pacClient = pacClient;
         this.environment = environment;
+        this.iTextPdfService = iTextPdfService;
+        this.correoService = correoService;
+        this.formatoCorreoService = formatoCorreoService;
     }
 
-    public NominaSaveResponse guardar(NominaSaveRequest req) {
+    public NominaSaveResponse guardar(NominaSaveRequest req, Long usuario) {
         NominaSaveResponse response = new NominaSaveResponse();
         List<String> errors = new ArrayList<>();
         response.setErrors(errors);
@@ -155,17 +169,48 @@ public class NominaService {
         
         if (periodoPago != null && !periodoPago.isEmpty()) {
             try {
-                // Intentar parsear formato "YYYY-MM-DD al YYYY-MM-DD" o similar
+                // Intentar parsear formato "DD/MM/YYYY al DD/MM/YYYY" o "YYYY-MM-DD al YYYY-MM-DD"
                 if (periodoPago.contains(" al ")) {
                     String[] partes = periodoPago.split(" al ");
                     if (partes.length == 2) {
-                        fechaInicialPago = LocalDate.parse(partes[0].trim());
-                        fechaFinalPago = LocalDate.parse(partes[1].trim());
+                        String fechaIniStr = partes[0].trim();
+                        String fechaFinStr = partes[1].trim();
+                        
+                        // Intentar parsear formato DD/MM/YYYY
+                        if (fechaIniStr.contains("/") && fechaIniStr.split("/").length == 3) {
+                            String[] partesIni = fechaIniStr.split("/");
+                            String[] partesFin = fechaFinStr.split("/");
+                            if (partesIni.length == 3 && partesFin.length == 3) {
+                                // Formato DD/MM/YYYY
+                                fechaInicialPago = LocalDate.of(
+                                    Integer.parseInt(partesIni[2]),
+                                    Integer.parseInt(partesIni[1]),
+                                    Integer.parseInt(partesIni[0])
+                                );
+                                fechaFinalPago = LocalDate.of(
+                                    Integer.parseInt(partesFin[2]),
+                                    Integer.parseInt(partesFin[1]),
+                                    Integer.parseInt(partesFin[0])
+                                );
+                            }
+                        } else {
+                            // Formato YYYY-MM-DD (ISO)
+                            fechaInicialPago = LocalDate.parse(fechaIniStr);
+                            fechaFinalPago = LocalDate.parse(fechaFinStr);
+                        }
+                        
                         numDiasPagados = (int) java.time.temporal.ChronoUnit.DAYS.between(fechaInicialPago, fechaFinalPago) + 1;
+                        if (numDiasPagados < 1) {
+                            numDiasPagados = 1;
+                        }
                     }
                 }
             } catch (Exception e) {
-                logger.warn("No se pudo parsear periodo de pago: {}", periodoPago);
+                logger.warn("No se pudo parsear periodo de pago: {}. Error: {}", periodoPago, e.getMessage());
+                // Usar fecha de pago como fallback
+                fechaInicialPago = fechaPagoDate;
+                fechaFinalPago = fechaPagoDate;
+                numDiasPagados = 1;
             }
         }
 
@@ -238,11 +283,27 @@ public class NominaService {
 
         PacTimbradoResponse pacResp = pacClient.solicitarTimbrado(pacRequest);
         if (pacResp == null || Boolean.FALSE.equals(pacResp.getOk())) {
-            errors.add(pacResp != null && pacResp.getMessage() != null
+            String mensajeError = pacResp != null && pacResp.getMessage() != null
                     ? pacResp.getMessage()
-                    : "PAC no disponible para timbrado.");
+                    : "PAC no disponible para timbrado.";
+            
+            // Incluir detalles adicionales del error del PAC
+            if (pacResp != null) {
+                logger.error("═══════════════════════════════════════════════════════════════");
+                logger.error("❌ ERROR AL TIMBRAR NÓMINA:");
+                logger.error("  Mensaje del PAC: {}", mensajeError);
+                logger.error("  Status: {}", pacResp.getStatus());
+                logger.error("  CodEstatus: {}", pacResp.getCodEstatus());
+                if (pacResp.getUuid() != null) {
+                    logger.error("  UUID (si existe): {}", pacResp.getUuid());
+                }
+                logger.error("═══════════════════════════════════════════════════════════════");
+            }
+            
+            errors.add(mensajeError);
             response.setOk(false);
-            response.setMessage("Error al timbrar nómina.");
+            // Incluir el mensaje específico del PAC en la respuesta
+            response.setMessage("Error al timbrar nómina: " + mensajeError);
             return response;
         }
 
@@ -263,6 +324,9 @@ public class NominaService {
         }
 
         // Insertar en FACTURAS (tipo_factura = 4 para nóminas)
+        // Estado EMITIDA = "0" cuando Finkok la devuelve timbrada
+        String estadoEmitida = com.cibercom.facturacion_back.model.EstadoFactura.EMITIDA.getCodigo(); // "0"
+        String estadoDescripcion = com.cibercom.facturacion_back.model.EstadoFactura.EMITIDA.getDescripcion(); // "EMITIDA"
         boolean insercionFactura = uuidFacturaOracleDAO.insertarBasicoConIdReceptor(
                 uuidNomina,
                 xmlTimbrado,
@@ -274,14 +338,15 @@ public class NominaService {
                 total,
                 "99",
                 usoCfdi != null ? usoCfdi : "CN01",
-                "TIMBRADA",
-                "CFDI de Nómina",
+                estadoEmitida, // "0" = EMITIDA
+                estadoDescripcion, // "EMITIDA"
                 "PUE",
                 rfcReceptor,
                 rfcEmisor,
                 correoReceptor,
                 idReceptor,
-                Integer.valueOf(4) // tipo_factura = 4 para nóminas
+                Integer.valueOf(4), // tipo_factura = 4 para nóminas
+                usuario // usuario que emitió la nómina
         );
 
         if (!insercionFactura) {
@@ -358,9 +423,25 @@ public class NominaService {
             return Optional.empty();
         }
         try {
-            return Optional.of(LocalDate.parse(fechaStr));
+            // Intentar formato ISO primero (YYYY-MM-DD)
+            try {
+                return Optional.of(LocalDate.parse(fechaStr));
+            } catch (Exception e1) {
+                // Intentar formato DD/MM/YYYY
+                if (fechaStr.contains("/") && fechaStr.split("/").length == 3) {
+                    String[] partes = fechaStr.split("/");
+                    if (partes.length == 3) {
+                        int dia = Integer.parseInt(partes[0].trim());
+                        int mes = Integer.parseInt(partes[1].trim());
+                        int anio = Integer.parseInt(partes[2].trim());
+                        return Optional.of(LocalDate.of(anio, mes, dia));
+                    }
+                }
+                // Si no coincide ningún formato, lanzar excepción
+                throw e1;
+            }
         } catch (Exception e) {
-            logger.warn("Error al parsear fecha: {}", fechaStr);
+            logger.warn("Error al parsear fecha: {}. Error: {}", fechaStr, e.getMessage());
             return Optional.empty();
         }
     }
@@ -422,29 +503,22 @@ public class NominaService {
         int meses = periodo.getMonths();
         int días = periodo.getDays();
         
-        // CRÍTICO NOM109: Formato ISO 8601 - omitir componentes en cero pero mantener orden
-        // Si hay años, incluir años (y meses/días solo si > 0)
-        // Si no hay años pero hay meses, incluir meses (y días solo si > 0)
-        // Si solo hay días, incluir días
+        // CRÍTICO NOM111: Cuando hay RegistroPatronal, el SAT requiere formato completo
+        // El formato debe incluir siempre días (incluso si es 0D) cuando hay años o meses
+        // Formato requerido: PnYnMnDn donde al menos un componente debe estar presente
         StringBuilder antiguedad = new StringBuilder("P");
         
+        // Incluir años si existen
         if (años > 0) {
             antiguedad.append(años).append("Y");
-            if (meses > 0) {
-                antiguedad.append(meses).append("M");
-            }
-            if (días > 0) {
-                antiguedad.append(días).append("D");
-            }
-        } else if (meses > 0) {
-            antiguedad.append(meses).append("M");
-            if (días > 0) {
-                antiguedad.append(días).append("D");
-            }
-        } else {
-            // Si no hay años ni meses, siempre incluir días (puede ser 0)
-            antiguedad.append(días).append("D");
         }
+        // Incluir meses si existen
+        if (meses > 0) {
+            antiguedad.append(meses).append("M");
+        }
+        // CRÍTICO: Siempre incluir días (incluso si es 0) para cumplir con el patrón del SAT cuando hay RegistroPatronal
+        // El SAT valida que el formato sea completo: P1Y0D en lugar de P1Y
+        antiguedad.append(días).append("D");
         
         return antiguedad.toString();
     }
@@ -711,5 +785,176 @@ public class NominaService {
         xml.append("</cfdi:Comprobante>");
         
         return xml.toString();
+    }
+
+    /**
+     * Genera un PDF de vista previa sin timbrar a partir de NominaSaveRequest
+     */
+    public byte[] generarPdfPreview(NominaSaveRequest request, Map<String, Object> logoConfig) {
+        try {
+            logger.info("Generando PDF de vista previa para nómina, RFC receptor: {}", request.getRfcReceptor());
+
+            // Obtener logoConfig si no se proporcionó
+            Map<String, Object> logoConfigFinal = logoConfig;
+            if (logoConfigFinal == null) {
+                logoConfigFinal = obtenerLogoConfig();
+            }
+
+            // Construir datos de la nómina para el PDF
+            Map<String, Object> datosFactura = new HashMap<>();
+            datosFactura.put("uuid", "PREVIEW-" + UUID.randomUUID().toString());
+            datosFactura.put("serie", "NOM");
+            datosFactura.put("folio", "PREVIEW");
+            datosFactura.put("fechaTimbrado", LocalDateTime.now());
+            datosFactura.put("rfcEmisor", request.getRfcEmisor() != null ? request.getRfcEmisor() : rfcEmisorDefault);
+            datosFactura.put("nombreEmisor", nombreEmisorDefault);
+            datosFactura.put("rfcReceptor", request.getRfcReceptor() != null ? request.getRfcReceptor() : "XAXX010101000");
+            datosFactura.put("nombreReceptor", request.getNombre() != null ? request.getNombre() : datosFactura.get("rfcReceptor"));
+            datosFactura.put("tipoComprobante", "N"); // N para Nómina
+            datosFactura.put("moneda", "MXN");
+            
+            // Construir conceptos
+            List<Map<String, Object>> conceptos = new ArrayList<>();
+            Map<String, Object> concepto = new HashMap<>();
+            BigDecimal total = request.getTotal() != null ? parseDecimal(request.getTotal()) : BigDecimal.ZERO;
+            String descripcionConcepto = "Nómina - " + (request.getTipoNomina() != null ? request.getTipoNomina() : "Nómina");
+            concepto.put("cantidad", BigDecimal.ONE);
+            concepto.put("descripcion", descripcionConcepto);
+            concepto.put("valorUnitario", total);
+            concepto.put("importe", total);
+            concepto.put("iva", BigDecimal.ZERO);
+            conceptos.add(concepto);
+            datosFactura.put("conceptos", conceptos);
+            
+            // Para nóminas: Subtotal = total, IVA = 0, Total = total
+            BigDecimal subtotal = total;
+            
+            datosFactura.put("subtotal", subtotal);
+            datosFactura.put("iva", BigDecimal.ZERO);
+            datosFactura.put("total", total);
+            
+            // Agregar todos los datos de nómina del formulario al mapa nomina
+            Map<String, Object> datosNomina = new HashMap<>();
+            datosNomina.put("idEmpleado", request.getIdEmpleado());
+            datosNomina.put("fechaNomina", request.getFechaNomina());
+            datosNomina.put("nombre", request.getNombre());
+            datosNomina.put("curp", request.getCurp());
+            datosNomina.put("rfcReceptor", request.getRfcReceptor());
+            datosNomina.put("periodoPago", request.getPeriodoPago());
+            datosNomina.put("fechaPago", request.getFechaPago());
+            datosNomina.put("percepciones", request.getPercepciones());
+            datosNomina.put("deducciones", request.getDeducciones());
+            datosNomina.put("total", request.getTotal());
+            datosNomina.put("tipoNomina", request.getTipoNomina());
+            datosNomina.put("usoCfdi", request.getUsoCfdi());
+            datosNomina.put("correoElectronico", request.getCorreoElectronico());
+            datosNomina.put("domicilioFiscalReceptor", request.getDomicilioFiscalReceptor());
+            datosNomina.put("numSeguridadSocial", request.getNumSeguridadSocial());
+            datosNomina.put("fechaInicioRelLaboral", request.getFechaInicioRelLaboral());
+            datosNomina.put("antiguedad", request.getAntiguedad());
+            datosNomina.put("riesgoPuesto", request.getRiesgoPuesto());
+            datosNomina.put("salarioDiarioIntegrado", request.getSalarioDiarioIntegrado());
+            datosFactura.put("nomina", datosNomina);
+            
+            // Generar PDF usando ITextPdfService
+            byte[] pdfBytes = iTextPdfService.generarPdfConLogo(datosFactura, logoConfigFinal != null ? logoConfigFinal : new HashMap<>());
+            logger.info("PDF de vista previa de nómina generado exitosamente: {} bytes", pdfBytes != null ? pdfBytes.length : 0);
+            return pdfBytes;
+        } catch (Exception e) {
+            logger.error("Error al generar PDF de vista previa de nómina: {}", e.getMessage(), e);
+            throw new RuntimeException("Error al generar PDF de vista previa de nómina: " + e.getMessage(), e);
+        }
+    }
+
+    private BigDecimal parseDecimal(String value) {
+        if (value == null || value.trim().isEmpty()) {
+            return BigDecimal.ZERO;
+        }
+        try {
+            return new BigDecimal(value.trim());
+        } catch (NumberFormatException e) {
+            return BigDecimal.ZERO;
+        }
+    }
+
+    /**
+     * Obtiene la configuración de logo y colores para el PDF
+     */
+    private Map<String, Object> obtenerLogoConfig() {
+        Map<String, Object> logoConfig = new HashMap<>();
+        Map<String, Object> customColors = new HashMap<>();
+        
+        // Obtener configuración de formato (color)
+        com.cibercom.facturacion_back.dto.FormatoCorreoDto configuracionFormato = null;
+        try {
+            com.cibercom.facturacion_back.dto.ConfiguracionCorreoResponseDto configResponse = correoService.obtenerConfiguracionMensajes();
+            if (configResponse != null && configResponse.getFormatoCorreo() != null) {
+                configuracionFormato = configResponse.getFormatoCorreo();
+                logger.info("Usando color de formato de configuración de mensajes: {}", configuracionFormato.getColorTexto());
+            } else {
+                configuracionFormato = formatoCorreoService.obtenerConfiguracionActiva();
+                logger.info("Usando color de formato activo (archivo): {}", configuracionFormato != null ? configuracionFormato.getColorTexto() : null);
+            }
+        } catch (Exception e) {
+            logger.warn("No se pudo obtener FormatoCorreo: {}", e.getMessage());
+        }
+        
+        // Establecer color primario
+        String colorPrimario = (configuracionFormato != null && configuracionFormato.getColorTexto() != null && !configuracionFormato.getColorTexto().isEmpty())
+            ? configuracionFormato.getColorTexto().trim()
+            : "#1d4ed8";
+        customColors.put("primary", colorPrimario);
+        logoConfig.put("customColors", customColors);
+        
+        // Intentar usar logoBase64 activo persistido
+        String logoBase64Activo = leerLogoBase64Activo();
+        if (logoBase64Activo != null && !logoBase64Activo.isBlank()) {
+            logoConfig.put("logoBase64", logoBase64Activo.trim());
+            logger.info("Usando logoBase64 activo para PDF de nómina");
+        } else {
+            // Fallback: usar el mismo endpoint PNG que en el correo
+            String logoEndpoint = serverBaseUrl + "/api/logos/cibercom-png";
+            logoConfig.put("logoUrl", logoEndpoint);
+            logger.info("Logo para PDF de nómina (fallback URL): {}", logoEndpoint);
+        }
+        
+        logger.info("Color primario seleccionado para PDF de nómina: {}", colorPrimario);
+        return logoConfig;
+    }
+    
+    private String leerLogoBase64Activo() {
+        try {
+            java.nio.file.Path p = getLogoBase64Path();
+            if (java.nio.file.Files.exists(p)) {
+                String content = java.nio.file.Files.readString(p);
+                if (content != null && !content.trim().isEmpty()) {
+                    logger.info("Logo activo leído desde: {}", p.toAbsolutePath());
+                    return content.trim();
+                }
+            } else {
+                logger.warn("Archivo de logo no encontrado en: {}", p.toAbsolutePath());
+            }
+        } catch (Exception e) {
+            logger.warn("No se pudo leer logo activo para PDF: {}", e.getMessage());
+        }
+        return null;
+    }
+    
+    private java.nio.file.Path getLogoBase64Path() {
+        // Intentar usar variable de entorno o propiedad del sistema
+        String tomcatBase = System.getProperty("catalina.base");
+        if (tomcatBase != null && !tomcatBase.isEmpty()) {
+            // Si estamos en Tomcat, guardar en conf/ dentro de Tomcat
+            return java.nio.file.Paths.get(tomcatBase, "conf", "logo-base64.txt");
+        }
+        
+        // Fallback: usar directorio de trabajo actual/config
+        String userDir = System.getProperty("user.dir");
+        if (userDir != null && !userDir.isEmpty()) {
+            return java.nio.file.Paths.get(userDir, "config", "logo-base64.txt");
+        }
+        
+        // Último fallback: directorio temporal
+        return java.nio.file.Paths.get(System.getProperty("java.io.tmpdir"), "logo-base64.txt");
     }
 }

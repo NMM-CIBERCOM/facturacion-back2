@@ -168,6 +168,12 @@ public class Factura {
     @Column(name = "BOLETA_BOL")
     private Integer boletaBol;
     
+    @Column(name = "UUID_ORIG", length = 40)
+    private String uuidOrig;
+    
+    @Column(name = "USUARIO", precision = 11)
+    private Long usuario;
+    
     @Transient
     private String cadenaOriginal;
     
@@ -316,6 +322,8 @@ public class Factura {
         public FacturaBuilder tiendaOrigen(Integer tiendaOrigen) { f.tiendaOrigen = tiendaOrigen; return this; }
         public FacturaBuilder terminalBol(Integer terminalBol) { f.terminalBol = terminalBol; return this; }
         public FacturaBuilder boletaBol(Integer boletaBol) { f.boletaBol = boletaBol; return this; }
+        public FacturaBuilder uuidOrig(String uuidOrig) { f.uuidOrig = uuidOrig; return this; }
+        public FacturaBuilder usuario(Long usuario) { f.usuario = usuario; return this; }
     
         public FacturaBuilder fechaCreacion(java.time.LocalDateTime fechaCreacion) { f.fechaCreacion = fechaCreacion; return this; }
         public FacturaBuilder fechaModificacion(java.time.LocalDateTime fechaModificacion) { f.fechaModificacion = fechaModificacion; return this; }

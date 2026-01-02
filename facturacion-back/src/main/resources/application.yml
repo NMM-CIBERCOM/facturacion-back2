@@ -1,6 +1,11 @@
+# ============================================================================
+# CONFIGURACIÓN BASE - Valores comunes para todos los perfiles
+# Perfil activo por defecto: prod,oracle (servidor de producción)
+# Para desarrollo local, usar: --spring.profiles.active=dev,oracle
+# ============================================================================
 spring:
   profiles:
-    active: oracle
+    active: prod,oracle
   jackson:
     serialization:
       write-dates-as-timestamps: false
@@ -17,24 +22,6 @@ spring:
           starttls:
             enable: true
           from: nm9282672@gmail.com
-
-server:
-  port: 8080
-
-# Configuración de Finkok (PAC)
-finkok:
-  enabled: true
-  username: nm9282672@gmail.com
-  password: N1C0LASm_  # Esta contraseña se usa para encriptar la llave privada en DES3
-  stamp:
-    # URL del endpoint SOAP (sin .wsdl - el .wsdl es solo para describir el servicio)
-    url: https://demo-facturacion.finkok.com/servicios/soap/stamp
-  cancel:
-    # URL del endpoint SOAP para cancelación (sin .wsdl)
-    url: https://demo-facturacion.finkok.com/servicios/soap/cancel
-  retentions:
-    # URL del endpoint SOAP para retenciones (sin .wsdl)
-    url: https://demo-facturacion.finkok.com/servicios/soap/retentions
 
 # Configuración del Emisor (valores por defecto para CFDI)
 facturacion:
@@ -51,14 +38,87 @@ facturacion:
     llave:
       path: classpath:certificados/CSD_Sucursal_1_IVD920810GU2_20230518_062554.key
       password: "12345678a"
----
 
+# Configuración de Finkok (PAC) - Demo por defecto
+finkok:
+  enabled: true
+  username: nm9282672@gmail.com
+  password: N1C0LASm_  # Esta contraseña se usa para encriptar la llave privada en DES3
+  stamp:
+    url: https://demo-facturacion.finkok.com/servicios/soap/stamp
+  cancel:
+    url: https://demo-facturacion.finkok.com/servicios/soap/cancel
+  retentions:
+    url: https://demo-facturacion.finkok.com/servicios/soap/retentions
+
+# ============================================================================
+# PERFIL: DESARROLLO (dev) - Configuración para desarrollo local
+# ============================================================================
+---
 spring:
   config:
     activate:
-      on-profile: oracle
+      on-profile: dev
+  # Base de datos Oracle para desarrollo
   datasource:
     url: jdbc:oracle:thin:@//localhost:1521/xepdb1
+    username: nick
+    password: N1C0LASm
+    driver-class-name: oracle.jdbc.OracleDriver
+    # Configuración del pool de conexiones (HikariCP)
+    hikari:
+      connection-timeout: 5000
+      maximum-pool-size: 5
+      minimum-idle: 0
+      validation-timeout: 3000
+      leak-detection-threshold: 60000
+      # No validar la conexión al inicio (permite que la app inicie aunque Oracle no esté disponible)
+      initialization-fail-timeout: -1
+      # Intentar conexión solo cuando se necesite, no al inicio
+      connection-test-query: SELECT 1 FROM DUAL
+  jpa:
+    properties:
+      hibernate.dialect: org.hibernate.dialect.OracleDialect
+      # Hacer JPA más tolerante cuando la BD no está disponible
+      hibernate.temp.use_jdbc_metadata_defaults: false
+    hibernate:
+      ddl-auto: none
+    # No inicializar JPA hasta que se necesite (permite iniciar sin BD)
+    open-in-view: false
+  show-sql: true
+
+# Servidor para desarrollo local
+server:
+  port: 8080
+  base-url: http://localhost:8080
+
+# URLs permitidas para CORS (desarrollo) - separadas por comas
+cors:
+  allowed-origins: http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174
+
+# Finkok en modo demo para desarrollo
+finkok:
+  enabled: true
+  username: nm9282672@gmail.com
+  password: N1C0LASm_
+  stamp:
+    url: https://demo-facturacion.finkok.com/servicios/soap/stamp
+  cancel:
+    url: https://demo-facturacion.finkok.com/servicios/soap/cancel
+  retentions:
+    url: https://demo-facturacion.finkok.com/servicios/soap/retentions
+
+# ============================================================================
+# PERFIL: PRODUCCIÓN (prod) - Configuración para producción
+# ============================================================================
+---
+spring:
+  config:
+    activate:
+      on-profile: prod
+  # Base de datos Oracle para producción
+  datasource:
+    url: jdbc:oracle:thin:@//174.136.25.157:1521/XE
     username: nick
     password: N1C0LASm
     driver-class-name: oracle.jdbc.OracleDriver
@@ -67,14 +127,42 @@ spring:
       hibernate.dialect: org.hibernate.dialect.OracleDialect
     hibernate:
       ddl-auto: none
-  show-sql: true
-  jackson:
-    serialization:
-      write-dates-as-timestamps: false
-    date-format: yyyy-MM-dd'T'HH:mm:ss.SSS
+  show-sql: false
 
+# Servidor para producción
+server:
+  port: 8080
+  base-url: http://174.136.25.157:8080
+
+# URLs permitidas para CORS (producción) - separadas por comas
+cors:
+  allowed-origins: http://174.136.25.157:5173,http://174.136.25.157:5174,http://localhost:5173,http://localhost:5174
+
+# Finkok en producción (puede usar demo o producción según necesidad)
+finkok:
+  enabled: true
+  username: nm9282672@gmail.com
+  password: N1C0LASm_
+  stamp:
+    url: https://demo-facturacion.finkok.com/servicios/soap/stamp
+  cancel:
+    url: https://demo-facturacion.finkok.com/servicios/soap/cancel
+  retentions:
+    url: https://demo-facturacion.finkok.com/servicios/soap/retentions
+
+# ============================================================================
+# PERFIL: ORACLE (oracle) - Configuración específica de Oracle DB
+# ============================================================================
 ---
+spring:
+  config:
+    activate:
+      on-profile: oracle
 
+# ============================================================================
+# PERFIL: MONGO (mongo) - Configuración específica de MongoDB (opcional)
+# ============================================================================
+---
 spring:
   config:
     activate:
@@ -82,19 +170,3 @@ spring:
   data:
     mongodb:
       uri: mongodb://localhost:27017/facturacion_mongo
-  jackson:
-    serialization:
-      write-dates-as-timestamps: false
-    date-format: yyyy-MM-dd'T'HH:mm:ss.SSS
-  mail:
-    host: smtp.gmail.com
-    port: 587
-    username: nm9282672@gmail.com
-    password: kaswbavrfmlqenec
-    properties:
-      mail:
-        smtp:
-          auth: true
-          starttls:
-            enable: true
-          from: nm9282672@gmail.com

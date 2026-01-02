@@ -30,7 +30,9 @@ public class SecurityConfig {
                 .requestMatchers("/api/**").permitAll()
                 .requestMatchers("/credit-notes/**").permitAll()
                 .requestMatchers("/actuator/**").permitAll()
-                .anyRequest().authenticated()
+                .requestMatchers("/").permitAll()
+                .requestMatchers("/facturacion-backend-0.0.1-SNAPSHOT/**").permitAll()
+                .anyRequest().permitAll()
             );
         
         return http.build();

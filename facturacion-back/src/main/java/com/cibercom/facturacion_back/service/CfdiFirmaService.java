@@ -1615,14 +1615,14 @@ public class CfdiFirmaService {
                     
                     // Buscar en múltiples ubicaciones con diferentes variantes
                     // CRÍTICO: Priorizar la carpeta base (donde está el XSLT principal) sobre otras ubicaciones
-                    // IMPORTANTE: Para retenciones, también buscar en carpeta RETEN y "Retenciones complementos"
+                    // IMPORTANTE: Para retenciones, también buscar en carpeta RETEN y "retenciones-complementos"
                     String[] searchPaths = {
                         // PRIMERO: Buscar en la carpeta base (donde está el XSLT principal)
                         baseFolder + "/complements/" + fileName,
                         baseFolder + "/" + cleanHref,
-                        // SEGUNDO: Para retenciones, buscar en carpeta "Retenciones complementos" (donde están los XSLT de complementos)
-                        "librerias/Retenciones complementos/" + fileName,
-                        "librerias/Retenciones complementos/" + cleanHref,
+                        // SEGUNDO: Para retenciones, buscar en carpeta "retenciones-complementos" (donde están los XSLT de complementos)
+                        "librerias/retenciones-complementos/" + fileName,
+                        "librerias/retenciones-complementos/" + cleanHref,
                         // TERCERO: Para retenciones, buscar en carpeta RETEN
                         "librerias/RETEN/" + fileName,
                         "librerias/RETEN/" + cleanHref,

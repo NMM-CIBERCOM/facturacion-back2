@@ -198,16 +198,8 @@ public class CorreoController {
             
             logger.info("Enviando correo con contenido: {}", contenidoCorreo);
             
-            // Obtener el PDF directamente y verificar que sea válido (validación básica)
-            byte[] pdfBytes = facturaService.obtenerPdfComoBytes(request.getUuidFactura());
-            if (pdfBytes == null || pdfBytes.length < 100) {
-                logger.error("PDF inválido o demasiado pequeño: {} bytes", pdfBytes != null ? pdfBytes.length : 0);
-                response.put("success", false);
-                response.put("message", "No se pudo generar el PDF para adjuntar al correo");
-                return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
-            }
-            
-            logger.info("PDF obtenido correctamente: {} bytes", pdfBytes.length);
+            // El PDF se genera dentro de enviarCorreoConPdfAdjunto usando el método correcto con logoConfig
+            // que incluye la detección de Carta Porte, Nómina, Retención, etc.
             correoService.enviarCorreoConPdfAdjunto(
                 request.getUuidFactura(),
                 request.getCorreoReceptor(),
@@ -285,13 +277,20 @@ public class CorreoController {
             // Preparar variables de plantilla si se proporcionan
             Map<String, String> templateVars = new java.util.HashMap<>();
             if (request.getTemplateVars() != null) {
+                logger.info("TemplateVars recibidos en controlador: {}", request.getTemplateVars());
                 templateVars.putAll(request.getTemplateVars());
+            } else {
+                logger.warn("TemplateVars es null en el request");
             }
             templateVars.putIfAbsent("serie", "");
             templateVars.putIfAbsent("folio", "");
             templateVars.putIfAbsent("uuid", "");
             templateVars.putIfAbsent("rfcEmisor", "");
             templateVars.putIfAbsent("rfcReceptor", "");
+            
+            logger.info("TemplateVars finales antes de enviar al servicio - serie: '{}', folio: '{}', uuid: '{}', rfcEmisor: '{}', rfcReceptor: '{}'", 
+                       templateVars.get("serie"), templateVars.get("folio"), templateVars.get("uuid"), 
+                       templateVars.get("rfcEmisor"), templateVars.get("rfcReceptor"));
 
             // Nuevo: XML opcional
             byte[] xmlBytes = null;
@@ -323,10 +322,17 @@ public class CorreoController {
             response.put("message", "Correo con PDF (y XML si aplica) enviado exitosamente");
             response.put("correoReceptor", request.getCorreoReceptor());
             return ResponseEntity.ok(response);
+        } catch (IllegalStateException e) {
+            logger.error("Error de configuración al enviar correo con PDF directo: {}", e.getMessage(), e);
+            response.put("success", false);
+            response.put("message", "Error de configuración: " + e.getMessage());
+            response.put("errorType", "CONFIGURATION_ERROR");
+            return ResponseEntity.status(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR).body(response);
         } catch (Exception e) {
             logger.error("Error al enviar correo con PDF directo: {}", e.getMessage(), e);
             response.put("success", false);
             response.put("message", "Error interno al enviar el correo: " + e.getMessage());
+            response.put("errorType", "INTERNAL_ERROR");
             return ResponseEntity.status(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR).body(response);
         }
     }

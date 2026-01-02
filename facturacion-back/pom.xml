@@ -10,7 +10,7 @@
         <artifactId>spring-boot-starter-parent</artifactId>
         <version>3.2.5</version> <relativePath/> </parent>
 
-    <groupId>com.cibercom</groupId> <artifactId>facturacion-backend</artifactId> <version>0.0.1-SNAPSHOT</version> <name>facturacion-backend</name> <description>Backend de Facturación para Cibercom con Spring Boot y Oracle</description> <packaging>jar</packaging> <properties>
+    <groupId>com.cibercom</groupId> <artifactId>facturacion-backend</artifactId> <version>0.0.1-SNAPSHOT</version> <name>facturacion-backend</name> <description>Backend de Facturación para Cibercom con Spring Boot y Oracle</description> <packaging>war</packaging> <properties>
         <java.version>17</java.version> <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <lombok.version>1.18.30</lombok.version>
     </properties>
@@ -20,6 +20,20 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
+            <!-- Excluir Tomcat embebido para desplegar en servidor Tomcat externo -->
+            <exclusions>
+                <exclusion>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-starter-tomcat</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- Tomcat proporcionado por el servidor (scope provided) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-tomcat</artifactId>
+            <scope>provided</scope>
         </dependency>
 
         <dependency>
@@ -153,6 +167,18 @@
             <artifactId>saaj-impl</artifactId>
             <version>3.0.2</version>
         </dependency>
+        
+        <!-- BouncyCastle para firma digital CFDI - Soporta PKCS#1, PKCS#8 y múltiples formatos -->
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcprov-jdk18on</artifactId>
+            <version>1.78.1</version>
+        </dependency>
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcpkix-jdk18on</artifactId>
+            <version>1.78.1</version>
+        </dependency>
     </dependencies>
 
     <build>
@@ -174,12 +200,28 @@
                     <skipTests>true</skipTests> </configuration>
             </plugin>
 
+            <!-- Plugin Maven WAR estándar para asegurar estructura correcta -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-war-plugin</artifactId>
+                <version>3.4.0</version>
+                <configuration>
+                    <failOnMissingWebXml>false</failOnMissingWebXml>
+                    <warSourceDirectory>src/main/webapp</warSourceDirectory>
+                </configuration>
+            </plugin>
+            
+            <!-- Spring Boot plugin: NO usar repackage para WAR estándar -->
+            <!-- El repackage crea estructura BOOT-INF que causa problemas con WarResourceSet -->
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
-                <configuration>
-                    <mainClass>com.cibercom.facturacion_back.FacturacionBackApplication</mainClass>
-                </configuration>
+                <executions>
+                    <execution>
+                        <id>repackage</id>
+                        <phase>none</phase>
+                    </execution>
+                </executions>
             </plugin>
 
         </plugins>

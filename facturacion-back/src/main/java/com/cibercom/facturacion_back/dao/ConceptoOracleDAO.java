@@ -1,5 +1,7 @@
 package com.cibercom.facturacion_back.dao;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -16,6 +18,7 @@ import java.util.Optional;
 @Profile("oracle")
 public class ConceptoOracleDAO {
 
+    private static final Logger logger = LoggerFactory.getLogger(ConceptoOracleDAO.class);
     private final JdbcTemplate jdbcTemplate;
     private volatile String lastInsertError;
 
@@ -239,6 +242,122 @@ public class ConceptoOracleDAO {
     }
 
     public String getLastInsertError() { return lastInsertError; }
+
+    /**
+     * Consulta conceptos desde la tabla CONCEPTOS (modo manual) por ID_FACTURA
+     * Hace JOIN con CATALOGOS_PRODUCTOS_SERVICIOS para obtener los campos del catálogo
+     */
+    public java.util.List<java.util.Map<String, Object>> buscarConceptosPorIdFactura(Long idFactura) {
+        try {
+            if (idFactura == null) {
+                return new java.util.ArrayList<>();
+            }
+            
+            // Verificar que exista la tabla CONCEPTOS
+            if (!hasColumn("CONCEPTOS", "ID_FACTURA")) {
+                logger.warn("Tabla CONCEPTOS no tiene columna ID_FACTURA, no se pueden consultar conceptos");
+                return new java.util.ArrayList<>();
+            }
+            
+            // Construir SELECT dinámicamente según las columnas disponibles
+            StringBuilder sql = new StringBuilder("SELECT ");
+            java.util.List<String> columnas = new java.util.ArrayList<>();
+            
+            // Columnas básicas de CONCEPTOS
+            if (hasColumn("CONCEPTOS", "ID_CONCEPTO")) columnas.add("c.ID_CONCEPTO");
+            if (hasColumn("CONCEPTOS", "ID_FACTURA")) columnas.add("c.ID_FACTURA");
+            if (hasColumn("CONCEPTOS", "SKU_CLAVE_SAT")) columnas.add("c.SKU_CLAVE_SAT");
+            if (hasColumn("CONCEPTOS", "DESCRIPCION")) columnas.add("c.DESCRIPCION");
+            if (hasColumn("CONCEPTOS", "CANTIDAD")) columnas.add("c.CANTIDAD");
+            if (hasColumn("CONCEPTOS", "UNIDAD_MEDIDA")) columnas.add("c.UNIDAD_MEDIDA");
+            if (hasColumn("CONCEPTOS", "VALOR_UNITARIO")) columnas.add("c.VALOR_UNITARIO");
+            if (hasColumn("CONCEPTOS", "IMPORTE")) columnas.add("c.IMPORTE");
+            if (hasColumn("CONCEPTOS", "TASA_IVA")) columnas.add("c.TASA_IVA");
+            if (hasColumn("CONCEPTOS", "IVA")) columnas.add("c.IVA");
+            
+            // Campos del catálogo CATALOGOS_PRODUCTOS_SERVICIOS
+            // Hacer JOIN con CATALOGOS_PRODUCTOS_SERVICIOS usando SKU_CLAVE_SAT = CLAVE_PROD_SERV
+            sql.append(String.join(", ", columnas));
+            sql.append(", cat.CLAVE_PROD_SERV, cat.OBJETO_IMPUESTO, cat.TASA_IVA AS TASA_IVA_CATALOGO, cat.UNIDAD AS UNIDAD_CATALOGO ");
+            sql.append("FROM CONCEPTOS c ");
+            sql.append("LEFT JOIN CATALOGOS_PRODUCTOS_SERVICIOS cat ON ");
+            sql.append("  cat.CLAVE_PROD_SERV = c.SKU_CLAVE_SAT ");
+            sql.append("  AND cat.ACTIVO = '1' ");
+            sql.append("WHERE c.ID_FACTURA = ? ");
+            sql.append("ORDER BY c.ID_CONCEPTO");
+            
+            logger.info("Consulta CONCEPTOS por ID_FACTURA SQL: {}", sql.toString());
+            
+            return jdbcTemplate.query(sql.toString(), new Object[]{idFactura}, (rs, rowNum) -> {
+                java.util.Map<String, Object> concepto = new java.util.HashMap<>();
+                
+                // Mapear columnas de CONCEPTOS
+                if (hasColumn("CONCEPTOS", "CANTIDAD")) {
+                    try { concepto.put("cantidad", rs.getBigDecimal("CANTIDAD")); } catch (Exception e) {}
+                }
+                if (hasColumn("CONCEPTOS", "DESCRIPCION")) {
+                    try { concepto.put("descripcion", rs.getString("DESCRIPCION")); } catch (Exception e) {}
+                }
+                if (hasColumn("CONCEPTOS", "UNIDAD_MEDIDA")) {
+                    try { concepto.put("unidad", rs.getString("UNIDAD_MEDIDA")); } catch (Exception e) {}
+                }
+                if (hasColumn("CONCEPTOS", "VALOR_UNITARIO")) {
+                    try { concepto.put("valorUnitario", rs.getBigDecimal("VALOR_UNITARIO")); } catch (Exception e) {}
+                }
+                if (hasColumn("CONCEPTOS", "IMPORTE")) {
+                    try { concepto.put("importe", rs.getBigDecimal("IMPORTE")); } catch (Exception e) {}
+                }
+                if (hasColumn("CONCEPTOS", "IVA")) {
+                    try { concepto.put("iva", rs.getBigDecimal("IVA")); } catch (Exception e) {}
+                }
+                if (hasColumn("CONCEPTOS", "TASA_IVA")) {
+                    try { concepto.put("tasaIva", rs.getBigDecimal("TASA_IVA")); } catch (Exception e) {}
+                }
+                
+                // Campos del catálogo (priorizar los del catálogo sobre los de CONCEPTOS)
+                try {
+                    String claveProdServ = rs.getString("CLAVE_PROD_SERV");
+                    if (claveProdServ != null && !claveProdServ.trim().isEmpty()) {
+                        concepto.put("claveProdServ", claveProdServ);
+                    } else {
+                        // Si no hay en catálogo, usar SKU_CLAVE_SAT de CONCEPTOS
+                        try {
+                            String skuClaveSat = rs.getString("SKU_CLAVE_SAT");
+                            if (skuClaveSat != null && !skuClaveSat.trim().isEmpty()) {
+                                concepto.put("claveProdServ", skuClaveSat);
+                            }
+                        } catch (Exception e) {}
+                    }
+                } catch (Exception e) {}
+                
+                try {
+                    String objetoImp = rs.getString("OBJETO_IMPUESTO");
+                    if (objetoImp != null && !objetoImp.trim().isEmpty()) {
+                        concepto.put("objetoImp", objetoImp);
+                    }
+                } catch (Exception e) {}
+                
+                try {
+                    java.math.BigDecimal tasaCatalogo = rs.getBigDecimal("TASA_IVA_CATALOGO");
+                    if (tasaCatalogo != null) {
+                        concepto.put("tasaIva", tasaCatalogo);
+                    }
+                } catch (Exception e) {}
+                
+                try {
+                    String unidadCatalogo = rs.getString("UNIDAD_CATALOGO");
+                    if (unidadCatalogo != null && !unidadCatalogo.trim().isEmpty()) {
+                        concepto.put("unidad", unidadCatalogo);
+                    }
+                } catch (Exception e) {}
+                
+                return concepto;
+            });
+        } catch (Exception e) {
+            logger.warn("Error al consultar conceptos desde CONCEPTOS para ID_FACTURA {}: {}", idFactura, e.getMessage());
+            return new java.util.ArrayList<>();
+        }
+    }
 
     private boolean hasColumn(String table, String col) {
         try {

@@ -19,6 +19,7 @@ import com.cibercom.facturacion_back.service.CfdiXmlParserService;
 import com.cibercom.facturacion_back.dao.UuidFacturaOracleDAO;
 import com.cibercom.facturacion_back.dao.ConceptoOracleDAO;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.env.Environment;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpHeaders;
@@ -70,6 +71,9 @@ public class FacturaController {
     @Autowired
     private Environment environment;
     
+    @Value("${server.base-url:http://localhost:8080}")
+    private String serverBaseUrl;
+    
     @Autowired
     private PacClient pacClient;
 
@@ -79,7 +83,7 @@ public class FacturaController {
     @Autowired
     private CfdiXmlParserService cfdiXmlParserService;
 
-    @Autowired
+    @Autowired(required = false)
     private UuidFacturaOracleDAO uuidFacturaOracleDAO;
 
     @Autowired(required = false)
@@ -122,6 +126,75 @@ public class FacturaController {
 
         } catch (Exception e) {
             logger.error("Error generando PDF con iText", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    @PostMapping("/preview-pdf")
+    public ResponseEntity<byte[]> previewPDF(
+            @Valid @RequestBody FacturaFrontendRequest request,
+            @RequestHeader(value = "X-Usuario", required = false, defaultValue = "0") String usuarioStr) {
+        logger.info("Recibida solicitud de vista previa PDF: {}", request);
+
+        try {
+            // Obtener logoConfig desde configuración de correo (igual que descargar-pdf)
+            // Obtener color primario desde Configuración de Mensajes (consistente con email)
+            String colorPrimario = null;
+            try {
+                ConfiguracionCorreoResponseDto configMensajes = correoService.obtenerConfiguracionMensajes();
+                if (configMensajes != null && configMensajes.getFormatoCorreo() != null &&
+                    configMensajes.getFormatoCorreo().getColorTexto() != null &&
+                    !configMensajes.getFormatoCorreo().getColorTexto().isBlank()) {
+                    colorPrimario = configMensajes.getFormatoCorreo().getColorTexto();
+                }
+            } catch (Exception e) {
+                logger.warn("No se pudo obtener Configuración de Mensajes: {}", e.getMessage());
+            }
+
+            // Fallback al formato activo si no hay color en Configuración de Mensajes
+            if (colorPrimario == null) {
+                try {
+                    FormatoCorreoDto formatoActivo = formatoCorreoService.obtenerConfiguracionActiva();
+                    if (formatoActivo != null && formatoActivo.getColorTexto() != null && !formatoActivo.getColorTexto().isBlank()) {
+                        colorPrimario = formatoActivo.getColorTexto();
+                    }
+                } catch (Exception e) {
+                    logger.warn("No se pudo obtener formato de correo activo: {}", e.getMessage());
+                }
+            }
+
+            Map<String, Object> logoConfig = new HashMap<>();
+            Map<String, Object> customColors = new HashMap<>();
+            if (colorPrimario != null) {
+                customColors.put("primary", colorPrimario.trim());
+            }
+            logoConfig.put("customColors", customColors);
+
+            // Intentar usar logoBase64 activo persistido
+            String logoBase64Activo = leerLogoBase64Activo();
+            if (logoBase64Activo != null && !logoBase64Activo.isBlank()) {
+                logoConfig.put("logoBase64", logoBase64Activo.trim());
+                logger.info("Usando logoBase64 activo para vista previa de PDF");
+            } else {
+                // Fallback: usar el mismo endpoint PNG que en el correo
+                String logoEndpoint = serverBaseUrl + "/api/logos/cibercom-png";
+                logoConfig.put("logoUrl", logoEndpoint);
+                logger.info("Logo para vista previa de PDF (fallback URL): {}", logoEndpoint);
+            }
+
+            byte[] pdfBytes = facturaService.generarPdfPreview(request, logoConfig);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_PDF);
+            headers.setContentDispositionFormData("inline", "preview-factura.pdf");
+
+            logger.info("PDF de vista previa generado exitosamente. Tamaño: {} bytes", pdfBytes.length);
+            return ResponseEntity.ok()
+                    .headers(headers)
+                    .body(pdfBytes);
+
+        } catch (Exception e) {
+            logger.error("Error generando PDF de vista previa", e);
             return ResponseEntity.internalServerError().build();
         }
     }
@@ -229,8 +302,7 @@ public class FacturaController {
                 logger.info("Usando logoBase64 activo para descarga de PDF");
             } else {
                 // Fallback: usar el mismo endpoint PNG que en el correo
-                String port = environment.getProperty("local.server.port", environment.getProperty("server.port", "8085"));
-                String logoEndpoint = "http://localhost:" + port + "/api/logos/cibercom-png";
+                String logoEndpoint = serverBaseUrl + "/api/logos/cibercom-png";
                 logoConfig.put("logoUrl", logoEndpoint);
                 logger.info("Logo para descarga de PDF (fallback URL): {}", logoEndpoint);
             }
@@ -258,11 +330,13 @@ public class FacturaController {
 
     @PostMapping("/generar/frontend")
     public ResponseEntity<Map<String, Object>> generarDesdeFrontend(
-            @Valid @RequestBody FacturaFrontendRequest request) {
-        logger.info("Recibida solicitud de generación desde frontend: {}", request);
+            @Valid @RequestBody FacturaFrontendRequest request,
+            @RequestHeader(value = "X-Usuario", required = false, defaultValue = "0") String usuarioStr) {
+        logger.info("Recibida solicitud de generación desde frontend: {}, usuario: {}", request, usuarioStr);
 
         try {
-            Map<String, Object> result = facturaService.procesarFormularioFrontend(request);
+            Long usuarioId = parseUsuario(usuarioStr);
+            Map<String, Object> result = facturaService.procesarFormularioFrontend(request, usuarioId);
             boolean exitoso = Boolean.TRUE.equals(result.get("exitoso"));
             if (exitoso) {
                 return ResponseEntity.ok(result);
@@ -323,27 +397,51 @@ public class FacturaController {
 
     private String leerLogoBase64Activo() {
         try {
-            java.nio.file.Path p = java.nio.file.Paths.get("config/logo-base64.txt");
+            // Usar la misma lógica que LogoController para encontrar el archivo
+            java.nio.file.Path p = getLogoBase64Path();
             if (java.nio.file.Files.exists(p)) {
                 String content = java.nio.file.Files.readString(p);
                 if (content != null && !content.trim().isEmpty()) {
+                    logger.info("Logo activo leído desde: {}", p.toAbsolutePath());
                     return content.trim();
                 }
+            } else {
+                logger.warn("Archivo de logo no encontrado en: {}", p.toAbsolutePath());
             }
         } catch (Exception e) {
             logger.warn("No se pudo leer logo activo para PDF: {}", e.getMessage());
         }
         return null;
     }
+    
+    private java.nio.file.Path getLogoBase64Path() {
+        // Intentar usar variable de entorno o propiedad del sistema
+        String tomcatBase = System.getProperty("catalina.base");
+        if (tomcatBase != null && !tomcatBase.isEmpty()) {
+            // Si estamos en Tomcat, guardar en conf/ dentro de Tomcat
+            return java.nio.file.Paths.get(tomcatBase, "conf", "logo-base64.txt");
+        }
+        
+        // Fallback: usar directorio de trabajo actual/config
+        String userDir = System.getProperty("user.dir");
+        if (userDir != null && !userDir.isEmpty()) {
+            return java.nio.file.Paths.get(userDir, "config", "logo-base64.txt");
+        }
+        
+        // Último fallback: ruta relativa
+        return java.nio.file.Paths.get("config", "logo-base64.txt");
+    }
 
     @PostMapping("/generar")
     public ResponseEntity<FacturaResponse> generarFactura(
-            @Valid @RequestBody FacturaRequest request) {
+            @Valid @RequestBody FacturaRequest request,
+            @RequestHeader(value = "X-Usuario", required = false, defaultValue = "0") String usuarioStr) {
 
-        logger.info("Recibida solicitud de generación de factura: {}", request);
+        logger.info("Recibida solicitud de generación de factura: {}, usuario: {}", request, usuarioStr);
 
         try {
-            FacturaResponse response = facturaTimbradoService.iniciarTimbrado(request);
+            Long usuarioId = parseUsuario(usuarioStr);
+            FacturaResponse response = facturaTimbradoService.iniciarTimbrado(request, usuarioId);
 
             logger.info("Respuesta del servicio: exitoso={}, mensaje={}", response.isExitoso(), response.getMensaje());
 
@@ -367,12 +465,13 @@ public class FacturaController {
 
     @PostMapping("/generar/xml")
     public ResponseEntity<FacturaResponse> generarXmlFactura(
-            @Valid @RequestBody FacturaRequest request) {
-
-        logger.info("Recibida solicitud de generación de XML: {}", request);
+            @Valid @RequestBody FacturaRequest request,
+            @RequestHeader(value = "X-Usuario", required = false, defaultValue = "0") String usuarioStr) {
+        logger.info("Recibida solicitud de generación de XML: {}, usuario: {}", request, usuarioStr);
 
         try {
-            FacturaResponse response = facturaService.procesarFactura(request);
+            Long usuarioId = parseUsuario(usuarioStr);
+            FacturaResponse response = facturaService.procesarFactura(request, usuarioId);
 
             logger.info("Respuesta del servicio XML: exitoso={}, mensaje={}", response.isExitoso(),
                     response.getMensaje());
@@ -397,13 +496,16 @@ public class FacturaController {
 
     @PostMapping(value = "/generar/xml-to-xml", consumes = { "application/xml", "text/xml", "text/xml;charset=UTF-8",
             "application/xml;charset=UTF-8" }, produces = "application/xml")
-    public ResponseEntity<String> generarXmlDesdeXml(@RequestBody String xmlRequest) {
+    public ResponseEntity<String> generarXmlDesdeXml(
+            @RequestBody String xmlRequest,
+            @RequestHeader(value = "X-Usuario", required = false, defaultValue = "0") String usuarioStr) {
 
-        logger.info("Recibida solicitud XML: {}", xmlRequest);
+        logger.info("Recibida solicitud XML: {}, usuario: {}", xmlRequest, usuarioStr);
 
         try {
+            Long usuarioId = parseUsuario(usuarioStr);
             FacturaRequest request = facturaService.convertirXmlAFacturaRequest(xmlRequest);
-            FacturaResponse response = facturaService.procesarFactura(request);
+            FacturaResponse response = facturaService.procesarFactura(request, usuarioId);
 
             if (response.isExitoso()) {
                 return ResponseEntity.ok()
@@ -872,7 +974,10 @@ public class FacturaController {
     }
 
     @PostMapping("/insertar-uuid")
-    public ResponseEntity<Map<String, Object>> insertarUuid(@RequestBody Map<String, Object> req) {
+    public ResponseEntity<Map<String, Object>> insertarUuid(
+            @RequestBody Map<String, Object> req,
+            @RequestHeader(value = "X-Usuario", required = false, defaultValue = "0") String usuarioStr) {
+        Long usuarioId = parseUsuario(usuarioStr);
         String uuid = req.get("uuid") != null ? String.valueOf(req.get("uuid")) : java.util.UUID.randomUUID().toString();
         String rfcReceptor = req.get("rfcReceptor") != null ? String.valueOf(req.get("rfcReceptor")) : "R";
         String rfcEmisor = req.get("rfcEmisor") != null ? String.valueOf(req.get("rfcEmisor")) : "R";
@@ -910,6 +1015,7 @@ public class FacturaController {
                     rfcReceptor,
                     rfcEmisor
             );
+            // El método insertarBasico llama internamente a insertarBasicoConIdReceptor con null para usuario
             oracleOk = ok;
         } catch (Exception e) {
             logger.warn("Fallo insertando en Oracle para UUID {}: {}", uuid, e.getMessage());
@@ -1229,6 +1335,22 @@ public ResponseEntity<CfdiConsultaResponse> consultarPorUuid(
             errorResp.setSuccess(false);
             errorResp.setMessage("Error al guardar factura global: " + e.getMessage());
             return ResponseEntity.internalServerError().body(errorResp);
+        }
+    }
+
+    /**
+     * Convierte el String del header X-Usuario a Long.
+     * Si el valor no es numérico o es null/vacío, retorna null.
+     */
+    private Long parseUsuario(String usuarioStr) {
+        if (usuarioStr == null || usuarioStr.trim().isEmpty() || "0".equals(usuarioStr.trim())) {
+            return null;
+        }
+        try {
+            return Long.parseLong(usuarioStr.trim());
+        } catch (NumberFormatException e) {
+            logger.warn("Valor de usuario no numérico recibido: '{}', se usará null", usuarioStr);
+            return null;
         }
     }
 }

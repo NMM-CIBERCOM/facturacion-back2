@@ -43,7 +43,7 @@ public class FacturaTimbradoService {
     @Autowired
     private Environment environment;
 
-    public FacturaResponse iniciarTimbrado(FacturaRequest request) {
+    public FacturaResponse iniciarTimbrado(FacturaRequest request, Long usuarioId) {
         try {
             SatValidationRequest emisorRequest = new SatValidationRequest();
             emisorRequest.setNombre(request.getNombreEmisor());
@@ -77,13 +77,21 @@ public class FacturaTimbradoService {
                         .build();
             }
 
-            // 3. Calcular totales
+            // 3. Calcular totales usando tasas de IVA de cada concepto
             BigDecimal subtotal = BigDecimal.ZERO;
+            BigDecimal iva = BigDecimal.ZERO;
             for (FacturaRequest.Concepto concepto : request.getConceptos()) {
                 subtotal = subtotal.add(concepto.getImporte());
+                // Calcular IVA por concepto usando su tasa específica
+                String objetoImp = (concepto.getObjetoImp() != null && !concepto.getObjetoImp().trim().isEmpty()) 
+                        ? concepto.getObjetoImp() : "02";
+                if ("02".equals(objetoImp)) {
+                    BigDecimal tasaIva = (concepto.getTasaIva() != null && concepto.getTasaIva().compareTo(BigDecimal.ZERO) > 0) 
+                            ? concepto.getTasaIva() : new BigDecimal("0.16");
+                    BigDecimal ivaConcepto = concepto.getImporte().multiply(tasaIva);
+                    iva = iva.add(ivaConcepto);
+                }
             }
-
-            BigDecimal iva = subtotal.multiply(new BigDecimal("0.16")); // 16% IVA
             BigDecimal total = subtotal.add(iva);
 
             // 4. Generar XML según lineamientos del SAT
@@ -112,14 +120,14 @@ public class FacturaTimbradoService {
                     uuidFinkok = normalizarUUIDConGuiones(uuidFinkok);
                     
                     // Guardar factura directamente con UUID de Finkok y estado EMITIDA
-                    guardarFacturaTimbrada(request, pacResponse, subtotal, iva, total, uuidFinkok);
+                    guardarFacturaTimbrada(request, pacResponse, usuarioId, subtotal, iva, total, uuidFinkok);
                     
                     return construirRespuestaExitosa(request, subtotal, iva, total, pacResponse, uuidFinkok);
                 } else if ("4".equals(status) || "EN_PROCESO_EMISION".equalsIgnoreCase(status)) {
                     // Timbrado en proceso (asíncrono) - EN_PROCESO_EMISION
                     // Para este caso, necesitamos un UUID temporal para seguimiento
                     String uuidTemporal = UUID.randomUUID().toString().replace("-", "").toUpperCase();
-                    guardarFacturaEnProceso(request, pacResponse.getXmlTimbrado() != null ? pacResponse.getXmlTimbrado() : xml, uuidTemporal, subtotal, iva, total);
+                    guardarFacturaEnProceso(request, pacResponse.getXmlTimbrado() != null ? pacResponse.getXmlTimbrado() : xml, uuidTemporal, usuarioId, subtotal, iva, total);
                     actualizarFacturaEnProcesoEmision(uuidTemporal);
                     return FacturaResponse.builder()
                             .exitoso(true)
@@ -218,9 +226,10 @@ public class FacturaTimbradoService {
             
             if (factura != null) {
                 logger.info("Factura encontrada en Oracle, actualizando a EMITIDA (0)");
-                logger.info("Estado anterior: {} - {}, EstatusFactura anterior: {}", 
-                        factura.getEstado(), factura.getEstadoDescripcion(), factura.getEstatusFactura());
+                logger.info("Estado anterior: {} - {}, EstatusFactura anterior: {}, Usuario: {}", 
+                        factura.getEstado(), factura.getEstadoDescripcion(), factura.getEstatusFactura(), factura.getUsuario());
                 // Actualizar el UUID con el oficial de Finkok
+                // NOTA: No sobrescribimos el usuario si ya existe - se preserva el usuario que creó la factura
                 factura.setUuid(uuidFinkok);
                 factura.setEstado(EstadoFactura.EMITIDA.getCodigo());
                 factura.setEstadoDescripcion(EstadoFactura.EMITIDA.getDescripcion());
@@ -233,6 +242,7 @@ public class FacturaTimbradoService {
                 factura.setCertificado(pacResponse.getCertificado());
                 factura.setSerie(pacResponse.getSerie());
                 factura.setFolio(pacResponse.getFolio());
+                // El usuario NO se sobrescribe aquí - se preserva el que se estableció al crear la factura
                 facturaRepository.save(factura);
                 
                 logger.info("✓✓✓ Factura actualizada en Oracle - UUID: {}, Estado: {}, EstatusFactura: {}, StatusSat: {}", 
@@ -270,6 +280,7 @@ public class FacturaTimbradoService {
                 }
                 if (facturaAlt != null) {
                     logger.info("Factura encontrada con UUID alternativo (case-insensitive), actualizando...");
+                    logger.info("Usuario anterior: {}", facturaAlt.getUsuario());
                     facturaAlt.setEstado(EstadoFactura.EMITIDA.getCodigo());
                     facturaAlt.setEstadoDescripcion(EstadoFactura.EMITIDA.getDescripcion());
                     facturaAlt.setEstatusFactura(Integer.valueOf(EstadoFactura.EMITIDA.getCodigo()));
@@ -282,7 +293,7 @@ public class FacturaTimbradoService {
                     facturaAlt.setSerie(pacResponse.getSerie());
                     facturaAlt.setFolio(pacResponse.getFolio());
                     facturaRepository.save(facturaAlt);
-                    logger.info("✓ Factura actualizada con UUID alternativo");
+                    logger.info("✓ Factura actualizada con UUID alternativo, usuario preservado: {}", facturaAlt.getUsuario());
                 } else {
                     logger.error("✗ No se encontró factura con UUID: {} (ni con variaciones)", uuid);
                 }
@@ -295,8 +306,11 @@ public class FacturaTimbradoService {
      * Construye la solicitud para el PAC
      */
     private PacTimbradoRequest construirPacTimbradoRequest(FacturaRequest request, String xml, BigDecimal total) {
+        // Validar y normalizar MetodoPago antes de enviar a Finkok
+        String metodoPagoValidado = validarYNormalizarMetodoPago(request.getMetodoPago());
+        
         return PacTimbradoRequest.builder()
-                .uuid(null) // No se envía UUID, Finkok lo genera al timbrar
+                .uuid(null) 
                 .xmlContent(xml)
                 .rfcEmisor(request.getRfcEmisor())
                 .rfcReceptor(request.getRfcReceptor())
@@ -306,10 +320,10 @@ public class FacturaTimbradoService {
                 .publicoGeneral(false)
                 .serie("A")
                 .folio("1")
-                .tienda("TIENDA-001") // Valor por defecto ya que no existe en FacturaRequest
+                .tienda("TIENDA-001") 
                 .terminal("TERMINAL-001")
                 .boleta("BOLETA-001")
-                .medioPago(request.getMetodoPago())
+                .medioPago(metodoPagoValidado)
                 .formaPago(request.getFormaPago())
                 .usoCFDI(request.getUsoCFDI())
                 .regimenFiscalEmisor(request.getRegimenFiscalEmisor())
@@ -317,11 +331,10 @@ public class FacturaTimbradoService {
                 .build();
     }
 
-    /**
-     * Guarda la factura directamente con UUID de Finkok y estado EMITIDA
-     */
+    
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
     private void guardarFacturaTimbrada(FacturaRequest request, PacTimbradoResponse pacResponse,
+            Long usuarioId,
             BigDecimal subtotal, BigDecimal iva, BigDecimal total, String uuidFinkok) {
         logger.info("=== GUARDANDO FACTURA TIMBRADA ===");
         logger.info("UUID de Finkok: {}", uuidFinkok);
@@ -378,6 +391,7 @@ public class FacturaTimbradoService {
                     .tienda("TIENDA-001") // Valor por defecto
                     .medioPago(request.getMetodoPago())
                     .formaPago(request.getFormaPago())
+                    .usuario(usuarioId)
                     .build();
             facturaRepository.save(factura);
             facturaRepository.flush();
@@ -390,6 +404,7 @@ public class FacturaTimbradoService {
      */
     @Transactional
     private void guardarFacturaEnProceso(FacturaRequest request, String xml, String uuid,
+            Long usuarioId,
             BigDecimal subtotal, BigDecimal iva, BigDecimal total) {
         String activeProfile = environment.getActiveProfiles().length > 0 ? environment.getActiveProfiles()[0]
                 : "oracle";
@@ -431,6 +446,7 @@ public class FacturaTimbradoService {
                     .tienda("TIENDA-001") // Valor por defecto
                     .medioPago(request.getMetodoPago())
                     .formaPago(request.getFormaPago())
+                    .usuario(usuarioId)
                     .build();
             facturaRepository.save(factura);
         }
@@ -579,7 +595,9 @@ public class FacturaTimbradoService {
         xml.append("Total=\"").append(total).append("\" ");
         xml.append("TipoDeComprobante=\"I\" ");
         xml.append("FormaPago=\"").append(request.getFormaPago()).append("\" ");
-        xml.append("MetodoPago=\"").append(request.getMetodoPago()).append("\" ");
+        // Validar y normalizar MetodoPago (debe ser PUE o PPD según catálogo c_MetodoPago)
+        String metodoPago = validarYNormalizarMetodoPago(request.getMetodoPago());
+        xml.append("MetodoPago=\"").append(metodoPago).append("\" ");
         xml.append("LugarExpedicion=\"").append(request.getCodigoPostalEmisor()).append("\" ");
         xml.append("xmlns:cfdi=\"http://www.sat.gob.mx/cfd/4\">\n");
 
@@ -607,49 +625,105 @@ public class FacturaTimbradoService {
 
         // Conceptos
         xml.append("  <cfdi:Conceptos>\n");
+        BigDecimal ivaTotalCalculado = BigDecimal.ZERO;
+        BigDecimal baseTotalCalculada = BigDecimal.ZERO;
+        
         for (FacturaRequest.Concepto concepto : request.getConceptos()) {
+            // Usar valores del catálogo si están disponibles, sino usar valores por defecto seguros
+            String claveProdServ = (concepto.getClaveProdServ() != null && !concepto.getClaveProdServ().trim().isEmpty()) 
+                    ? concepto.getClaveProdServ() : "01010101";
+            String claveUnidad = (concepto.getClaveUnidad() != null && !concepto.getClaveUnidad().trim().isEmpty()) 
+                    ? concepto.getClaveUnidad() : (concepto.getUnidad() != null && !concepto.getUnidad().trim().isEmpty() 
+                    ? concepto.getUnidad() : "E48");
+            String objetoImp = (concepto.getObjetoImp() != null && !concepto.getObjetoImp().trim().isEmpty()) 
+                    ? concepto.getObjetoImp() : "02";
+            BigDecimal tasaIva = (concepto.getTasaIva() != null && concepto.getTasaIva().compareTo(BigDecimal.ZERO) > 0) 
+                    ? concepto.getTasaIva() : new BigDecimal("0.16");
+            
             xml.append("    <cfdi:Concepto ");
-            xml.append("ClaveProdServ=\"01010101\" ");
-            xml.append("NoIdentificacion=\"\" ");
+            xml.append("ClaveProdServ=\"").append(claveProdServ).append("\" ");
+            // NO agregar NoIdentificacion="" vacío - Finkok lo rechaza (error 705)
             xml.append("Cantidad=\"").append(concepto.getCantidad()).append("\" ");
-            xml.append("ClaveUnidad=\"H87\" ");
+            xml.append("ClaveUnidad=\"").append(claveUnidad).append("\" ");
             xml.append("Unidad=\"").append(concepto.getUnidad()).append("\" ");
             xml.append("Descripcion=\"").append(concepto.getDescripcion()).append("\" ");
             xml.append("ValorUnitario=\"").append(concepto.getPrecioUnitario()).append("\" ");
             xml.append("Importe=\"").append(concepto.getImporte()).append("\" ");
-            xml.append("Descuento=\"0.00\">\n");
+            // NO agregar Descuento="0.00" - Si el descuento es cero, no debe incluirse el atributo
+            xml.append("ObjetoImp=\"").append(objetoImp).append("\">\n");
 
-            // Impuestos del concepto
-            BigDecimal ivaConcepto = concepto.getImporte().multiply(new BigDecimal("0.16"));
-            xml.append("      <cfdi:Impuestos>\n");
-            xml.append("        <cfdi:Traslados>\n");
-            xml.append("          <cfdi:Traslado ");
-            xml.append("Base=\"").append(concepto.getImporte()).append("\" ");
-            xml.append("Impuesto=\"002\" ");
-            xml.append("TipoFactor=\"Tasa\" ");
-            xml.append("TasaOCuota=\"0.160000\" ");
-            xml.append("Importe=\"").append(ivaConcepto).append("\"/>\n");
-            xml.append("        </cfdi:Traslados>\n");
-            xml.append("      </cfdi:Impuestos>\n");
+            // Impuestos del concepto - solo si ObjetoImp es "02" (Sí objeto de impuesto)
+            if ("02".equals(objetoImp)) {
+                BigDecimal ivaConcepto = concepto.getImporte().multiply(tasaIva);
+                ivaTotalCalculado = ivaTotalCalculado.add(ivaConcepto);
+                baseTotalCalculada = baseTotalCalculada.add(concepto.getImporte());
+                
+                xml.append("      <cfdi:Impuestos>\n");
+                xml.append("        <cfdi:Traslados>\n");
+                xml.append("          <cfdi:Traslado ");
+                xml.append("Base=\"").append(concepto.getImporte()).append("\" ");
+                xml.append("Impuesto=\"002\" ");
+                xml.append("TipoFactor=\"Tasa\" ");
+                xml.append("TasaOCuota=\"").append(String.format("%.6f", tasaIva)).append("\" ");
+                xml.append("Importe=\"").append(ivaConcepto.setScale(2, java.math.RoundingMode.HALF_UP)).append("\"/>\n");
+                xml.append("        </cfdi:Traslados>\n");
+                xml.append("      </cfdi:Impuestos>\n");
+            }
             xml.append("    </cfdi:Concepto>\n");
         }
         xml.append("  </cfdi:Conceptos>\n");
 
-        // Impuestos
-        xml.append("  <cfdi:Impuestos ");
-        xml.append("TotalImpuestosTrasladados=\"").append(iva).append("\">\n");
-        xml.append("    <cfdi:Traslados>\n");
-        xml.append("      <cfdi:Traslado ");
-        xml.append("Impuesto=\"002\" ");
-        xml.append("TipoFactor=\"Tasa\" ");
-        xml.append("TasaOCuota=\"0.160000\" ");
-        xml.append("Importe=\"").append(iva).append("\"/>\n");
-        xml.append("    </cfdi:Traslados>\n");
-        xml.append("  </cfdi:Impuestos>\n");
+        // Impuestos - usar el IVA calculado de los conceptos si está disponible
+        BigDecimal ivaFinal = ivaTotalCalculado.compareTo(BigDecimal.ZERO) > 0 ? ivaTotalCalculado : iva;
+        BigDecimal baseFinal = baseTotalCalculada.compareTo(BigDecimal.ZERO) > 0 ? baseTotalCalculada : subtotal;
+        
+        if (ivaFinal.compareTo(BigDecimal.ZERO) > 0) {
+            xml.append("  <cfdi:Impuestos ");
+            xml.append("TotalImpuestosTrasladados=\"").append(ivaFinal.setScale(2, java.math.RoundingMode.HALF_UP)).append("\">\n");
+            xml.append("    <cfdi:Traslados>\n");
+            xml.append("      <cfdi:Traslado ");
+            xml.append("Base=\"").append(baseFinal.setScale(2, java.math.RoundingMode.HALF_UP)).append("\" ");
+            xml.append("Impuesto=\"002\" ");
+            xml.append("TipoFactor=\"Tasa\" ");
+            BigDecimal tasaPromedio = baseFinal.compareTo(BigDecimal.ZERO) > 0 
+                    ? ivaFinal.divide(baseFinal, 6, java.math.RoundingMode.HALF_UP) 
+                    : new BigDecimal("0.16");
+            xml.append("TasaOCuota=\"").append(String.format("%.6f", tasaPromedio)).append("\" ");
+            xml.append("Importe=\"").append(ivaFinal.setScale(2, java.math.RoundingMode.HALF_UP)).append("\"/>\n");
+            xml.append("    </cfdi:Traslados>\n");
+            xml.append("  </cfdi:Impuestos>\n");
+        }
 
         xml.append("</cfdi:Comprobante>");
 
         return xml.toString();
+    }
+
+    /**
+     * Valida y normaliza el MetodoPago según el catálogo c_MetodoPago del SAT
+     * CRÍTICO: Los únicos valores válidos son "PUE" (Pago en una sola exhibición) y "PPD" (Pago en parcialidades o diferido)
+     * 
+     * @param metodoPago MetodoPago proporcionado
+     * @return MetodoPago válido ("PUE" o "PPD"), por defecto "PUE" si es inválido
+     */
+    private String validarYNormalizarMetodoPago(String metodoPago) {
+        if (metodoPago == null || metodoPago.trim().isEmpty()) {
+            logger.warn("⚠️ MetodoPago vacío, usando valor por defecto 'PUE'");
+            return "PUE";
+        }
+        
+        String metodoPagoUpper = metodoPago.trim().toUpperCase();
+        
+        // Valores válidos del catálogo c_MetodoPago
+        if ("PUE".equals(metodoPagoUpper)) {
+            return "PUE";
+        } else if ("PPD".equals(metodoPagoUpper)) {
+            return "PPD";
+        } else {
+            // Valor inválido - usar PUE por defecto
+            logger.warn("⚠️ MetodoPago '{}' no es válido. Los valores válidos del catálogo c_MetodoPago son: PUE, PPD. Corrigiendo a 'PUE'.", metodoPago);
+            return "PUE";
+        }
     }
 
     /**

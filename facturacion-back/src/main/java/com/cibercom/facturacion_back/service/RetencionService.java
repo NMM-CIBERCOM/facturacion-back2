@@ -69,6 +69,9 @@ public class RetencionService {
     // El complemento SectorFinanciero solo se usa cuando es true
     @Value("${facturacion.emisor.esFiduciaria:false}")
     private boolean esEmisorFiduciaria;
+    
+    @Value("${server.base-url:http://localhost:8080}")
+    private String serverBaseUrl;
 
     public RetencionService(ConceptoOracleDAO conceptoOracleDAO,
                            RetencionOracleDAO retencionOracleDAO,
@@ -94,7 +97,7 @@ public class RetencionService {
         this.cfdiFirmaService = cfdiFirmaServiceProvider.getIfAvailable();
     }
 
-    public RetencionResponse registrarRetencion(RetencionRequest request) {
+    public RetencionResponse registrarRetencion(RetencionRequest request, Long usuario) {
         RetencionResponse response = new RetencionResponse();
         List<String> errores = new ArrayList<>();
         response.setErrors(errores);
@@ -540,6 +543,9 @@ public class RetencionService {
         response.setRfcEmisor(rfcEmisor);
 
         // Insertar en FACTURAS (tipo_factura = 6 para retenciones)
+        // Estado EMITIDA = "0" cuando Finkok la devuelve timbrada
+        String estadoEmitida = com.cibercom.facturacion_back.model.EstadoFactura.EMITIDA.getCodigo(); // "0"
+        String estadoDescripcion = com.cibercom.facturacion_back.model.EstadoFactura.EMITIDA.getDescripcion(); // "EMITIDA"
         boolean insercionFactura = uuidFacturaOracleDAO.insertarBasicoConIdReceptor(
                 uuidRetencion,
                 xmlTimbrado,
@@ -551,14 +557,15 @@ public class RetencionService {
                 montoRetenido,
                 "99",
                 "G03",
-                "TIMBRADA",
-                "CFDI de Retenciones e Información de Pagos",
+                estadoEmitida, // "0" = EMITIDA
+                estadoDescripcion, // "EMITIDA"
                 "99",
                 rfcReceptor,
                 rfcEmisor,
                 correoReceptor,
                 idReceptor,
-                Integer.valueOf(6) // tipo_factura = 6 para retenciones
+                Integer.valueOf(6), // tipo_factura = 6 para retenciones
+                usuario // usuario que emitió la retención
         );
 
         if (!insercionFactura) {
@@ -1132,6 +1139,28 @@ public class RetencionService {
     private String formatMonto6Decimales(BigDecimal monto) {
         return monto != null ? monto.setScale(6, RoundingMode.HALF_UP).toPlainString() : "0.000000";
     }
+    
+    /**
+     * Obtiene el nombre del mes en español a partir del número de mes (01-12)
+     */
+    private String obtenerNombreMes(String mes) {
+        if (mes == null || mes.trim().isEmpty()) {
+            return mes;
+        }
+        try {
+            int mesInt = Integer.parseInt(mes.trim());
+            String[] meses = {
+                "", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+                "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+            };
+            if (mesInt >= 1 && mesInt <= 12) {
+                return meses[mesInt];
+            }
+        } catch (NumberFormatException e) {
+            // Si no es un número válido, devolver el valor original
+        }
+        return mes;
+    }
 
     public RetencionResponse enviarRetencionPorCorreo(com.cibercom.facturacion_back.dto.RetencionEnvioRequest request) {
         RetencionResponse response = new RetencionResponse();
@@ -1192,66 +1221,24 @@ public class RetencionService {
             
             String asunto = "CFDI de Retención de Pagos - " + uuidRetencion;
             
-            // Obtener descripción del tipo de retención
-            String tipoRetencionDesc = obtenerDescripcionTipoRetencion(request.getTipoRetencion());
+            // Mensaje principal simple, igual que los otros tipos de factura
+            String mensajePrincipal = "Se ha generado su comprobante fiscal digital de Retención de Pagos.";
             
-            // Construir mensaje descriptivo
-            StringBuilder mensajeBuilder = new StringBuilder();
-            mensajeBuilder.append("Estimado(a) ").append(defaultString(request.getNombreReceptor(), "Cliente")).append(",\n\n");
-            mensajeBuilder.append("Por este medio le hacemos llegar el CFDI de Retención de Pagos correspondiente.\n\n");
-            mensajeBuilder.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-            mensajeBuilder.append("INFORMACIÓN DEL COMPROBANTE\n");
-            mensajeBuilder.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n");
-            
-            if (request.getSerieRetencion() != null && !request.getSerieRetencion().isBlank() && 
-                request.getFolioRetencion() != null && !request.getFolioRetencion().isBlank()) {
-                mensajeBuilder.append("Serie y Folio: ").append(request.getSerieRetencion()).append("-").append(request.getFolioRetencion()).append("\n");
-            }
-            mensajeBuilder.append("UUID: ").append(uuidRetencion).append("\n");
-            
-            if (request.getFechaTimbrado() != null && !request.getFechaTimbrado().isBlank()) {
-                mensajeBuilder.append("Fecha de Timbrado: ").append(request.getFechaTimbrado()).append("\n");
-            }
-            
-            mensajeBuilder.append("\n");
-            mensajeBuilder.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-            mensajeBuilder.append("DATOS DE LA RETENCIÓN\n");
-            mensajeBuilder.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n");
-            
-            mensajeBuilder.append("Tipo de Retención: ").append(tipoRetencionDesc).append("\n");
-            mensajeBuilder.append("Monto Base: $").append(formatMonto(new BigDecimal(defaultString(request.getBaseRetencion(), "0.00")))).append("\n");
-            mensajeBuilder.append("Monto Total Retenido: $").append(formatMonto(new BigDecimal(defaultString(request.getMontoRetenido(), "0.00")))).append("\n");
-            
-            mensajeBuilder.append("\n");
-            mensajeBuilder.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-            mensajeBuilder.append("DATOS DEL EMISOR\n");
-            mensajeBuilder.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n");
-            mensajeBuilder.append("Razón Social: ").append(defaultString(request.getNombreEmisor(), "N/A")).append("\n");
-            mensajeBuilder.append("RFC: ").append(defaultString(request.getRfcEmisor(), "N/A")).append("\n");
-            
-            mensajeBuilder.append("\n");
-            mensajeBuilder.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-            mensajeBuilder.append("DATOS DEL RECEPTOR\n");
-            mensajeBuilder.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n");
-            mensajeBuilder.append("Razón Social: ").append(defaultString(request.getNombreReceptor(), "N/A")).append("\n");
-            mensajeBuilder.append("RFC: ").append(defaultString(request.getRfcReceptor(), "N/A")).append("\n");
-            
-            mensajeBuilder.append("\n");
-            mensajeBuilder.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n");
-            mensajeBuilder.append("Se adjuntan los archivos PDF y XML del comprobante fiscal digital.\n\n");
-            mensajeBuilder.append("Este es un correo generado automáticamente. Por favor, no responda a este mensaje.\n\n");
-            mensajeBuilder.append("Atentamente,\n");
-            mensajeBuilder.append(defaultString(request.getNombreEmisor(), "Sistema de Facturación"));
-            
-            String mensaje = mensajeBuilder.toString();
+            // Preparar templateVars con datos de la factura
+            Map<String, String> templateVars = new HashMap<>();
+            templateVars.put("serie", defaultString(request.getSerieRetencion(), ""));
+            templateVars.put("folio", defaultString(request.getFolioRetencion(), ""));
+            templateVars.put("uuid", uuidRetencion != null ? uuidRetencion : "");
+            templateVars.put("rfcEmisor", defaultString(request.getRfcEmisor(), ""));
+            templateVars.put("rfcReceptor", defaultString(request.getRfcReceptor(), ""));
             
             // Enviar correo con PDF y XML como adjuntos
             if (xmlBytes != null && xmlBytes.length > 0) {
                 correoService.enviarCorreoConAdjuntosDirecto(
                     correo,
                     asunto,
-                    mensaje,
-                    new HashMap<>(), // templateVars vacío
+                    mensajePrincipal,
+                    templateVars,
                     pdfBytes,
                     "Retencion-" + uuidRetencion + ".pdf",
                     xmlBytes,
@@ -1260,7 +1247,7 @@ public class RetencionService {
                 logger.info("Correo enviado con PDF y XML adjuntos");
             } else {
                 // Si no hay XML, enviar solo PDF
-                correoService.enviarCorreoConPdfDirecto(correo, asunto, mensaje, pdfBytes, "Retencion-" + uuidRetencion + ".pdf");
+                correoService.enviarCorreoConPdfDirecto(correo, asunto, mensajePrincipal, templateVars, pdfBytes, "Retencion-" + uuidRetencion + ".pdf");
                 logger.warn("Correo enviado solo con PDF (XML no disponible)");
             }
 
@@ -1310,11 +1297,55 @@ public class RetencionService {
             }
         }
 
-        String port = environment.getProperty("local.server.port", environment.getProperty("server.port", "8080"));
-        String logoEndpoint = "http://localhost:" + port + "/api/logos/cibercom-png";
-        logoConfig.put("logoUrl", logoEndpoint);
+        // Intentar usar logoBase64 activo persistido (igual que FacturaController)
+        String logoBase64Activo = leerLogoBase64Activo();
+        if (logoBase64Activo != null && !logoBase64Activo.isBlank()) {
+            logoConfig.put("logoBase64", logoBase64Activo.trim());
+            logger.info("Usando logoBase64 activo para PDF de retención");
+        } else {
+            // Fallback: usar el mismo endpoint PNG que en el correo
+            String logoEndpoint = serverBaseUrl + "/api/logos/cibercom-png";
+            logoConfig.put("logoUrl", logoEndpoint);
+            logger.info("Logo para PDF de retención (fallback URL): {}", logoEndpoint);
+        }
 
         return logoConfig;
+    }
+    
+    private String leerLogoBase64Activo() {
+        try {
+            java.nio.file.Path p = getLogoBase64Path();
+            if (java.nio.file.Files.exists(p)) {
+                String content = java.nio.file.Files.readString(p);
+                if (content != null && !content.trim().isEmpty()) {
+                    logger.info("Logo activo leído desde: {}", p.toAbsolutePath());
+                    return content.trim();
+                }
+            } else {
+                logger.warn("Archivo de logo no encontrado en: {}", p.toAbsolutePath());
+            }
+        } catch (Exception e) {
+            logger.warn("No se pudo leer logo activo para PDF: {}", e.getMessage());
+        }
+        return null;
+    }
+    
+    private java.nio.file.Path getLogoBase64Path() {
+        // Intentar usar variable de entorno o propiedad del sistema
+        String tomcatBase = System.getProperty("catalina.base");
+        if (tomcatBase != null && !tomcatBase.isEmpty()) {
+            // Si estamos en Tomcat, guardar en conf/ dentro de Tomcat
+            return java.nio.file.Paths.get(tomcatBase, "conf", "logo-base64.txt");
+        }
+        
+        // Fallback: usar directorio de trabajo actual/config
+        String userDir = System.getProperty("user.dir");
+        if (userDir != null && !userDir.isEmpty()) {
+            return java.nio.file.Paths.get(userDir, "config", "logo-base64.txt");
+        }
+        
+        // Último fallback: directorio temporal
+        return java.nio.file.Paths.get(System.getProperty("java.io.tmpdir"), "logo-base64.txt");
     }
 
     private String obtenerDescripcionTipoRetencion(String tipoRetencion) {
@@ -1921,5 +1952,221 @@ public class RetencionService {
         
         return null;
     }
+
+    /**
+     * Genera un PDF de vista previa sin timbrar a partir de RetencionRequest
+     */
+    public byte[] generarPdfPreview(RetencionRequest request, Map<String, Object> logoConfig) {
+        try {
+            logger.info("Generando PDF de vista previa para retención, RFC receptor: {}", request.getRfcReceptor());
+
+            // Obtener logoConfig si no se proporcionó
+            Map<String, Object> logoConfigFinal = logoConfig;
+            if (logoConfigFinal == null) {
+                logoConfigFinal = obtenerLogoConfig();
+            }
+
+            // Construir datos de la retención para el PDF
+            Map<String, Object> datosFactura = new HashMap<>();
+            datosFactura.put("uuid", "PREVIEW-" + UUID.randomUUID().toString());
+            datosFactura.put("serie", "RET");
+            datosFactura.put("folio", "PREVIEW");
+            datosFactura.put("fechaTimbrado", LocalDateTime.now());
+            datosFactura.put("rfcEmisor", request.getRfcEmisor() != null ? request.getRfcEmisor() : rfcEmisorDefault);
+            datosFactura.put("nombreEmisor", request.getNombreEmisor() != null ? request.getNombreEmisor() : nombreEmisorDefault);
+            datosFactura.put("rfcReceptor", request.getRfcReceptor() != null ? request.getRfcReceptor() : "XAXX010101000");
+            
+            // Determinar nombre del receptor
+            String nombreReceptor = "";
+            if (request.getTipoPersona() != null && "moral".equals(request.getTipoPersona())) {
+                nombreReceptor = request.getRazonSocial() != null ? request.getRazonSocial() : "";
+            } else {
+                StringBuilder nombreBuilder = new StringBuilder();
+                if (request.getNombre() != null) nombreBuilder.append(request.getNombre());
+                if (request.getPaterno() != null) nombreBuilder.append(" ").append(request.getPaterno());
+                if (request.getMaterno() != null) nombreBuilder.append(" ").append(request.getMaterno());
+                nombreReceptor = nombreBuilder.toString().trim();
+            }
+            datosFactura.put("nombreReceptor", nombreReceptor.isEmpty() ? datosFactura.get("rfcReceptor") : nombreReceptor);
+            datosFactura.put("tipoComprobante", "R"); // R para Retención
+            datosFactura.put("moneda", "MXN");
+            
+            // Construir conceptos con información detallada de la retención
+            List<Map<String, Object>> conceptos = new ArrayList<>();
+            Map<String, Object> concepto = new HashMap<>();
+            BigDecimal montoBase = request.getMontoBase() != null ? request.getMontoBase() : BigDecimal.ZERO;
+            BigDecimal montoTotGravado = request.getMontoTotGravado() != null ? request.getMontoTotGravado() : BigDecimal.ZERO;
+            BigDecimal montoTotExento = request.getMontoTotExento() != null ? request.getMontoTotExento() : BigDecimal.ZERO;
+            
+            // Construir descripción detallada del concepto con toda la información de la retención
+            StringBuilder descripcionBuilder = new StringBuilder();
+            
+            // Título principal: Tipo de retención
+            String tipoRetencion = request.getTipoRetencion() != null && !request.getTipoRetencion().trim().isEmpty()
+                ? request.getTipoRetencion().trim()
+                : null;
+            String cveRetenc = request.getCveRetenc() != null && !request.getCveRetenc().trim().isEmpty()
+                ? request.getCveRetenc().trim()
+                : null;
+            
+            if (tipoRetencion != null) {
+                String descripcionTipo = obtenerDescripcionTipoRetencion(tipoRetencion);
+                descripcionBuilder.append(descripcionTipo);
+                if (cveRetenc != null) {
+                    descripcionBuilder.append(" (Clave: ").append(cveRetenc).append(")");
+                }
+            } else if (cveRetenc != null) {
+                descripcionBuilder.append("Retención - Clave: ").append(cveRetenc);
+            } else {
+                descripcionBuilder.append("Retención de Pagos");
+            }
+            
+            // Concepto del usuario (si está disponible)
+            String conceptoUsuario = request.getConcepto() != null && !request.getConcepto().trim().isEmpty() 
+                ? request.getConcepto().trim() 
+                : null;
+            if (conceptoUsuario != null) {
+                descripcionBuilder.append("\nConcepto: ").append(conceptoUsuario);
+            }
+            
+            // Montos: Base, Gravado, Exento
+            descripcionBuilder.append("\nMonto Base: $").append(formatMonto(montoBase));
+            if (montoTotGravado.compareTo(BigDecimal.ZERO) > 0) {
+                descripcionBuilder.append(" | Gravado: $").append(formatMonto(montoTotGravado));
+            }
+            if (montoTotExento.compareTo(BigDecimal.ZERO) > 0) {
+                descripcionBuilder.append(" | Exento: $").append(formatMonto(montoTotExento));
+            }
+            
+            // Período (si está disponible)
+            String periodoMes = request.getPeriodoMes() != null ? request.getPeriodoMes().trim() : null;
+            String periodoAnio = request.getPeriodoAnio() != null ? request.getPeriodoAnio().trim() : null;
+            if (periodoMes != null && periodoAnio != null) {
+                descripcionBuilder.append("\nPeríodo: ").append(obtenerNombreMes(periodoMes)).append(" ").append(periodoAnio);
+            }
+            
+            // Fecha de pago
+            String fechaPago = request.getFechaPago() != null ? request.getFechaPago().trim() : null;
+            if (fechaPago != null && !fechaPago.isEmpty()) {
+                try {
+                    LocalDate fecha = LocalDate.parse(fechaPago);
+                    descripcionBuilder.append(" | Fecha de Pago: ").append(fecha.format(DateTimeFormatter.ofPattern("dd/MM/yyyy")));
+                } catch (Exception e) {
+                    descripcionBuilder.append(" | Fecha de Pago: ").append(fechaPago);
+                }
+            }
+            
+            // Impuestos retenidos con detalles
+            BigDecimal isrRetenido = request.getIsrRetenido() != null ? request.getIsrRetenido() : BigDecimal.ZERO;
+            BigDecimal ivaRetenido = request.getIvaRetenido() != null ? request.getIvaRetenido() : BigDecimal.ZERO;
+            BigDecimal montoRetenidoTotal = request.getMontoRetenido() != null ? request.getMontoRetenido() : BigDecimal.ZERO;
+            
+            if (montoRetenidoTotal.compareTo(BigDecimal.ZERO) > 0) {
+                descripcionBuilder.append("\nImpuestos Retenidos:");
+                if (isrRetenido.compareTo(BigDecimal.ZERO) > 0) {
+                    descripcionBuilder.append(" ISR: $").append(formatMonto(isrRetenido));
+                }
+                if (ivaRetenido.compareTo(BigDecimal.ZERO) > 0) {
+                    descripcionBuilder.append(" IVA: $").append(formatMonto(ivaRetenido));
+                }
+                descripcionBuilder.append(" | Total Retenido: $").append(formatMonto(montoRetenidoTotal));
+            }
+            
+            // Detalles de impuestos retenidos si están disponibles
+            if (request.getImpRetenidos() != null && !request.getImpRetenidos().isEmpty()) {
+                descripcionBuilder.append("\nDetalle de Retenciones:");
+                for (RetencionRequest.ImpRetenidoInfo imp : request.getImpRetenidos()) {
+                    String impuestoNombre = "";
+                    if ("001".equals(imp.getImpuestoRet())) {
+                        impuestoNombre = "ISR";
+                    } else if ("002".equals(imp.getImpuestoRet())) {
+                        impuestoNombre = "IVA";
+                    } else if ("003".equals(imp.getImpuestoRet())) {
+                        impuestoNombre = "IEPS";
+                    } else {
+                        impuestoNombre = "Impuesto " + imp.getImpuestoRet();
+                    }
+                    
+                    String tipoPago = "";
+                    if ("01".equals(imp.getTipoPagoRet())) {
+                        tipoPago = "Definitivo";
+                    } else if ("02".equals(imp.getTipoPagoRet())) {
+                        tipoPago = "Provisional";
+                    } else if ("03".equals(imp.getTipoPagoRet())) {
+                        tipoPago = "A cuenta de definitivo";
+                    } else if ("04".equals(imp.getTipoPagoRet())) {
+                        tipoPago = "A cuenta de provisional";
+                    }
+                    
+                    descripcionBuilder.append("\n  - ").append(impuestoNombre);
+                    if (imp.getBaseRet() != null && !imp.getBaseRet().trim().isEmpty()) {
+                        try {
+                            BigDecimal base = new BigDecimal(imp.getBaseRet());
+                            descripcionBuilder.append(" (Base: $").append(formatMonto(base)).append(")");
+                        } catch (Exception e) {
+                            descripcionBuilder.append(" (Base: ").append(imp.getBaseRet()).append(")");
+                        }
+                    }
+                    if (imp.getMontoRet() != null && !imp.getMontoRet().trim().isEmpty()) {
+                        try {
+                            BigDecimal monto = new BigDecimal(imp.getMontoRet());
+                            descripcionBuilder.append(" Monto: $").append(formatMonto(monto));
+                        } catch (Exception e) {
+                            descripcionBuilder.append(" Monto: ").append(imp.getMontoRet());
+                        }
+                    }
+                    if (!tipoPago.isEmpty()) {
+                        descripcionBuilder.append(" [").append(tipoPago).append("]");
+                    }
+                }
+            }
+            
+            String descripcionConcepto = descripcionBuilder.toString();
+            
+            // Guardar información estructurada de la retención para el diseño específico
+            Map<String, Object> datosRetencion = new HashMap<>();
+            datosRetencion.put("tipoRetencion", tipoRetencion);
+            datosRetencion.put("cveRetenc", cveRetenc);
+            datosRetencion.put("descripcionTipo", tipoRetencion != null ? obtenerDescripcionTipoRetencion(tipoRetencion) : "");
+            datosRetencion.put("concepto", conceptoUsuario);
+            datosRetencion.put("montoBase", montoBase);
+            datosRetencion.put("montoTotGravado", montoTotGravado);
+            datosRetencion.put("montoTotExento", montoTotExento);
+            datosRetencion.put("periodoMes", periodoMes);
+            datosRetencion.put("periodoAnio", periodoAnio);
+            datosRetencion.put("fechaPago", fechaPago);
+            datosRetencion.put("isrRetenido", isrRetenido);
+            datosRetencion.put("ivaRetenido", ivaRetenido);
+            datosRetencion.put("montoRetenido", montoRetenidoTotal);
+            datosRetencion.put("impRetenidos", request.getImpRetenidos());
+            datosFactura.put("datosRetencion", datosRetencion);
+            
+            // También mantener conceptos para compatibilidad
+            concepto.put("cantidad", BigDecimal.ONE);
+            concepto.put("descripcion", conceptoUsuario != null && !conceptoUsuario.isEmpty() ? conceptoUsuario : "Retención de Pagos");
+            concepto.put("valorUnitario", montoBase);
+            concepto.put("importe", montoBase);
+            concepto.put("iva", BigDecimal.ZERO);
+            conceptos.add(concepto);
+            datosFactura.put("conceptos", conceptos);
+            
+            // Para retenciones: Subtotal = monto base, Total = monto retenido
+            BigDecimal subtotal = montoBase;
+            BigDecimal montoRetenido = request.getMontoRetenido() != null ? request.getMontoRetenido() : BigDecimal.ZERO;
+            
+            datosFactura.put("subtotal", subtotal);
+            datosFactura.put("iva", BigDecimal.ZERO);
+            datosFactura.put("total", montoRetenido);
+            
+            // Generar PDF usando ITextPdfService
+            byte[] pdfBytes = iTextPdfService.generarPdfConLogo(datosFactura, logoConfigFinal != null ? logoConfigFinal : new HashMap<>());
+            logger.info("PDF de vista previa de retención generado exitosamente: {} bytes", pdfBytes != null ? pdfBytes.length : 0);
+            return pdfBytes;
+        } catch (Exception e) {
+            logger.error("Error al generar PDF de vista previa de retención: {}", e.getMessage(), e);
+            throw new RuntimeException("Error al generar PDF de vista previa de retención: " + e.getMessage(), e);
+        }
+    }
+
 }
 

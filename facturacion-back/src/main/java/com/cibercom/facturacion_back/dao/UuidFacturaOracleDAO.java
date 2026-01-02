@@ -129,7 +129,7 @@ public class UuidFacturaOracleDAO {
         String ieps3Expr = avail.contains("IEPS_3") ? "IEPS_3" : "NULL AS IEPS_3";
         String ieps43Expr = avail.contains("IEPS_43") ? "IEPS_43" : "NULL AS IEPS_43";
 
-        String sql = "SELECT " + xmlExpr + ", " + serieExpr + ", " + folioExpr + ", " + subtotalExpr + ", " + descuentoExpr + ", " +
+        String sql = "SELECT " + uuidCol + " AS UUID, " + xmlExpr + ", " + serieExpr + ", " + folioExpr + ", " + subtotalExpr + ", " + descuentoExpr + ", " +
                 ivaExpr + ", " + iepsExpr + ", " + totalExpr + ", " +
                 metodoPagoExpr + ", " + formaPagoExpr + ", " + usoCfdiExpr + ", " + estadoExpr + ", " + estadoDescExpr + ", " +
                 rfcEmisorExpr + ", " + rfcReceptorExpr + ", " + fechaExpr + ", " +
@@ -328,7 +328,7 @@ public class UuidFacturaOracleDAO {
                                   String rfcReceptor,
                                   String rfcEmisor) {
         return insertarBasicoConIdReceptor(uuid, xmlContent, serie, folio, subtotal, iva, ieps, total,
-                formaPago, usoCfdi, estado, estadoDescripcion, medioPago, rfcReceptor, rfcEmisor, null, null, null);
+                formaPago, usoCfdi, estado, estadoDescripcion, medioPago, rfcReceptor, rfcEmisor, null, null, null, null);
     }
 
     /** Variante que permite especificar ID_RECEPTOR explícitamente si el esquema lo requiere como NOT NULL. */
@@ -349,7 +349,7 @@ public class UuidFacturaOracleDAO {
                                                String rfcEmisor,
                                                Long idReceptor) {
         return insertarBasicoConIdReceptor(uuid, xmlContent, serie, folio, subtotal, iva, ieps, total,
-                formaPago, usoCfdi, estado, estadoDescripcion, medioPago, rfcReceptor, rfcEmisor, null, idReceptor, null);
+                formaPago, usoCfdi, estado, estadoDescripcion, medioPago, rfcReceptor, rfcEmisor, null, idReceptor, null, null);
     }
 
     /** Variante extendida que permite indicar explícitamente el TIPO_FACTURA (ej. 2 = egreso). */
@@ -370,7 +370,8 @@ public class UuidFacturaOracleDAO {
                                               String rfcEmisor,
                                               String correoReceptor,
                                               Long idReceptor,
-                                              Integer tipoFactura) {
+                                              Integer tipoFactura,
+                                              Long usuario) {
         lastInsertError = null;
         try {
             String tableName = detectFacturaTableName();
@@ -452,6 +453,15 @@ public class UuidFacturaOracleDAO {
             addIfPresentWithFallback(meta, avail, cols, vals, "CORREO_ELECTRONICO", correoReceptor, correoReceptorFallback);
             addIfPresentWithFallback(meta, avail, cols, vals, "CORREO", correoReceptor, correoReceptorFallback);
             addIfPresentWithFallback(meta, avail, cols, vals, "EMAIL", correoReceptor, correoReceptorFallback);
+            // USUARIO - campo para guardar el ID del usuario que emitió la factura (NUMBER)
+            if (usuario != null && avail.contains("USUARIO")) {
+                cols.add("USUARIO");
+                vals.add(usuario);
+            }
+            if (usuario != null && avail.contains("USUARIO_CREACION")) {
+                cols.add("USUARIO_CREACION");
+                vals.add(usuario);
+            }
             // ID_RECEPTOR si el esquema lo tiene y lo exige como NOT NULL
             if (avail.contains("ID_RECEPTOR")) {
                 ColumnMeta cm = meta.get("ID_RECEPTOR");
@@ -557,6 +567,126 @@ public class UuidFacturaOracleDAO {
             return false;
         }
     }
+    
+    /**
+     * Actualiza el XML timbrado, serie y folio en FACTURAS después del timbrado exitoso
+     */
+    public boolean actualizarFacturaTimbrada(String uuid, String xmlTimbrado, String serie, String folio) {
+        if (uuid == null || uuid.trim().isEmpty()) {
+            logger.warn("No se puede actualizar factura timbrada: UUID vacío");
+            return false;
+        }
+        
+        try {
+            String tableName = detectFacturaTableName();
+            java.util.Map<String, ColumnMeta> meta = fetchColumnsMeta(tableName);
+            java.util.Set<String> avail = availableNames(meta);
+            
+            java.util.List<String> updates = new java.util.ArrayList<>();
+            java.util.List<Object> params = new java.util.ArrayList<>();
+            
+            // Actualizar XML_CONTENT si está disponible
+            if (xmlTimbrado != null && !xmlTimbrado.isBlank()) {
+                if (avail.contains("XML_CONTENT")) {
+                    updates.add("XML_CONTENT = ?");
+                    params.add(xmlTimbrado);
+                } else if (avail.contains("XML")) {
+                    updates.add("XML = ?");
+                    params.add(xmlTimbrado);
+                } else if (avail.contains("XML_CFDI")) {
+                    updates.add("XML_CFDI = ?");
+                    params.add(xmlTimbrado);
+                }
+            }
+            
+            // Actualizar SERIE si está disponible
+            if (serie != null && !serie.isBlank() && avail.contains("SERIE")) {
+                updates.add("SERIE = ?");
+                params.add(serie);
+            }
+            
+            // Actualizar FOLIO si está disponible
+            if (folio != null && !folio.isBlank() && avail.contains("FOLIO")) {
+                updates.add("FOLIO = ?");
+                params.add(folio);
+            }
+            
+            if (updates.isEmpty()) {
+                logger.warn("No hay columnas disponibles para actualizar en {}", tableName);
+                return false;
+            }
+            
+            // Obtener columna UUID
+            String uuidCol = pickFirst(avail, "UUID", "FOLIO_FISCAL", "FOLIO_FISCAL_SAT", "UUID_CFDI", "FOLIO_FISCAL_UUID");
+            if (uuidCol == null) {
+                logger.error("No se encontró columna UUID compatible en {}", tableName);
+                return false;
+            }
+            
+            params.add(uuid.trim().toUpperCase());
+            String sql = "UPDATE " + tableName + " SET " + String.join(", ", updates) + " WHERE " + uuidCol + " = ?";
+            int updated = jdbcTemplate.update(sql, params.toArray());
+            
+            if (updated > 0) {
+                logger.info("Factura timbrada actualizada exitosamente: UUID={}, XML={}, serie={}, folio={}", 
+                           uuid, xmlTimbrado != null && !xmlTimbrado.isBlank(), serie, folio);
+                return true;
+            } else {
+                logger.warn("No se encontró registro con UUID: {}", uuid);
+                return false;
+            }
+        } catch (Exception e) {
+            logger.error("Error al actualizar factura timbrada en FACTURAS: {}", e.getMessage(), e);
+            return false;
+        }
+    }
+
+    /**
+     * Busca una factura por serie y folio que esté timbrada (tiene UUID)
+     * @param serie Serie de la factura
+     * @param folio Folio de la factura
+     * @return Result con UUID y XML si existe, Optional.empty() si no existe
+     */
+    public java.util.Optional<Result> obtenerBasicosPorSerieFolio(String serie, String folio) {
+        if (serie == null || serie.trim().isEmpty() || folio == null || folio.trim().isEmpty()) {
+            return java.util.Optional.empty();
+        }
+        
+        try {
+            String tableName = detectFacturaTableName();
+            java.util.Map<String, ColumnMeta> meta = fetchColumnsMeta(tableName);
+            java.util.Set<String> avail = availableNames(meta);
+            
+            String xmlExpr = avail.contains("XML_CONTENT") ? "XML_CONTENT" :
+                    (avail.contains("XML") ? "XML AS XML_CONTENT" :
+                            (avail.contains("XML_CFDI") ? "XML_CFDI AS XML_CONTENT" : "NULL AS XML_CONTENT"));
+            String uuidExpr = pickFirst(avail, "UUID", "FOLIO_FISCAL", "FOLIO_FISCAL_SAT", "UUID_CFDI", "FOLIO_FISCAL_UUID");
+            if (uuidExpr == null) {
+                logger.warn("No se encontró columna UUID compatible en {}", tableName);
+                return java.util.Optional.empty();
+            }
+            
+            String sql = "SELECT " + uuidExpr + " AS UUID, " + xmlExpr + " FROM " + tableName + 
+                        " WHERE SERIE = ? AND FOLIO = ? AND " + uuidExpr + " IS NOT NULL AND " + uuidExpr + " != ''";
+            
+            java.util.List<Result> resultados = jdbcTemplate.query(sql, 
+                (rs, rowNum) -> {
+                    Result r = new Result();
+                    r.uuid = rs.getString("UUID");
+                    r.xmlContent = rs.getString("XML_CONTENT");
+                    return r;
+                },
+                serie.trim(), folio.trim());
+            
+            if (resultados != null && !resultados.isEmpty()) {
+                return java.util.Optional.of(resultados.get(0));
+            }
+            return java.util.Optional.empty();
+        } catch (Exception e) {
+            logger.warn("Error al buscar factura por serie={}, folio={}: {}", serie, folio, e.getMessage());
+            return java.util.Optional.empty();
+        }
+    }
 
     private String rootCauseMessage(Throwable t) {
         Throwable c = t;
@@ -570,6 +700,7 @@ public class UuidFacturaOracleDAO {
 
     private Result map(ResultSet rs) throws SQLException {
         Result r = new Result();
+        try { r.uuid = rs.getString("UUID"); } catch (SQLException ignored) { r.uuid = null; }
         r.xmlContent = rs.getString("XML_CONTENT");
         r.serie = rs.getString("SERIE");
         r.folio = rs.getString("FOLIO");
@@ -624,6 +755,7 @@ public class UuidFacturaOracleDAO {
 
     /** Resultado compacto para la consulta por UUID */
     public static class Result {
+        public String uuid;
         public String xmlContent;
         public String serie;
         public String folio;

@@ -15,6 +15,7 @@ import com.cibercom.facturacion_back.dto.ConfiguracionCorreoResponseDto;
 import com.cibercom.facturacion_back.model.FacturaMongo;
 import com.cibercom.facturacion_back.repository.FacturaMongoRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.env.Environment;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpHeaders;
@@ -46,6 +47,10 @@ public class ConsultaFacturaController {
     private FacturaService facturaService;
     @Autowired
     private Environment environment;
+    
+    @Value("${server.base-url:http://localhost:8080}")
+    private String serverBaseUrl;
+    
     @Autowired(required = false)
     private UuidFacturaOracleDAO uuidFacturaOracleDAO;
     @Autowired(required = false)
@@ -167,8 +172,7 @@ public class ConsultaFacturaController {
                 logger.info("Usando logoBase64 activo para descarga de PDF");
             } else {
                 // Fallback: usar el mismo endpoint PNG que en el correo
-                String port = environment.getProperty("local.server.port", environment.getProperty("server.port", "8080"));
-                String logoEndpoint = "http://localhost:" + port + "/api/logos/cibercom-png";
+                String logoEndpoint = serverBaseUrl + "/api/logos/cibercom-png";
                 logoConfig.put("logoUrl", logoEndpoint);
                 logger.info("Logo para descarga de PDF (fallback URL): {}", logoEndpoint);
             }
@@ -307,17 +311,39 @@ public class ConsultaFacturaController {
 
     private String leerLogoBase64Activo() {
         try {
-            java.nio.file.Path p = java.nio.file.Paths.get("config/logo-base64.txt");
+            // Usar la misma lógica que LogoController para encontrar el archivo
+            java.nio.file.Path p = getLogoBase64Path();
             if (java.nio.file.Files.exists(p)) {
                 String content = java.nio.file.Files.readString(p);
                 if (content != null && !content.trim().isEmpty()) {
+                    logger.info("Logo activo leído desde: {}", p.toAbsolutePath());
                     return content.trim();
                 }
+            } else {
+                logger.warn("Archivo de logo no encontrado en: {}", p.toAbsolutePath());
             }
         } catch (Exception e) {
             logger.warn("No se pudo leer logo activo para PDF: {}", e.getMessage());
         }
         return null;
+    }
+    
+    private java.nio.file.Path getLogoBase64Path() {
+        // Intentar usar variable de entorno o propiedad del sistema
+        String tomcatBase = System.getProperty("catalina.base");
+        if (tomcatBase != null && !tomcatBase.isEmpty()) {
+            // Si estamos en Tomcat, guardar en conf/ dentro de Tomcat
+            return java.nio.file.Paths.get(tomcatBase, "conf", "logo-base64.txt");
+        }
+        
+        // Fallback: usar directorio de trabajo actual/config
+        String userDir = System.getProperty("user.dir");
+        if (userDir != null && !userDir.isEmpty()) {
+            return java.nio.file.Paths.get(userDir, "config", "logo-base64.txt");
+        }
+        
+        // Último fallback: ruta relativa
+        return java.nio.file.Paths.get("config", "logo-base64.txt");
     }
 
     private String construirXmlMinimo(String uuid, UuidFacturaOracleDAO.Result r) {

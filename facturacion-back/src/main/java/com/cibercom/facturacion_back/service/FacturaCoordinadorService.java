@@ -7,9 +7,11 @@ package com.cibercom.facturacion_back.service;
 import com.cibercom.facturacion_back.dao.FacturaDAO;
 import com.cibercom.facturacion_back.dto.FacturaFrontendRequest;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 
 @Service
+@Profile("oracle")
 public class FacturaCoordinadorService {
 
     private final FacturaDAO facturaDAO;

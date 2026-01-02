@@ -3,6 +3,7 @@ package com.cibercom.facturacion_back.dto;
 import lombok.Data;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 @Data
 public class RetencionRequest {
@@ -22,6 +23,8 @@ public class RetencionRequest {
     private String tipoRetencion; // ISR_SERVICIOS, ISR_ARRENDAMIENTO, IVA, etc.
     private String cveRetenc; // Clave de retención directamente del formulario (01-28)
     private BigDecimal montoBase;
+    private BigDecimal montoTotGravado; // Monto total gravado
+    private BigDecimal montoTotExento; // Monto total exento
     private BigDecimal isrRetenido;
     private BigDecimal ivaRetenido;
     private BigDecimal montoRetenido; // Total retenido (ISR + IVA)
@@ -45,5 +48,16 @@ public class RetencionRequest {
     // CRÍTICO: Código postal del receptor (DomicilioFiscalR) - requerido según XSD
     // Debe ser un código postal válido del catálogo c_CodigoPostal del SAT (5 dígitos)
     private String codigoPostalReceptor;
+    
+    // Impuestos retenidos (para información detallada en el PDF)
+    private List<ImpRetenidoInfo> impRetenidos;
+    
+    @Data
+    public static class ImpRetenidoInfo {
+        private String baseRet;
+        private String impuestoRet; // 001=ISR, 002=IVA, 003=IEPS
+        private String montoRet;
+        private String tipoPagoRet; // 01-04
+    }
 }
 

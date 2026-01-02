@@ -68,6 +68,9 @@ public class PagoService {
     
     @Value("${facturacion.emisor.cp:58000}")
     private String codigoPostalEmisorDefault;
+    
+    @Value("${server.base-url:http://localhost:8080}")
+    private String serverBaseUrl;
 
     public PagoService(ConceptoOracleDAO conceptoOracleDAO,
                        PagoOracleDAO pagoOracleDAO,
@@ -101,7 +104,7 @@ public class PagoService {
         return conceptoOracleDAO.obtenerIdFacturaPorUuid(uuid.trim());
     }
 
-    public PagoComplementoResponse registrarComplemento(PagoComplementoRequest request) {
+    public PagoComplementoResponse registrarComplemento(PagoComplementoRequest request, Long usuario) {
         PagoComplementoResponse response = new PagoComplementoResponse();
         List<String> errores = new ArrayList<>();
         response.setErrors(errores);
@@ -348,6 +351,9 @@ public class PagoService {
 
         Long idReceptor = resolverIdReceptorPorRfc(facturaOriginal.rfcReceptor, correoReceptor);
 
+        // Estado EMITIDA = "0" cuando Finkok la devuelve timbrada
+        String estadoEmitida = com.cibercom.facturacion_back.model.EstadoFactura.EMITIDA.getCodigo(); // "0"
+        String estadoDescripcion = com.cibercom.facturacion_back.model.EstadoFactura.EMITIDA.getDescripcion(); // "EMITIDA"
         boolean insercionFactura = uuidFacturaOracleDAO.insertarBasicoConIdReceptor(
                 uuidComplemento,
                 xmlTimbrado,
@@ -359,14 +365,15 @@ public class PagoService {
                 BigDecimal.ZERO,
                 formaCfdi,
                 usoCfdi,
-                "TIMBRADA",
-                "Complemento de pago timbrado",
+                estadoEmitida, // "0" = EMITIDA
+                estadoDescripcion, // "EMITIDA"
                 metodoCfdi,
                 defaultString(facturaOriginal.rfcReceptor, "XAXX010101000"),
                 defaultString(facturaOriginal.rfcEmisor, "AAA010101AAA"),
                 correoReceptor,
                 idReceptor,
-                Integer.valueOf(5)
+                Integer.valueOf(5), // tipo_factura = 5 para pagos
+                usuario // usuario que emitió el complemento de pago
         );
 
         if (!insercionFactura) {
@@ -547,7 +554,16 @@ public class PagoService {
             }
             
             String asunto = "Complemento de Pago " + uuidComplemento;
-            String mensaje = "Se adjunta el complemento de pago relacionado con el UUID " + defaultString(request.getFacturaUuid(), "") + ".";
+            // Mensaje principal simple, igual que los otros tipos de factura
+            String mensaje = "Se ha generado su comprobante fiscal digital de Complemento de Pago.";
+            
+            // Preparar templateVars con datos de la factura
+            Map<String, String> templateVars = new HashMap<>();
+            templateVars.put("serie", defaultString(request.getSerieComplemento(), ""));
+            templateVars.put("folio", defaultString(request.getFolioComplemento(), ""));
+            templateVars.put("uuid", uuidComplemento != null ? uuidComplemento : "");
+            templateVars.put("rfcEmisor", defaultString(request.getRfcEmisor(), ""));
+            templateVars.put("rfcReceptor", defaultString(request.getRfcReceptor(), ""));
             
             // Enviar correo con PDF y XML como adjuntos
             if (xmlBytes != null && xmlBytes.length > 0) {
@@ -555,7 +571,7 @@ public class PagoService {
                     correo,
                     asunto,
                     mensaje,
-                    new HashMap<>(), // templateVars vacío
+                    templateVars,
                     pdfBytes,
                     "ComplementoPago-" + uuidComplemento + ".pdf",
                     xmlBytes,
@@ -564,7 +580,7 @@ public class PagoService {
                 logger.info("Correo enviado con PDF y XML adjuntos");
             } else {
                 // Si no hay XML, enviar solo PDF (comportamiento anterior)
-                correoService.enviarCorreoConPdfDirecto(correo, asunto, mensaje, pdfBytes, "ComplementoPago-" + uuidComplemento + ".pdf");
+                correoService.enviarCorreoConPdfDirecto(correo, asunto, mensaje, templateVars, pdfBytes, "ComplementoPago-" + uuidComplemento + ".pdf");
                 logger.warn("Correo enviado solo con PDF (XML no disponible)");
             }
 
@@ -932,20 +948,170 @@ public class PagoService {
         customColors.put("primary", colorPrimario);
         logoConfig.put("customColors", customColors);
         
-        // Obtener logo (intentar desde endpoint del backend)
-        try {
-            String port = (environment != null) 
-                ? environment.getProperty("local.server.port", environment.getProperty("server.port", "8080")) 
-                : "8080";
-            String logoEndpoint = "http://localhost:" + port + "/api/logos/cibercom-png";
+        // Intentar usar logoBase64 activo persistido (igual que FacturaController)
+        String logoBase64Activo = leerLogoBase64Activo();
+        if (logoBase64Activo != null && !logoBase64Activo.isBlank()) {
+            logoConfig.put("logoBase64", logoBase64Activo.trim());
+            logger.info("Usando logoBase64 activo para PDF de complemento de pago");
+        } else {
+            // Fallback: usar el mismo endpoint PNG que en el correo
+            String logoEndpoint = serverBaseUrl + "/api/logos/cibercom-png";
             logoConfig.put("logoUrl", logoEndpoint);
-            logger.info("Incluyendo logoUrl en configuración de PDF: {}", logoEndpoint);
-        } catch (Exception e) {
-            logger.warn("No se pudo configurar logoUrl: {}", e.getMessage());
+            logger.info("Logo para PDF de complemento (fallback URL): {}", logoEndpoint);
         }
         
         logger.info("Color primario seleccionado para PDF de complemento: {}", colorPrimario);
         return logoConfig;
+    }
+    
+    private String leerLogoBase64Activo() {
+        try {
+            java.nio.file.Path p = getLogoBase64Path();
+            if (java.nio.file.Files.exists(p)) {
+                String content = java.nio.file.Files.readString(p);
+                if (content != null && !content.trim().isEmpty()) {
+                    logger.info("Logo activo leído desde: {}", p.toAbsolutePath());
+                    return content.trim();
+                }
+            } else {
+                logger.warn("Archivo de logo no encontrado en: {}", p.toAbsolutePath());
+            }
+        } catch (Exception e) {
+            logger.warn("No se pudo leer logo activo para PDF: {}", e.getMessage());
+        }
+        return null;
+    }
+    
+    private java.nio.file.Path getLogoBase64Path() {
+        // Intentar usar variable de entorno o propiedad del sistema
+        String tomcatBase = System.getProperty("catalina.base");
+        if (tomcatBase != null && !tomcatBase.isEmpty()) {
+            // Si estamos en Tomcat, guardar en conf/ dentro de Tomcat
+            return java.nio.file.Paths.get(tomcatBase, "conf", "logo-base64.txt");
+        }
+        
+        // Fallback: usar directorio de trabajo actual/config
+        String userDir = System.getProperty("user.dir");
+        if (userDir != null && !userDir.isEmpty()) {
+            return java.nio.file.Paths.get(userDir, "config", "logo-base64.txt");
+        }
+        
+        // Último fallback: directorio temporal
+        return java.nio.file.Paths.get(System.getProperty("java.io.tmpdir"), "logo-base64.txt");
+    }
+
+    /**
+     * Genera un PDF de vista previa sin timbrar a partir de PagoComplementoRequest
+     */
+    public byte[] generarPdfPreviewComplemento(PagoComplementoRequest request, Map<String, Object> logoConfig) {
+        try {
+            logger.info("Generando PDF de vista previa para complemento de pago, factura UUID: {}", request.getFacturaUuid());
+
+            // Construir datos del complemento para preview
+            ITextPdfService.ComplementoPagoPdfData data = new ITextPdfService.ComplementoPagoPdfData();
+            data.uuidComplemento = "PREVIEW-" + UUID.randomUUID().toString();
+            data.serieComplemento = "REP";
+            data.folioComplemento = "PREVIEW";
+            data.fechaTimbrado = FECHA_HORA.format(LocalDateTime.now());
+            data.rfcEmisor = rfcEmisorDefault;
+            data.nombreEmisor = nombreEmisorDefault;
+            
+            // Obtener datos de la factura original si está disponible
+            String facturaUuid = safeTrim(request.getFacturaUuid());
+            if (facturaUuid != null) {
+                try {
+                    Optional<UuidFacturaOracleDAO.Result> facturaOpt = uuidFacturaOracleDAO.obtenerBasicosPorUuid(facturaUuid);
+                    if (facturaOpt.isPresent()) {
+                        UuidFacturaOracleDAO.Result factura = facturaOpt.get();
+                        data.rfcReceptor = defaultString(factura.rfcReceptor, "XAXX010101000");
+                        // UuidFacturaOracleDAO.Result no tiene nombreReceptor, usar RFC como fallback
+                        data.nombreReceptor = data.rfcReceptor;
+                        data.facturaUuid = facturaUuid;
+                    } else {
+                        data.rfcReceptor = "XAXX010101000";
+                        data.nombreReceptor = "RECEPTOR DE PRUEBA";
+                        data.facturaUuid = facturaUuid;
+                    }
+                } catch (Exception e) {
+                    logger.warn("Error al obtener datos de factura para preview: {}", e.getMessage());
+                    data.rfcReceptor = "XAXX010101000";
+                    data.nombreReceptor = "RECEPTOR DE PRUEBA";
+                    data.facturaUuid = facturaUuid;
+                }
+            } else {
+                data.rfcReceptor = "XAXX010101000";
+                data.nombreReceptor = "RECEPTOR DE PRUEBA";
+                data.facturaUuid = "";
+            }
+            
+            data.correoReceptor = safeTrim(request.getCorreoReceptor());
+            data.metodoCfdi = "PPD";
+            data.formaCfdi = "99";
+            data.moneda = "MXN";
+            data.cadenaOriginal = "";
+            data.selloDigital = "";
+            data.selloSat = "";
+            
+            // Construir detalles de pagos desde el request
+            List<ITextPdfService.ComplementoPagoPdfData.PagoDetalle> detalles = new ArrayList<>();
+            BigDecimal totalPagado = BigDecimal.ZERO;
+            int parcialidad = 1;
+            
+            if (request.getPagos() != null && !request.getPagos().isEmpty()) {
+                for (PagoDetalleRequest pagoReq : request.getPagos()) {
+                    LocalDate fechaPago = parseFecha(pagoReq.getFechaPago()).orElse(LocalDate.now());
+                    BigDecimal monto = pagoReq.getMonto() != null ? pagoReq.getMonto() : BigDecimal.ZERO;
+                    totalPagado = totalPagado.add(monto);
+                    
+                    ITextPdfService.ComplementoPagoPdfData.PagoDetalle detalle = 
+                        new ITextPdfService.ComplementoPagoPdfData.PagoDetalle();
+                    detalle.fechaPago = formatFecha(fechaPago);
+                    detalle.formaPago = describirFormaPago(pagoReq.getFormaPago());
+                    detalle.moneda = defaultString(pagoReq.getMoneda(), "MXN");
+                    detalle.monto = formatMonto(monto);
+                    detalle.parcialidad = parcialidad;
+                    detalle.saldoAnterior = formatMonto(monto);
+                    detalle.importePagado = formatMonto(monto);
+                    detalle.saldoInsoluto = formatMonto(BigDecimal.ZERO);
+                    detalle.uuidRelacionado = facturaUuid != null ? facturaUuid : "";
+                    detalles.add(detalle);
+                    parcialidad++;
+                }
+                data.moneda = detalles.get(0).moneda;
+            } else {
+                // Si no hay pagos, crear uno de ejemplo
+                ITextPdfService.ComplementoPagoPdfData.PagoDetalle detalleEjemplo = 
+                    new ITextPdfService.ComplementoPagoPdfData.PagoDetalle();
+                detalleEjemplo.fechaPago = formatFecha(LocalDate.now());
+                detalleEjemplo.formaPago = "Efectivo";
+                detalleEjemplo.moneda = "MXN";
+                detalleEjemplo.monto = "1000.00";
+                detalleEjemplo.parcialidad = 1;
+                detalleEjemplo.saldoAnterior = "1000.00";
+                detalleEjemplo.importePagado = "1000.00";
+                detalleEjemplo.saldoInsoluto = "0.00";
+                detalleEjemplo.uuidRelacionado = facturaUuid != null ? facturaUuid : "";
+                detalles.add(detalleEjemplo);
+                totalPagado = new BigDecimal("1000.00");
+            }
+            
+            data.pagos = detalles;
+            data.totalPagado = formatMonto(totalPagado);
+            
+            // Obtener logoConfig si no se proporcionó
+            Map<String, Object> logoConfigFinal = logoConfig;
+            if (logoConfigFinal == null) {
+                logoConfigFinal = obtenerLogoConfig();
+            }
+            
+            // Generar PDF
+            byte[] pdfBytes = iTextPdfService.generarPdfComplementoPago(data, logoConfigFinal != null ? logoConfigFinal : new HashMap<>());
+            logger.info("PDF de vista previa de complemento generado exitosamente: {} bytes", pdfBytes != null ? pdfBytes.length : 0);
+            return pdfBytes;
+        } catch (Exception e) {
+            logger.error("Error al generar PDF de vista previa de complemento: {}", e.getMessage(), e);
+            throw new RuntimeException("Error al generar PDF de vista previa de complemento: " + e.getMessage(), e);
+        }
     }
 
     private CfdiDatosBasicos extraerDatosBasicosDesdeXml(String xmlContent) {

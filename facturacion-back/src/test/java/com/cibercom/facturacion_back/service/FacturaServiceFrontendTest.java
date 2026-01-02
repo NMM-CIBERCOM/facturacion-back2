@@ -58,7 +58,7 @@ public class FacturaServiceFrontendTest {
         set(req, "guardarEnMongo", Boolean.TRUE);
 
         // Act
-        Map<String, Object> result = facturaService.procesarFormularioFrontend(req);
+        Map<String, Object> result = facturaService.procesarFormularioFrontend(req, 1L); // usuarioId de prueba
 
         // Assert
         assertThat(result).isNotNull();

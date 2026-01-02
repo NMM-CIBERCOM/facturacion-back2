@@ -66,6 +66,12 @@ public class FacturaRequest {
         @NotNull(message = "El importe es obligatorio")
         @DecimalMin(value = "0.01", message = "El importe debe ser mayor a 0")
         private BigDecimal importe;
+        
+        // Campos del catálogo de productos/servicios
+        private String claveProdServ;  // Clave del catálogo c_ClaveProdServ
+        private String claveUnidad;    // Clave del catálogo c_ClaveUnidad (generalmente igual a unidad)
+        private String objetoImp;      // Objeto de impuesto del catálogo c_ObjetoImp (01, 02, 03)
+        private BigDecimal tasaIva;    // Tasa de IVA (ej: 0.16 para 16%)
 
         // Getters y setters explícitos para asegurar disponibilidad en compilación
         public String getDescripcion() { return descripcion; }
@@ -78,6 +84,14 @@ public class FacturaRequest {
         public void setPrecioUnitario(BigDecimal precioUnitario) { this.precioUnitario = precioUnitario; }
         public BigDecimal getImporte() { return importe; }
         public void setImporte(BigDecimal importe) { this.importe = importe; }
+        public String getClaveProdServ() { return claveProdServ; }
+        public void setClaveProdServ(String claveProdServ) { this.claveProdServ = claveProdServ; }
+        public String getClaveUnidad() { return claveUnidad; }
+        public void setClaveUnidad(String claveUnidad) { this.claveUnidad = claveUnidad; }
+        public String getObjetoImp() { return objetoImp; }
+        public void setObjetoImp(String objetoImp) { this.objetoImp = objetoImp; }
+        public BigDecimal getTasaIva() { return tasaIva; }
+        public void setTasaIva(BigDecimal tasaIva) { this.tasaIva = tasaIva; }
     }
     
     // Getters explícitos para asegurar disponibilidad si Lombok falla

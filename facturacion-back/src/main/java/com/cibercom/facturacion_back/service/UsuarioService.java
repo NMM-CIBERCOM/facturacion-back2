@@ -275,6 +275,8 @@ public class UsuarioService {
             logger.info("Intentando autenticar usuario: {}", username);
             
             // Consultar usuario por nombre de usuario y contraseña
+            // IMPORTANTE: ID_DFI es el identificador numérico del usuario en la tabla DFI/empleados
+            // ID_PERFIL es el identificador del perfil asignado al usuario
             String sql = "SELECT u.NO_USUARIO, u.NOMBRE_EMPLEADO, u.ESTATUS_USUARIO, u.ID_DFI, " +
                         "u.ID_ESTACIONAMIENTO, u.MODIFICA_UBICACION, u.ID_PERFIL, p.NOMBRE_PERFIL " +
                         "FROM USUARIOS u " +
@@ -285,7 +287,24 @@ public class UsuarioService {
             
             if (!usuarios.isEmpty()) {
                 UsuarioLoginDto usuario = usuarios.get(0);
-                logger.info("Usuario autenticado exitosamente: {}", username);
+                logger.info("✅ Usuario autenticado exitosamente: {}", username);
+                logger.info("   - NO_USUARIO: {}", usuario.getNoUsuario());
+                logger.info("   - ID_DFI: {}", usuario.getIdDfi());
+                logger.info("   - ID_PERFIL: {}", usuario.getIdPerfil());
+                
+                // Determinar el ID que se usará para guardar en FACTURAS
+                // IMPORTANTE: ID_PERFIL es NOT NULL en la tabla USUARIOS, siempre existe
+                // ID_DFI puede ser NULL, por lo que usamos ID_PERFIL como fallback
+                Integer idParaFacturas = null;
+                if (usuario.getIdDfi() != null) {
+                    idParaFacturas = usuario.getIdDfi();
+                    logger.info("   → ID para FACTURAS: ID_DFI = {}", idParaFacturas);
+                } else if (usuario.getIdPerfil() != null) {
+                    idParaFacturas = usuario.getIdPerfil();
+                    logger.info("   → ID para FACTURAS: ID_PERFIL = {} (ID_DFI es NULL)", idParaFacturas);
+                } else {
+                    logger.error("   ❌ ERROR CRÍTICO: Usuario {} no tiene ID_DFI ni ID_PERFIL - esto no debería pasar (ID_PERFIL es NOT NULL)", username);
+                }
                 
                 response.put("success", true);
                 response.put("message", "Autenticación exitosa");
@@ -353,6 +372,8 @@ public class UsuarioService {
             usuario.setNombrePerfil(rs.getString("NOMBRE_PERFIL"));
             usuario.setIdPerfil(rs.getObject("ID_PERFIL", Integer.class));
             usuario.setEstatusUsuario(rs.getString("ESTATUS_USUARIO"));
+            // ID_DFI es el identificador numérico del usuario en la tabla DFI/empleados
+            // Este es el ID que debe usarse para guardar en el campo USUARIO de FACTURAS
             usuario.setIdDfi(rs.getObject("ID_DFI", Integer.class));
             usuario.setIdEstacionamiento(rs.getObject("ID_ESTACIONAMIENTO", Integer.class));
             usuario.setModificaUbicacion(rs.getString("MODIFICA_UBICACION"));

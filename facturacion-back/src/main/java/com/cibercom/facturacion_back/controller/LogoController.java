@@ -30,8 +30,23 @@ public class LogoController {
     private CorreoService correoService;
 
     // Ruta del archivo donde persistimos el logo activo (data URI)
+    // CRÍTICO: Usar ruta absoluta dentro del directorio de Tomcat para persistencia
     private Path getLogoBase64Path() {
-        return Paths.get("config/logo-base64.txt");
+        // Intentar usar variable de entorno o propiedad del sistema
+        String tomcatBase = System.getProperty("catalina.base");
+        if (tomcatBase != null && !tomcatBase.isEmpty()) {
+            // Si estamos en Tomcat, guardar en conf/ dentro de Tomcat
+            return Paths.get(tomcatBase, "conf", "logo-base64.txt");
+        }
+        
+        // Fallback: usar directorio de trabajo actual/config
+        String userDir = System.getProperty("user.dir");
+        if (userDir != null && !userDir.isEmpty()) {
+            return Paths.get(userDir, "config", "logo-base64.txt");
+        }
+        
+        // Último fallback: ruta relativa
+        return Paths.get("config", "logo-base64.txt");
     }
 
     private String leerLogoBase64Activo() {
@@ -49,13 +64,16 @@ public class LogoController {
         return null;
     }
 
-    private void guardarLogoBase64Activo(String dataUri) throws IOException {
+    private Path guardarLogoBase64Activo(String dataUri) throws IOException {
         Path p = getLogoBase64Path();
         if (p.getParent() != null && !Files.exists(p.getParent())) {
             Files.createDirectories(p.getParent());
+            logger.info("Directorio creado: {}", p.getParent().toAbsolutePath());
         }
         Files.writeString(p, dataUri != null ? dataUri.trim() : "", StandardCharsets.UTF_8);
-        logger.info("Logo activo guardado en {}", p.toAbsolutePath());
+        logger.info("Logo activo guardado en {} ({} bytes)", p.toAbsolutePath(), 
+                   dataUri != null ? dataUri.length() : 0);
+        return p;
     }
 
     @GetMapping("/configuracion")
@@ -75,15 +93,26 @@ public class LogoController {
                     logoBase64 = activo;
                     logger.info("Usando logoBase64 activo persistido ({} chars)", activo.length());
                 } else {
-                    Path logoPath = Paths.get(
-                            "C:/workspace/Repositories/FacturacionCibercom/facturacion-cibercom/public/images/cibercom-logo.svg");
-                    if (Files.exists(logoPath)) {
-                        byte[] logoBytes = Files.readAllBytes(logoPath);
-                        logoBase64 = Base64.getEncoder().encodeToString(logoBytes);
-                        logger.info("Logo SVG leído exitosamente, tamaño: {} bytes", logoBytes.length);
-                    } else {
-                        logger.warn("Archivo de logo no encontrado en: {}", logoPath.toAbsolutePath());
+                    // CRÍTICO: Intentar cargar desde classpath (recursos del WAR) primero
+                    try {
+                        java.io.InputStream logoStream = getClass().getClassLoader()
+                                .getResourceAsStream("static/images/cibercom-logo.svg");
+                        if (logoStream != null) {
+                            byte[] logoBytes = logoStream.readAllBytes();
+                            logoStream.close();
+                            logoBase64 = Base64.getEncoder().encodeToString(logoBytes);
+                            logger.info("Logo SVG cargado desde classpath (recursos del WAR), tamaño: {} bytes", logoBytes.length);
+                        }
+                    } catch (Exception e) {
+                        logger.warn("No se pudo cargar logo SVG desde classpath: {}", e.getMessage());
+                    }
+                    
+                    // Fallback: Intentar desde rutas del sistema de archivos (solo si no está en classpath)
+                    if (logoBase64 == null) {
                         Path[] rutasAlternativas = {
+                                Paths.get("src/main/resources/static/images/cibercom-logo.svg"),
+                                Paths.get("static/images/cibercom-logo.svg"),
+                                Paths.get("images/cibercom-logo.svg"),
                                 Paths.get("../facturacion-cibercom/public/images/cibercom-logo.svg"),
                                 Paths.get("../../facturacion-cibercom/public/images/cibercom-logo.svg"),
                                 Paths.get("../../../facturacion-cibercom/public/images/cibercom-logo.svg")
@@ -156,14 +185,39 @@ public class LogoController {
             if (logoBase64 == null || logoBase64.trim().isEmpty()) {
                 response.put("exitoso", false);
                 response.put("mensaje", "logoBase64 vacío o no proporcionado");
+                logger.warn("Intento de guardar logo vacío rechazado");
                 return ResponseEntity.badRequest().body(response);
             }
-            guardarLogoBase64Activo(logoBase64);
+            
+            // Validar que sea un data URI válido
+            String trimmed = logoBase64.trim();
+            if (!trimmed.startsWith("data:image/")) {
+                logger.warn("Logo recibido no es un data URI válido, agregando prefijo si es necesario");
+                // Si es solo base64, intentar agregar prefijo PNG
+                if (!trimmed.contains(",")) {
+                    trimmed = "data:image/png;base64," + trimmed;
+                }
+            }
+            
+            Path logoPath = guardarLogoBase64Activo(trimmed);
+            logger.info("Logo guardado exitosamente en: {} (tamaño: {} chars)", 
+                       logoPath.toAbsolutePath(), trimmed.length());
+            
+            // Verificar que se guardó correctamente
+            String verificado = leerLogoBase64Activo();
+            if (verificado == null || verificado.trim().isEmpty()) {
+                logger.error("Logo guardado pero no se pudo leer después de guardar");
+                response.put("exitoso", false);
+                response.put("mensaje", "Logo guardado pero no se pudo verificar");
+                return ResponseEntity.internalServerError().body(response);
+            }
+            
             response.put("exitoso", true);
-            response.put("mensaje", "Logo guardado correctamente");
+            response.put("mensaje", "Logo guardado correctamente en: " + logoPath.toAbsolutePath());
+            response.put("ruta", logoPath.toAbsolutePath().toString());
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            logger.error("Error guardando logo activo: {}", e.getMessage());
+            logger.error("Error guardando logo activo: {}", e.getMessage(), e);
             response.put("exitoso", false);
             response.put("mensaje", "Error interno: " + e.getMessage());
             return ResponseEntity.internalServerError().body(response);
@@ -202,51 +256,54 @@ public class LogoController {
                 // Solo servimos si parece PNG para evitar incompatibilidades
                 if (lower.startsWith("data:image/png;base64,")) {
                     byte[] decoded = Base64.getDecoder().decode(raw);
+                    logger.info("Logo PNG servido desde logo activo persistido ({} bytes)", decoded.length);
                     return ResponseEntity.ok()
                             .contentType(MediaType.IMAGE_PNG)
                             .body(decoded);
                 }
             }
 
-            // Ruta principal proporcionada por el usuario
-            Path logoPathPrincipal = Paths.get(
-                    "C:/workspace/Repositories/FacturacionCibercom/facturacion-cibercom/public/images/Logo Cibercom.png");
+            // CRÍTICO: Intentar cargar desde classpath (recursos del WAR) primero
+            try {
+                java.io.InputStream logoStream = getClass().getClassLoader()
+                        .getResourceAsStream("static/images/Logo Cibercom.png");
+                if (logoStream != null) {
+                    byte[] logoBytes = logoStream.readAllBytes();
+                    logoStream.close();
+                    logger.info("Logo PNG cargado desde classpath (recursos del WAR): {} bytes", logoBytes.length);
+                    return ResponseEntity.ok()
+                            .contentType(MediaType.IMAGE_PNG)
+                            .body(logoBytes);
+                }
+            } catch (Exception e) {
+                logger.warn("No se pudo cargar logo desde classpath: {}", e.getMessage());
+            }
 
-            // Rutas alternativas relativas por si se ejecuta desde otro directorio
+            // Fallback: Intentar desde rutas del sistema de archivos (solo si no está en classpath)
             Path[] rutasAlternativas = new Path[] {
+                    Paths.get("src/main/resources/static/images/Logo Cibercom.png"),
+                    Paths.get("static/images/Logo Cibercom.png"),
+                    Paths.get("images/Logo Cibercom.png"),
                     Paths.get("../facturacion-cibercom/public/images/Logo Cibercom.png"),
                     Paths.get("../../facturacion-cibercom/public/images/Logo Cibercom.png"),
-                    Paths.get("../../../facturacion-cibercom/public/images/Logo Cibercom.png"),
-                    Paths.get("public/images/Logo Cibercom.png"),
-                    Paths.get("src/main/resources/static/images/Logo Cibercom.png")
+                    Paths.get("public/images/Logo Cibercom.png")
             };
 
-            Path rutaEncontrada = null;
-
-            if (Files.exists(logoPathPrincipal)) {
-                rutaEncontrada = logoPathPrincipal;
-                logger.info("Logo PNG encontrado en ruta principal: {}", logoPathPrincipal.toAbsolutePath());
-            } else {
-                for (Path alternativa : rutasAlternativas) {
-                    if (Files.exists(alternativa)) {
-                        rutaEncontrada = alternativa;
-                        logger.info("Logo PNG encontrado en ruta alternativa: {}", alternativa.toAbsolutePath());
-                        break;
-                    }
+            for (Path alternativa : rutasAlternativas) {
+                if (Files.exists(alternativa)) {
+                    byte[] logoBytes = Files.readAllBytes(alternativa);
+                    logger.info("Logo PNG encontrado en ruta alternativa: {} ({} bytes)", 
+                               alternativa.toAbsolutePath(), logoBytes.length);
+                    return ResponseEntity.ok()
+                            .contentType(MediaType.IMAGE_PNG)
+                            .body(logoBytes);
                 }
             }
 
-            if (rutaEncontrada != null) {
-                byte[] logoBytes = Files.readAllBytes(rutaEncontrada);
-                return ResponseEntity.ok()
-                        .contentType(MediaType.IMAGE_PNG)
-                        .body(logoBytes);
-            } else {
-                logger.warn("No se encontró el archivo PNG del logo en las rutas configuradas");
-                return ResponseEntity.notFound().build();
-            }
+            logger.warn("No se encontró el archivo PNG del logo en ninguna ruta configurada");
+            return ResponseEntity.notFound().build();
         } catch (IOException e) {
-            logger.error("Error leyendo el archivo PNG del logo: {}", e.getMessage());
+            logger.error("Error leyendo el archivo PNG del logo: {}", e.getMessage(), e);
             return ResponseEntity.internalServerError().build();
         }
     }

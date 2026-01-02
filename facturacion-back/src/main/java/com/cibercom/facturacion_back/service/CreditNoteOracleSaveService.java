@@ -31,7 +31,7 @@ public class CreditNoteOracleSaveService {
         this.clienteCatalogoService = clienteCatalogoService;
     }
 
-    public SaveResult guardar(CreditNoteSaveRequest req) {
+    public SaveResult guardar(CreditNoteSaveRequest req, Long usuario) {
         SaveResult result = new SaveResult();
         // Asegurar UUID_NC: si no viene, generar uno y usarlo en todo el flujo
         String uuidNc = req.getUuidNc();
@@ -54,6 +54,9 @@ public class CreditNoteOracleSaveService {
         logger.info("NC Oracle Guardar: rfcReceptor={} idReceptor={} uuidNc={}", req.getRfcReceptor(), idReceptor, req.getUuidNc());
 
         // Insertar básico en FACTURAS para asegurar compatibilidad con reportes/consultas
+        // Estado EMITIDA = "0" cuando Finkok la devuelve timbrada
+        String estadoEmitida = com.cibercom.facturacion_back.model.EstadoFactura.EMITIDA.getCodigo(); // "0"
+        String estadoDescripcion = com.cibercom.facturacion_back.model.EstadoFactura.EMITIDA.getDescripcion(); // "EMITIDA"
         boolean okFactura = uuidFacturaOracleDAO.insertarBasicoConIdReceptor(
                 uuidNc,
                 req.getXmlContent(),
@@ -65,14 +68,15 @@ public class CreditNoteOracleSaveService {
                 nullSafe(req.getTotal()),
                 req.getFormaPago(),
                 req.getUsoCfdi(),
-                "EMITIDA",
-                "NOTA_CREDITO",
+                estadoEmitida, // "0" = EMITIDA
+                estadoDescripcion, // "EMITIDA"
                 req.getMetodoPago(),
                 req.getRfcReceptor(),
                 req.getRfcEmisor(),
                 null,
                 idReceptor,
-                Integer.valueOf(2)
+                Integer.valueOf(2),
+                usuario // usuario que emitió la nota de crédito
         );
         if (!okFactura) {
             String err = uuidFacturaOracleDAO.getLastInsertError();
@@ -105,7 +109,8 @@ public class CreditNoteOracleSaveService {
                             req.getRfcEmisor(),
                             null,
                             idReceptor,
-                            null
+                            null,
+                            usuario // usuario que emitió la nota de crédito
                     );
                     if (!okFacturaOrig) {
                         String err = uuidFacturaOracleDAO.getLastInsertError();

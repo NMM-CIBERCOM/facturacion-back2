@@ -29,6 +29,9 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.ArrayList;
 import java.util.Optional;
+import java.util.Set;
+import java.util.HashSet;
+import java.util.Arrays;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import org.w3c.dom.Document;
@@ -102,6 +105,10 @@ public class FacturaService {
     
     @Autowired(required = false)
     private com.cibercom.facturacion_back.dao.RetencionOracleDAO retencionOracleDAO;
+    
+    @Autowired(required = false)
+    @org.springframework.context.annotation.Lazy
+    private CartaPorteService cartaPorteService;
 
     @Autowired(required = false)
     private PacClient pacClient;
@@ -115,7 +122,7 @@ public class FacturaService {
     /**
      * Procesa una factura generando solo el XML (sin timbrar)
      */
-    public FacturaResponse procesarFactura(FacturaRequest request) {
+    public FacturaResponse procesarFactura(FacturaRequest request, Long usuarioId) {
         try {
             // 1. Validar datos del emisor
             SatValidationRequest emisorRequest = new SatValidationRequest();
@@ -151,13 +158,21 @@ public class FacturaService {
                         .build();
             }
 
-            // 3. Calcular totales
+            // 3. Calcular totales usando tasas de IVA de cada concepto
             BigDecimal subtotal = BigDecimal.ZERO;
+            BigDecimal iva = BigDecimal.ZERO;
             for (FacturaRequest.Concepto concepto : request.getConceptos()) {
                 subtotal = subtotal.add(concepto.getImporte());
+                // Calcular IVA por concepto usando su tasa específica
+                String objetoImp = (concepto.getObjetoImp() != null && !concepto.getObjetoImp().trim().isEmpty()) 
+                        ? concepto.getObjetoImp() : "02";
+                if ("02".equals(objetoImp)) {
+                    BigDecimal tasaIva = (concepto.getTasaIva() != null && concepto.getTasaIva().compareTo(BigDecimal.ZERO) > 0) 
+                            ? concepto.getTasaIva() : new BigDecimal("0.16");
+                    BigDecimal ivaConcepto = concepto.getImporte().multiply(tasaIva);
+                    iva = iva.add(ivaConcepto);
+                }
             }
-
-            BigDecimal iva = subtotal.multiply(new BigDecimal("0.16")); // 16% IVA
             BigDecimal total = subtotal.add(iva);
 
             // 4. Generar UUID temporal para el XML
@@ -167,7 +182,7 @@ public class FacturaService {
             String xml = generarXMLFactura(request, subtotal, iva, total, uuid);
 
             // 6. Guardar en base de datos
-            guardarFacturaEnBD(request, xml, uuid, subtotal, iva, total);
+            guardarFacturaEnBD(request, xml, uuid, subtotal, iva, total, usuarioId);
 
             // 7. Construir respuesta con XML generado
             return FacturaResponse.builder()
@@ -192,7 +207,7 @@ public class FacturaService {
      * Genera y timbra una factura según los lineamientos del SAT
      * AHORA TAMBIÉN GUARDA EN BASE DE DATOS
      */
-    public FacturaResponse generarYTimbrarFactura(FacturaRequest request) {
+    public FacturaResponse generarYTimbrarFactura(FacturaRequest request, Long usuarioId) {
         try {
             // 1. Validar datos del emisor
             SatValidationRequest emisorRequest = new SatValidationRequest();
@@ -228,13 +243,21 @@ public class FacturaService {
                         .build();
             }
 
-            // 3. Calcular totales
+            // 3. Calcular totales usando tasas de IVA de cada concepto
             BigDecimal subtotal = BigDecimal.ZERO;
+            BigDecimal iva = BigDecimal.ZERO;
             for (FacturaRequest.Concepto concepto : request.getConceptos()) {
                 subtotal = subtotal.add(concepto.getImporte());
+                // Calcular IVA por concepto usando su tasa específica
+                String objetoImp = (concepto.getObjetoImp() != null && !concepto.getObjetoImp().trim().isEmpty()) 
+                        ? concepto.getObjetoImp() : "02";
+                if ("02".equals(objetoImp)) {
+                    BigDecimal tasaIva = (concepto.getTasaIva() != null && concepto.getTasaIva().compareTo(BigDecimal.ZERO) > 0) 
+                            ? concepto.getTasaIva() : new BigDecimal("0.16");
+                    BigDecimal ivaConcepto = concepto.getImporte().multiply(tasaIva);
+                    iva = iva.add(ivaConcepto);
+                }
             }
-
-            BigDecimal iva = subtotal.multiply(new BigDecimal("0.16")); // 16% IVA
             BigDecimal total = subtotal.add(iva);
 
             // 4. Simular timbrado (en ambiente real se conectaría con PAC)
@@ -244,7 +267,7 @@ public class FacturaService {
             String xml = generarXMLFactura(request, subtotal, iva, total, uuid);
 
             // 6. GUARDAR EN BASE DE DATOS (NUEVO)
-            guardarFacturaEnBD(request, xml, uuid, subtotal, iva, total);
+            guardarFacturaEnBD(request, xml, uuid, subtotal, iva, total, usuarioId);
 
             // 7. Construir respuesta
             return FacturaResponse.builder()
@@ -270,7 +293,7 @@ public class FacturaService {
      * Procesa el formulario del frontend y genera factura
      */
     @Transactional
-    public Map<String, Object> procesarFormularioFrontend(FacturaFrontendRequest request) {
+    public Map<String, Object> procesarFormularioFrontend(FacturaFrontendRequest request, Long usuarioId) {
         Map<String, Object> response = new HashMap<>();
 
         try {
@@ -334,39 +357,66 @@ public class FacturaService {
                 return response;
             }
 
-            // 2. Buscar ticket y usar sus totales cuando esté disponible
-            BigDecimal subtotal = new BigDecimal("1000.00"); // Valor por defecto si no hay ticket
-            BigDecimal iva = subtotal.multiply(new BigDecimal("0.16"));
-            BigDecimal total = subtotal.add(iva);
+            // 2. Calcular totales desde conceptos si están disponibles, sino buscar ticket
+            BigDecimal subtotal = BigDecimal.ZERO;
+            BigDecimal iva = BigDecimal.ZERO;
+            BigDecimal total = BigDecimal.ZERO;
             String formaPagoOverride = null;
 
-            try {
-                if (ticketService != null) {
-                    TicketSearchRequest tsr = new TicketSearchRequest();
-                    tsr.setCodigoTienda(request.getTienda());
-                    tsr.setTerminalId(toInt(request.getTerminal()));
-                    tsr.setFecha(request.getFecha() != null ? request.getFecha().toString() : null);
-                    tsr.setFolio(toInt(request.getBoleta()));
-
-                    List<TicketDto> tickets = ticketService.buscarTickets(tsr);
-                    if (tickets != null && !tickets.isEmpty()) {
-                        TicketDto t = tickets.get(0);
-                        if (t.getSubtotal() != null) subtotal = t.getSubtotal();
-                        if (t.getIva() != null) {
-                            iva = t.getIva();
-                        } else {
-                            iva = subtotal.multiply(new BigDecimal("0.16"));
-                        }
-                        if (t.getTotal() != null) {
-                            total = t.getTotal();
-                        } else {
-                            total = subtotal.add(iva);
-                        }
-                        formaPagoOverride = t.getFormaPago();
+            // Si hay conceptos del catálogo (modo manual), calcular totales desde ellos
+            if (request.getConceptos() != null && !request.getConceptos().isEmpty()) {
+                logger.info("Calculando totales desde {} conceptos del catálogo", request.getConceptos().size());
+                for (FacturaFrontendRequest.Concepto concepto : request.getConceptos()) {
+                    BigDecimal importeConcepto = concepto.getImporte() != null ? concepto.getImporte() : 
+                        (concepto.getPrecioUnitario() != null && concepto.getCantidad() != null ? 
+                         concepto.getPrecioUnitario().multiply(concepto.getCantidad()) : BigDecimal.ZERO);
+                    subtotal = subtotal.add(importeConcepto);
+                    
+                    // Calcular IVA solo si el objeto de impuesto es "02"
+                    String objetoImp = (concepto.getObjetoImp() != null && !concepto.getObjetoImp().trim().isEmpty()) 
+                        ? concepto.getObjetoImp() : "02";
+                    if ("02".equals(objetoImp)) {
+                        BigDecimal tasaIva = concepto.getTasaIva() != null ? concepto.getTasaIva() : new BigDecimal("0.16");
+                        BigDecimal ivaConcepto = importeConcepto.multiply(tasaIva);
+                        iva = iva.add(ivaConcepto);
                     }
                 }
-            } catch (Exception e) {
-                logger.warn("Fallo al buscar ticket para totales: {}", e.getMessage());
+                total = subtotal.add(iva);
+                logger.info("Totales calculados desde conceptos - Subtotal: {}, IVA: {}, Total: {}", subtotal, iva, total);
+            } else {
+                // Modo automático: buscar ticket y usar sus totales
+                subtotal = new BigDecimal("1000.00"); // Valor por defecto si no hay ticket
+                iva = subtotal.multiply(new BigDecimal("0.16"));
+                total = subtotal.add(iva);
+
+                try {
+                    if (ticketService != null) {
+                        TicketSearchRequest tsr = new TicketSearchRequest();
+                        tsr.setCodigoTienda(request.getTienda());
+                        tsr.setTerminalId(toInt(request.getTerminal()));
+                        tsr.setFecha(request.getFecha() != null ? request.getFecha().toString() : null);
+                        tsr.setFolio(toInt(request.getBoleta()));
+
+                        List<TicketDto> tickets = ticketService.buscarTickets(tsr);
+                        if (tickets != null && !tickets.isEmpty()) {
+                            TicketDto t = tickets.get(0);
+                            if (t.getSubtotal() != null) subtotal = t.getSubtotal();
+                            if (t.getIva() != null) {
+                                iva = t.getIva();
+                            } else {
+                                iva = subtotal.multiply(new BigDecimal("0.16"));
+                            }
+                            if (t.getTotal() != null) {
+                                total = t.getTotal();
+                            } else {
+                                total = subtotal.add(iva);
+                            }
+                            formaPagoOverride = t.getFormaPago();
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.warn("Fallo al buscar ticket para totales: {}", e.getMessage());
+                }
             }
 
             // 3. Generar XML de la factura con totales y CP dinámicos
@@ -404,6 +454,9 @@ public class FacturaService {
             String folioFinal = generarFolioConsecutivo("A"); // Por defecto, se actualizará con el de Finkok si está disponible
             try {
                 if (pacClient != null) {
+                    // Validar y normalizar MetodoPago antes de enviar a Finkok
+                    String metodoPagoValidado = validarYNormalizarMetodoPago(request.getMedioPago());
+                    
                     PacTimbradoRequest pacReq = PacTimbradoRequest.builder()
                             .uuid(null) // No enviar UUID, Finkok lo genera al timbrar
                             .xmlContent(xml)
@@ -418,7 +471,7 @@ public class FacturaService {
                             .tienda(request.getTienda())
                             .terminal(request.getTerminal())
                             .boleta(request.getBoleta())
-                            .medioPago(request.getMedioPago())
+                            .medioPago(metodoPagoValidado)
                             .formaPago(formaPagoOverride != null && !formaPagoOverride.isBlank() ? formaPagoOverride : request.getFormaPago())
                             .usoCFDI(request.getUsoCfdi())
                             .regimenFiscalEmisor(regimenFiscalEmisorDefault)
@@ -469,10 +522,17 @@ public class FacturaService {
                                     folioFinal = pacResp.getFolio() != null ? pacResp.getFolio() : generarFolioConsecutivo("A");
                                     
                                     // Guardar en Oracle con UUID de Finkok y estado EMITIDA
-                                    Factura facturaOracle = guardarEnOracleTimbrada(request, xmlTimbrado, uuidFinkok, subtotal, iva, total, pacResp);
+                                    Factura facturaOracle = guardarEnOracleTimbrada(request, xmlTimbrado, uuidFinkok, subtotal, iva, total, pacResp, usuarioId);
                                     
-                                    // Guardar en MongoDB con UUID de Finkok y estado EMITIDA
-                                    guardarEnMongoTimbrada(request, xmlTimbrado, uuidFinkok, subtotal, iva, total, pacResp);
+                                    // Guardar en MongoDB solo si el perfil activo es "mongo"
+                                    String activeProfile = environment.getActiveProfiles().length > 0 ? environment.getActiveProfiles()[0] : "oracle";
+                                    if ("mongo".equals(activeProfile) && facturaMongoRepository != null) {
+                                        try {
+                                            guardarEnMongoTimbrada(request, xmlTimbrado, uuidFinkok, subtotal, iva, total, pacResp);
+                                        } catch (Exception e) {
+                                            logger.warn("No se pudo guardar en MongoDB (puede no estar disponible): {}", e.getMessage());
+                                        }
+                                    }
                                     
                                     // Enlazar ticket con factura en Oracle (si es posible)
                                     try {
@@ -499,8 +559,7 @@ public class FacturaService {
                                     
                                     logger.info("✓✓✓ Factura guardada con UUID de Finkok: {} y estado EMITIDA", uuidFinkok);
                                     
-                                    // Verificar que se guardó correctamente
-                                    String activeProfile = environment.getActiveProfiles().length > 0 ? environment.getActiveProfiles()[0] : "oracle";
+                                    // Verificar que se guardó correctamente (reutilizar activeProfile ya declarado arriba)
                                     if ("mongo".equals(activeProfile)) {
                                         com.cibercom.facturacion_back.model.FacturaMongo facturaVerificada = facturaMongoRepository.findByUuid(uuidFinkok);
                                         if (facturaVerificada != null) {
@@ -609,7 +668,9 @@ public class FacturaService {
         xml.append("TipoDeComprobante=\"I\" ");
         // Exportacion="01" es para operaciones nacionales (según catálogo SAT c_TipoExportacion)
         xml.append("Exportacion=\"01\" ");
-        xml.append("MetodoPago=\"").append(request.getMetodoPago()).append("\" ");
+        // Validar y normalizar MetodoPago (debe ser PUE o PPD según catálogo c_MetodoPago)
+        String metodoPago = validarYNormalizarMetodoPago(request.getMetodoPago());
+        xml.append("MetodoPago=\"").append(metodoPago).append("\" ");
         xml.append("LugarExpedicion=\"").append(request.getCodigoPostalEmisor()).append("\">\n");
 
         // Agregar comentario con información adicional
@@ -641,46 +702,83 @@ public class FacturaService {
         // Conceptos
         xml.append("  <cfdi:Conceptos>\n");
         for (FacturaRequest.Concepto concepto : request.getConceptos()) {
+            // Usar valores del catálogo si están disponibles, sino usar valores por defecto seguros
+            String claveProdServ = (concepto.getClaveProdServ() != null && !concepto.getClaveProdServ().trim().isEmpty()) 
+                    ? concepto.getClaveProdServ() : "01010101";
+            String claveUnidad = validarYNormalizarClaveUnidad(
+                    concepto.getClaveUnidad(), 
+                    concepto.getUnidad()
+            );
+            String objetoImp = (concepto.getObjetoImp() != null && !concepto.getObjetoImp().trim().isEmpty()) 
+                    ? concepto.getObjetoImp() : "02";
+            BigDecimal tasaIva = (concepto.getTasaIva() != null && concepto.getTasaIva().compareTo(BigDecimal.ZERO) > 0) 
+                    ? concepto.getTasaIva() : new BigDecimal("0.16");
+            
             xml.append("    <cfdi:Concepto ");
-            xml.append("ClaveProdServ=\"01010101\" ");
+            xml.append("ClaveProdServ=\"").append(escapeXml(claveProdServ)).append("\" ");
             // NO agregar NoIdentificacion="" vacío - Finkok lo rechaza (error 705)
             xml.append("Cantidad=\"").append(concepto.getCantidad()).append("\" ");
-            xml.append("ClaveUnidad=\"H87\" ");
-            xml.append("Unidad=\"").append(concepto.getUnidad()).append("\" ");
-            xml.append("Descripcion=\"").append(concepto.getDescripcion()).append("\" ");
+            xml.append("ClaveUnidad=\"").append(escapeXml(claveUnidad)).append("\" ");
+            xml.append("Unidad=\"").append(escapeXml(concepto.getUnidad())).append("\" ");
+            xml.append("Descripcion=\"").append(escapeXml(concepto.getDescripcion())).append("\" ");
             xml.append("ValorUnitario=\"").append(concepto.getPrecioUnitario()).append("\" ");
             xml.append("Importe=\"").append(concepto.getImporte()).append("\" ");
             // NO agregar Descuento="0.00" - Si el descuento es cero, no debe incluirse el atributo
-            xml.append("ObjetoImp=\"02\">\n");
+            xml.append("ObjetoImp=\"").append(objetoImp).append("\">\n");
 
-            // Impuestos del concepto
-            BigDecimal ivaConcepto = concepto.getImporte().multiply(new BigDecimal("0.16"));
-            xml.append("      <cfdi:Impuestos>\n");
-            xml.append("        <cfdi:Traslados>\n");
-            xml.append("          <cfdi:Traslado ");
-            xml.append("Base=\"").append(concepto.getImporte()).append("\" ");
-            xml.append("Impuesto=\"002\" ");
-            xml.append("TipoFactor=\"Tasa\" ");
-            xml.append("TasaOCuota=\"0.160000\" ");
-            xml.append("Importe=\"").append(ivaConcepto).append("\"/>\n");
-            xml.append("        </cfdi:Traslados>\n");
-            xml.append("      </cfdi:Impuestos>\n");
+            // Impuestos del concepto - SIEMPRE si ObjetoImp es "02" (Sí objeto de impuesto)
+            // Según SAT, cuando ObjetoImp="02", el nodo Impuestos es OBLIGATORIO
+            if ("02".equals(objetoImp)) {
+                BigDecimal ivaConcepto = concepto.getImporte().multiply(tasaIva);
+                xml.append("      <cfdi:Impuestos>\n");
+                xml.append("        <cfdi:Traslados>\n");
+                xml.append("          <cfdi:Traslado ");
+                xml.append("Base=\"").append(concepto.getImporte()).append("\" ");
+                xml.append("Impuesto=\"002\" ");
+                xml.append("TipoFactor=\"Tasa\" ");
+                xml.append("TasaOCuota=\"").append(String.format("%.6f", tasaIva)).append("\" ");
+                xml.append("Importe=\"").append(ivaConcepto.setScale(2, java.math.RoundingMode.HALF_UP)).append("\"/>\n");
+                xml.append("        </cfdi:Traslados>\n");
+                xml.append("      </cfdi:Impuestos>\n");
+            }
             xml.append("    </cfdi:Concepto>\n");
         }
         xml.append("  </cfdi:Conceptos>\n");
 
-        // Impuestos
-        xml.append("  <cfdi:Impuestos ");
-        xml.append("TotalImpuestosTrasladados=\"").append(iva).append("\">\n");
-        xml.append("    <cfdi:Traslados>\n");
-        xml.append("      <cfdi:Traslado ");
-        xml.append("Base=\"").append(subtotal).append("\" ");
-        xml.append("Impuesto=\"002\" ");
-        xml.append("TipoFactor=\"Tasa\" ");
-        xml.append("TasaOCuota=\"0.160000\" ");
-        xml.append("Importe=\"").append(iva).append("\"/>\n");
-        xml.append("    </cfdi:Traslados>\n");
-        xml.append("  </cfdi:Impuestos>\n");
+        // Calcular IVA total sumando los IVAs de cada concepto (solo si tasa > 0)
+        BigDecimal ivaTotal = BigDecimal.ZERO;
+        BigDecimal baseTotal = BigDecimal.ZERO;
+        for (FacturaRequest.Concepto concepto : request.getConceptos()) {
+            String objetoImpConcepto = (concepto.getObjetoImp() != null && !concepto.getObjetoImp().trim().isEmpty()) 
+                    ? concepto.getObjetoImp() : "02";
+            if ("02".equals(objetoImpConcepto)) {
+                BigDecimal tasaIvaConcepto = (concepto.getTasaIva() != null && concepto.getTasaIva().compareTo(BigDecimal.ZERO) >= 0) 
+                        ? concepto.getTasaIva() : new BigDecimal("0.16");
+                // Sumar siempre si ObjetoImp="02" (incluso si tasa=0%)
+                BigDecimal ivaConcepto = concepto.getImporte().multiply(tasaIvaConcepto);
+                ivaTotal = ivaTotal.add(ivaConcepto);
+                baseTotal = baseTotal.add(concepto.getImporte());
+            }
+        }
+
+        // Impuestos - agregar siempre si hay conceptos con ObjetoImp="02"
+        if (baseTotal.compareTo(BigDecimal.ZERO) > 0) {
+            xml.append("  <cfdi:Impuestos ");
+            xml.append("TotalImpuestosTrasladados=\"").append(ivaTotal.setScale(2, java.math.RoundingMode.HALF_UP)).append("\">\n");
+            xml.append("    <cfdi:Traslados>\n");
+            // Calcular tasa: si hay IVA, calcularla; si no (ivaTotal=0), usar 0.000000
+            BigDecimal tasaPromedio = baseTotal.compareTo(BigDecimal.ZERO) > 0 && ivaTotal.compareTo(BigDecimal.ZERO) > 0
+                    ? ivaTotal.divide(baseTotal, 6, java.math.RoundingMode.HALF_UP) 
+                    : BigDecimal.ZERO;
+            xml.append("      <cfdi:Traslado ");
+            xml.append("Base=\"").append(baseTotal.setScale(2, java.math.RoundingMode.HALF_UP)).append("\" ");
+            xml.append("Impuesto=\"002\" ");
+            xml.append("TipoFactor=\"Tasa\" ");
+            xml.append("TasaOCuota=\"").append(String.format("%.6f", tasaPromedio)).append("\" ");
+            xml.append("Importe=\"").append(ivaTotal.setScale(2, java.math.RoundingMode.HALF_UP)).append("\"/>\n");
+            xml.append("    </cfdi:Traslados>\n");
+            xml.append("  </cfdi:Impuestos>\n");
+        }
 
         // Complemento con TimbreFiscalDigital
         xml.append("  <cfdi:Complemento>\n");
@@ -756,6 +854,82 @@ public class FacturaService {
         }
 
         return "00000"; // Código postal por defecto
+    }
+
+    /**
+     * Valida y normaliza el MetodoPago según el catálogo c_MetodoPago del SAT
+     * CRÍTICO: Los únicos valores válidos son "PUE" (Pago en una sola exhibición) y "PPD" (Pago en parcialidades o diferido)
+     * 
+     * @param metodoPago MetodoPago proporcionado
+     * @return MetodoPago válido ("PUE" o "PPD"), por defecto "PUE" si es inválido
+     */
+    private String validarYNormalizarMetodoPago(String metodoPago) {
+        if (metodoPago == null || metodoPago.trim().isEmpty()) {
+            logger.warn("⚠️ MetodoPago vacío, usando valor por defecto 'PUE'");
+            return "PUE";
+        }
+        
+        String metodoPagoUpper = metodoPago.trim().toUpperCase();
+        
+        // Valores válidos del catálogo c_MetodoPago
+        if ("PUE".equals(metodoPagoUpper)) {
+            return "PUE";
+        } else if ("PPD".equals(metodoPagoUpper)) {
+            return "PPD";
+        } else {
+            // Valor inválido - usar PUE por defecto
+            logger.warn("⚠️ MetodoPago '{}' no es válido. Los valores válidos del catálogo c_MetodoPago son: PUE, PPD. Corrigiendo a 'PUE'.", metodoPago);
+            return "PUE";
+        }
+    }
+    
+    /**
+     * Valida y normaliza ClaveUnidad para que sea un código válido del catálogo SAT c_ClaveUnidad
+     * Valores comunes: E48 (Servicio), H87 (Pieza), MTR (Metro), KGM (Kilogramo), LTR (Litro), etc.
+     * Si el valor no es un código válido del catálogo, usa "E48" (Servicio) por defecto.
+     */
+    private String validarYNormalizarClaveUnidad(String claveUnidad, String unidad) {
+        // Lista completa de códigos válidos del catálogo SAT c_ClaveUnidad
+        Set<String> clavesUnidadValidas = new HashSet<>(Arrays.asList(
+            "H87", "EA", "E48", "ACT", "KGM", "E51", "A9", "MTR", "AB", "BB", "KT", "SET", "LTR", 
+            "XBX", "MON", "HUR", "MTK", "11", "MGM", "XPK", "XKI", "AS", "GRM", "PR", "DPC", 
+            "XUN", "xun", "DAY", "XLT", "10", "MLT", "E54"
+        ));
+        
+        // Si se proporciona una claveUnidad, validarla
+        if (claveUnidad != null && !claveUnidad.trim().isEmpty()) {
+            String claveUnidadTrim = claveUnidad.trim();
+            String claveUnidadUpper = claveUnidadTrim.toUpperCase();
+            
+            // Verificar si es un código válido (en mayúsculas o como está)
+            if (clavesUnidadValidas.contains(claveUnidadUpper) || clavesUnidadValidas.contains(claveUnidadTrim)) {
+                // Retornar en mayúsculas, excepto "xun" que debe ser minúsculas
+                if ("xun".equalsIgnoreCase(claveUnidadTrim)) {
+                    return "xun";
+                }
+                return claveUnidadUpper;
+            }
+            
+            // Verificar textos descriptivos comunes
+            String[] textosDescriptivos = {"OPCIONAL", "SERVICIO", "PIEZA", "UNIDAD", "N/A", "NA", "-"};
+            boolean esTextoDescriptivo = false;
+            for (String texto : textosDescriptivos) {
+                if (claveUnidadUpper.equals(texto)) {
+                    esTextoDescriptivo = true;
+                    break;
+                }
+            }
+            if (esTextoDescriptivo) {
+                logger.warn("⚠️ ClaveUnidad '{}' es un texto descriptivo. Usando 'E48' (Unidad de Servicio) por defecto.", claveUnidad);
+                return "E48";
+            }
+            
+            logger.warn("⚠️ ClaveUnidad '{}' no es un código válido del catálogo c_ClaveUnidad. Corrigiendo a 'E48'.", claveUnidad);
+        }
+        
+        // Si no hay claveUnidad válida, usar "E48" (Unidad de Servicio) por defecto
+        logger.info("⚠️ Usando ClaveUnidad por defecto 'E48' (Unidad de Servicio)");
+        return "E48";
     }
 
     /**
@@ -859,10 +1033,59 @@ public class FacturaService {
             lugarExpedicion = "58000"; // Usar el CP configurado por defecto
         }
         
+        // Validar y normalizar MetodoPago (debe ser PUE o PPD según catálogo c_MetodoPago)
+        String metodoPago = validarYNormalizarMetodoPago(request.getMedioPago());
+        
+        // CRÍTICO: Calcular totales desde conceptos ANTES de generar el XML
+        // Esto asegura que SubTotal, TotalImpuestosTrasladados y Total sean consistentes
+        BigDecimal subtotalCalculado = BigDecimal.ZERO;
+        BigDecimal totalImpuestosCalculado = BigDecimal.ZERO;
+        
+        if (request.getConceptos() != null && !request.getConceptos().isEmpty()) {
+            for (FacturaFrontendRequest.Concepto concepto : request.getConceptos()) {
+                BigDecimal importeConcepto = concepto.getImporte() != null ? concepto.getImporte() : 
+                    (concepto.getPrecioUnitario() != null && concepto.getCantidad() != null ? 
+                     concepto.getPrecioUnitario().multiply(concepto.getCantidad()) : BigDecimal.ZERO);
+                subtotalCalculado = subtotalCalculado.add(importeConcepto);
+                
+                String objetoImpConcepto = (concepto.getObjetoImp() != null && !concepto.getObjetoImp().trim().isEmpty()) 
+                    ? concepto.getObjetoImp() : "02";
+                if ("02".equals(objetoImpConcepto)) {
+                    BigDecimal tasaIva = concepto.getTasaIva() != null ? concepto.getTasaIva() : new BigDecimal("0.16");
+                    BigDecimal ivaConcepto = importeConcepto.multiply(tasaIva);
+                    totalImpuestosCalculado = totalImpuestosCalculado.add(ivaConcepto);
+                }
+            }
+            // Usar los totales calculados desde conceptos
+            subtotal = subtotalCalculado;
+            iva = totalImpuestosCalculado;
+            total = subtotal.add(iva);
+            logger.info("Totales recalculados desde conceptos - SubTotal: {}, IVA: {}, Total: {}", subtotal, iva, total);
+        }
+        
         // Generar XML en formato compacto (todos los atributos en una línea)
         // para evitar problemas con normalización en PacClient
         xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-        xml.append("<cfdi:Comprobante xmlns:cfdi=\"http://www.sat.gob.mx/cfd/4\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:schemaLocation=\"http://www.sat.gob.mx/cfd/4 http://www.sat.gob.mx/sitio_internet/cfd/4/cfdv40.xsd\" Version=\"4.0\" Serie=\"A\" Folio=\"").append(folio).append("\" Fecha=\"").append(fechaActual).append("\" FormaPago=\"").append(formaPago).append("\" SubTotal=\"").append(subtotal.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString()).append("\" Moneda=\"MXN\" Total=\"").append(total.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString()).append("\" TipoDeComprobante=\"I\" Exportacion=\"01\" MetodoPago=\"").append(request.getMedioPago()).append("\" LugarExpedicion=\"").append(lugarExpedicion).append("\">\n");
+        xml.append("<cfdi:Comprobante xmlns:cfdi=\"http://www.sat.gob.mx/cfd/4\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:schemaLocation=\"http://www.sat.gob.mx/cfd/4 http://www.sat.gob.mx/sitio_internet/cfd/4/cfdv40.xsd\" Version=\"4.0\" Serie=\"A\" Folio=\"").append(folio).append("\" Fecha=\"").append(fechaActual).append("\" FormaPago=\"").append(formaPago).append("\" SubTotal=\"").append(subtotal.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString()).append("\" Moneda=\"MXN\" Total=\"").append(total.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString()).append("\" TipoDeComprobante=\"I\" Exportacion=\"01\" MetodoPago=\"").append(metodoPago).append("\" LugarExpedicion=\"").append(lugarExpedicion).append("\">\n");
+
+        // CfdiRelacionados - Si se proporciona UUID de CFDI relacionado y tipo de relación
+        if (request.getUuidCfdiRelacionado() != null && !request.getUuidCfdiRelacionado().trim().isEmpty() 
+            && request.getTipoRelacion() != null && !request.getTipoRelacion().trim().isEmpty()) {
+            String uuidRelacionado = request.getUuidCfdiRelacionado().trim().toUpperCase();
+            String tipoRelacion = request.getTipoRelacion().trim();
+            // Validar que el tipo de relación sea válido (01, 02, 03, 04)
+            if (tipoRelacion.matches("0[1-4]")) {
+                // Escapar caracteres especiales XML
+                String tipoRelacionEscapado = escapeXml(tipoRelacion);
+                String uuidRelacionadoEscapado = escapeXml(uuidRelacionado);
+                xml.append("  <cfdi:CfdiRelacionados TipoRelacion=\"").append(tipoRelacionEscapado).append("\">\n");
+                xml.append("    <cfdi:CfdiRelacionado UUID=\"").append(uuidRelacionadoEscapado).append("\"/>\n");
+                xml.append("  </cfdi:CfdiRelacionados>\n");
+                logger.info("✓ Nodo CfdiRelacionados agregado - Tipo: {}, UUID: {}", tipoRelacion, uuidRelacionado);
+            } else {
+                logger.warn("⚠️ Tipo de relación inválido: {}. Debe ser 01, 02, 03 o 04. Se omite el nodo CfdiRelacionados.", tipoRelacion);
+            }
+        }
 
         // Emisor - Formato compacto para evitar problemas con normalización
         xml.append("  <cfdi:Emisor Rfc=\"").append(rfcEmisorDefault).append("\" Nombre=\"").append(nombreEmisorDefault).append("\" RegimenFiscal=\"").append(regimenFiscalEmisorDefault).append("\"/>\n");
@@ -973,32 +1196,133 @@ public class FacturaService {
         receptorAttr.append("UsoCFDI=\"").append(usoCfdiFinal).append("\"");
         xml.append("  <cfdi:Receptor ").append(receptorAttr.toString()).append("/>\n");
 
-        // Conceptos - Formato compacto para evitar problemas con normalización
-        String valorUnitario = subtotal.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString();
-        String importe = subtotal.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString();
-        String base = subtotal.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString();
-        String importeIva = iva.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString();
-        String totalImpuestosTrasladados = iva.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString();
-        
+        // Conceptos - Usar conceptos del request si están disponibles, sino usar valores por defecto
         xml.append("  <cfdi:Conceptos>\n");
-        xml.append("    <cfdi:Concepto ClaveProdServ=\"01010101\" Cantidad=\"1\" ClaveUnidad=\"H87\" Unidad=\"Hora\" Descripcion=\"Servicio de Facturación\" ValorUnitario=\"").append(valorUnitario).append("\" Importe=\"").append(importe).append("\" ObjetoImp=\"02\">\n");
-        // ObjetoImp="02" es obligatorio en CFDI 4.0: "02" = Sí objeto de impuesto
-        // NO agregar Descuento="0.00" - Si el descuento es cero, no debe incluirse el atributo
-        xml.append("      <cfdi:Impuestos>\n");
-        xml.append("        <cfdi:Traslados>\n");
-        xml.append("          <cfdi:Traslado Base=\"").append(base).append("\" Impuesto=\"002\" TipoFactor=\"Tasa\" TasaOCuota=\"0.160000\" Importe=\"").append(importeIva).append("\"/>\n");
-        xml.append("        </cfdi:Traslados>\n");
-        xml.append("      </cfdi:Impuestos>\n");
-        xml.append("    </cfdi:Concepto>\n");
+        
+        // Si ya calculamos los totales desde conceptos arriba, usar ese IVA
+        // Si no, calcular desde los conceptos aquí
+        BigDecimal totalImpuestosTrasladados = BigDecimal.ZERO;
+        if (request.getConceptos() != null && !request.getConceptos().isEmpty()) {
+            // Ya se calculó arriba, usar el valor
+            totalImpuestosTrasladados = iva;
+        }
+        
+        if (request.getConceptos() != null && !request.getConceptos().isEmpty()) {
+            // Usar conceptos del request (modo manual con catálogo)
+            for (FacturaFrontendRequest.Concepto concepto : request.getConceptos()) {
+                String claveProdServ = (concepto.getClaveProdServ() != null && !concepto.getClaveProdServ().trim().isEmpty()) 
+                    ? concepto.getClaveProdServ() : "01010101";
+                // ClaveUnidad DEBE ser un código del catálogo SAT c_ClaveUnidad (ej: E48, H87, MTR, etc.)
+                // NO puede ser un texto descriptivo como "Opcional"
+                String claveUnidad = validarYNormalizarClaveUnidad(concepto.getClaveUnidad(), concepto.getUnidad());
+                String unidad = (concepto.getUnidad() != null && !concepto.getUnidad().trim().isEmpty()) 
+                    ? concepto.getUnidad() : "Servicio";
+                String descripcion = (concepto.getDescripcion() != null && !concepto.getDescripcion().trim().isEmpty()) 
+                    ? concepto.getDescripcion() : "Servicio de Facturación";
+                String objetoImp = (concepto.getObjetoImp() != null && !concepto.getObjetoImp().trim().isEmpty()) 
+                    ? concepto.getObjetoImp() : "02";
+                BigDecimal cantidad = concepto.getCantidad() != null ? concepto.getCantidad() : BigDecimal.ONE;
+                BigDecimal precioUnitario = concepto.getPrecioUnitario() != null ? concepto.getPrecioUnitario() : concepto.getImporte();
+                BigDecimal importe = concepto.getImporte() != null ? concepto.getImporte() : precioUnitario.multiply(cantidad);
+                BigDecimal tasaIva = concepto.getTasaIva() != null ? concepto.getTasaIva() : new BigDecimal("0.16");
+                
+                xml.append("    <cfdi:Concepto ");
+                xml.append("ClaveProdServ=\"").append(escapeXml(claveProdServ)).append("\" ");
+                xml.append("Cantidad=\"").append(cantidad).append("\" ");
+                xml.append("ClaveUnidad=\"").append(escapeXml(claveUnidad)).append("\" ");
+                xml.append("Unidad=\"").append(escapeXml(unidad)).append("\" ");
+                xml.append("Descripcion=\"").append(escapeXml(descripcion)).append("\" ");
+                xml.append("ValorUnitario=\"").append(precioUnitario.setScale(2, java.math.RoundingMode.HALF_UP)).append("\" ");
+                xml.append("Importe=\"").append(importe.setScale(2, java.math.RoundingMode.HALF_UP)).append("\" ");
+                xml.append("ObjetoImp=\"").append(objetoImp).append("\">\n");
+                
+                if ("02".equals(objetoImp)) { 
+                    // Cuando ObjetoImp="02", SIEMPRE se debe agregar el nodo Impuestos (obligatorio según SAT)
+                    BigDecimal baseConcepto = importe;
+                    BigDecimal ivaConcepto = baseConcepto.multiply(tasaIva);
+                    totalImpuestosTrasladados = totalImpuestosTrasladados.add(ivaConcepto);
+                    
+                    xml.append("      <cfdi:Impuestos>\n");
+                    xml.append("        <cfdi:Traslados>\n");
+                    xml.append("          <cfdi:Traslado ");
+                    xml.append("Base=\"").append(baseConcepto.setScale(2, java.math.RoundingMode.HALF_UP)).append("\" ");
+                    xml.append("Impuesto=\"002\" ");
+                    xml.append("TipoFactor=\"Tasa\" ");
+                    xml.append("TasaOCuota=\"").append(String.format("%.6f", tasaIva)).append("\" ");
+                    xml.append("Importe=\"").append(ivaConcepto.setScale(2, java.math.RoundingMode.HALF_UP)).append("\"/>\n");
+                    xml.append("        </cfdi:Traslados>\n");
+                    xml.append("      </cfdi:Impuestos>\n");
+                }
+                xml.append("    </cfdi:Concepto>\n");
+            }
+        } else {
+            // Modo automático o sin conceptos: usar valores por defecto
+            String valorUnitario = subtotal.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString();
+            String importe = subtotal.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString();
+            String base = subtotal.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString();
+            String importeIva = iva.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString();
+            totalImpuestosTrasladados = iva;
+            
+            String claveProdServDefault = "01010101";
+            String claveUnidadDefault = "E48";
+            String unidadDefault = "Servicio";
+            String objetoImpDefault = "02";
+            BigDecimal tasaIvaDefault = new BigDecimal("0.16");
+            
+            xml.append("    <cfdi:Concepto ClaveProdServ=\"").append(claveProdServDefault).append("\" Cantidad=\"1\" ClaveUnidad=\"").append(claveUnidadDefault).append("\" Unidad=\"").append(unidadDefault).append("\" Descripcion=\"Servicio de Facturación\" ValorUnitario=\"").append(valorUnitario).append("\" Importe=\"").append(importe).append("\" ObjetoImp=\"").append(objetoImpDefault).append("\">\n");
+            if ("02".equals(objetoImpDefault)) {
+                // Cuando ObjetoImp="02", SIEMPRE agregar Impuestos (obligatorio según SAT)
+                xml.append("      <cfdi:Impuestos>\n");
+                xml.append("        <cfdi:Traslados>\n");
+                xml.append("          <cfdi:Traslado Base=\"").append(base).append("\" Impuesto=\"002\" TipoFactor=\"Tasa\" TasaOCuota=\"").append(String.format("%.6f", tasaIvaDefault)).append("\" Importe=\"").append(importeIva).append("\"/>\n");
+                xml.append("        </cfdi:Traslados>\n");
+                xml.append("      </cfdi:Impuestos>\n");
+            }
+            xml.append("    </cfdi:Concepto>\n");
+        }
+        
         xml.append("  </cfdi:Conceptos>\n");
 
         // Impuestos - Formato compacto
         // En CFDI 4.0, el Traslado dentro de Impuestos debe tener el atributo Base (obligatorio)
-        xml.append("  <cfdi:Impuestos TotalImpuestosTrasladados=\"").append(totalImpuestosTrasladados).append("\">\n");
+        // Calcular base total desde los conceptos
+        BigDecimal baseTotal = BigDecimal.ZERO;
+        if (request.getConceptos() != null && !request.getConceptos().isEmpty()) {
+            for (FacturaFrontendRequest.Concepto concepto : request.getConceptos()) {
+                String objetoImpConcepto = (concepto.getObjetoImp() != null && !concepto.getObjetoImp().trim().isEmpty()) 
+                    ? concepto.getObjetoImp() : "02";
+                if ("02".equals(objetoImpConcepto)) {
+                    BigDecimal importeConcepto = concepto.getImporte() != null ? concepto.getImporte() : 
+                        (concepto.getPrecioUnitario() != null && concepto.getCantidad() != null ? 
+                         concepto.getPrecioUnitario().multiply(concepto.getCantidad()) : BigDecimal.ZERO);
+                    baseTotal = baseTotal.add(importeConcepto);
+                }
+            }
+        } else {
+            baseTotal = subtotal;
+        }
+        
+        xml.append("  <cfdi:Impuestos TotalImpuestosTrasladados=\"").append(totalImpuestosTrasladados.setScale(2, java.math.RoundingMode.HALF_UP)).append("\">\n");
         xml.append("    <cfdi:Traslados>\n");
-        xml.append("      <cfdi:Traslado Base=\"").append(base).append("\" Impuesto=\"002\" TipoFactor=\"Tasa\" TasaOCuota=\"0.160000\" Importe=\"").append(importeIva).append("\"/>\n");
+        // Si hay conceptos con ObjetoImp="02", SIEMPRE agregar el Traslado (incluso si Importe=0.00)
+        // Esto es necesario para que coincida con los Traslados en los conceptos
+        if (baseTotal.compareTo(BigDecimal.ZERO) > 0) {
+            // Calcular tasa: si hay IVA, calcularla; si no (totalImpuestosTrasladados=0), usar 0.000000
+            BigDecimal tasaOCuota = baseTotal.compareTo(BigDecimal.ZERO) > 0 && totalImpuestosTrasladados.compareTo(BigDecimal.ZERO) > 0 ? 
+                totalImpuestosTrasladados.divide(baseTotal, 6, java.math.RoundingMode.HALF_UP) : BigDecimal.ZERO;
+            xml.append("      <cfdi:Traslado Base=\"").append(baseTotal.setScale(2, java.math.RoundingMode.HALF_UP)).append("\" Impuesto=\"002\" TipoFactor=\"Tasa\" TasaOCuota=\"").append(String.format("%.6f", tasaOCuota)).append("\" Importe=\"").append(totalImpuestosTrasladados.setScale(2, java.math.RoundingMode.HALF_UP)).append("\"/>\n");
+        }
         xml.append("    </cfdi:Traslados>\n");
         xml.append("  </cfdi:Impuestos>\n");
+
+        // CRÍTICO: Recalcular el total para asegurar que coincida con SubTotal + TotalImpuestosTrasladados
+        // El total debe ser: SubTotal + TotalImpuestosTrasladados (sin descuentos ni retenciones)
+        BigDecimal totalRecalculado = subtotal.add(totalImpuestosTrasladados);
+        logger.info("Totales en XML - SubTotal: {}, TotalImpuestosTrasladados: {}, Total (recalculado): {}, Total (parámetro): {}", 
+            subtotal, totalImpuestosTrasladados, totalRecalculado, total);
+        
+        // Usar el total recalculado en lugar del parámetro para asegurar consistencia
+        total = totalRecalculado;
 
         xml.append("</cfdi:Comprobante>");
 
@@ -1009,7 +1333,7 @@ public class FacturaService {
      * Guarda la factura en Oracle
      */
     private Factura guardarEnOracle(FacturaFrontendRequest request, String xml, String uuid,
-            BigDecimal subtotal, BigDecimal iva, BigDecimal total) {
+            BigDecimal subtotal, BigDecimal iva, BigDecimal total, Long usuarioId) {
 
         Long idReceptor = resolverIdReceptorPorRfc(request);
         if (idReceptor == null) {
@@ -1049,6 +1373,8 @@ public class FacturaService {
                 .receptorDomicilioFiscal(request.getDomicilioFiscal())
                 .receptorRegimenFiscal(request.getRegimenFiscal())
                 .receptorUsoCfdi(request.getUsoCfdi())
+                // Usuario que emitió la factura
+                .usuario(usuarioId)
                 // Datos de la Factura
                 .codigoFacturacion(request.getCodigoFacturacion())
                 .tiendaOrigen(toInt(request.getTienda()))
@@ -1058,6 +1384,9 @@ public class FacturaService {
                  .medioPago(request.getMedioPago())
                  .formaPago(request.getFormaPago())
                  .iepsDesglosado(Boolean.TRUE.equals(request.getIepsDesglosado()))
+                // Relación con CFDI (sustitución)
+                .uuidOrig(request.getUuidCfdiRelacionado() != null && !request.getUuidCfdiRelacionado().trim().isEmpty() 
+                    ? request.getUuidCfdiRelacionado().trim().toUpperCase() : null)
                 // Totales
                 .subtotal(subtotal)
                 .iva(iva)
@@ -1127,6 +1456,12 @@ public class FacturaService {
     private void guardarEnMongo(FacturaFrontendRequest request, String xml, String uuid,
             BigDecimal subtotal, BigDecimal iva, BigDecimal total) {
 
+        // Verificar que MongoDB esté disponible
+        if (facturaMongoRepository == null) {
+            logger.warn("FacturaMongoRepository no está disponible - omitiendo guardado en MongoDB");
+            return;
+        }
+
         // Crear mapas para emisor y receptor
         Map<String, Object> emisor = new HashMap<>();
         emisor.put("rfc", rfcEmisorDefault);
@@ -1187,7 +1522,7 @@ public class FacturaService {
      * Guarda la factura en Oracle directamente con UUID de Finkok y estado EMITIDA
      */
     private Factura guardarEnOracleTimbrada(FacturaFrontendRequest request, String xmlTimbrado, String uuidFinkok,
-            BigDecimal subtotal, BigDecimal iva, BigDecimal total, PacTimbradoResponse pacResponse) {
+            BigDecimal subtotal, BigDecimal iva, BigDecimal total, PacTimbradoResponse pacResponse, Long usuarioId) {
 
         Long idReceptor = resolverIdReceptorPorRfc(request);
         if (idReceptor == null) {
@@ -1227,15 +1562,20 @@ public class FacturaService {
                 .receptorDomicilioFiscal(request.getDomicilioFiscal())
                 .receptorRegimenFiscal(request.getRegimenFiscal())
                 .receptorUsoCfdi(request.getUsoCfdi())
+                // Usuario que emitió la factura
+                .usuario(usuarioId)
                 // Datos de la Factura
                 .codigoFacturacion(request.getCodigoFacturacion())
                 .tiendaOrigen(toInt(request.getTienda()))
-                .fechaFactura(LocalDateTime.now())
-                .terminalBol(toInt(request.getTerminal()))
-                .boletaBol(toInt(request.getBoleta()))
-                .medioPago(request.getMedioPago())
-                .formaPago(request.getFormaPago())
-                .iepsDesglosado(Boolean.TRUE.equals(request.getIepsDesglosado()))
+                 .fechaFactura(LocalDateTime.now())
+                 .terminalBol(toInt(request.getTerminal()))
+                 .boletaBol(toInt(request.getBoleta()))
+                 .medioPago(request.getMedioPago())
+                 .formaPago(request.getFormaPago())
+                 .iepsDesglosado(Boolean.TRUE.equals(request.getIepsDesglosado()))
+                // Relación con CFDI (sustitución)
+                .uuidOrig(request.getUuidCfdiRelacionado() != null && !request.getUuidCfdiRelacionado().trim().isEmpty() 
+                    ? request.getUuidCfdiRelacionado().trim().toUpperCase() : null)
                 // Totales
                 .subtotal(subtotal)
                 .iva(iva)
@@ -1258,6 +1598,12 @@ public class FacturaService {
      */
     private void guardarEnMongoTimbrada(FacturaFrontendRequest request, String xmlTimbrado, String uuidFinkok,
             BigDecimal subtotal, BigDecimal iva, BigDecimal total, PacTimbradoResponse pacResponse) {
+
+        // Verificar que MongoDB esté disponible
+        if (facturaMongoRepository == null) {
+            logger.warn("FacturaMongoRepository no está disponible - omitiendo guardado en MongoDB");
+            return;
+        }
 
         // Crear mapas para emisor y receptor
         Map<String, Object> emisor = new HashMap<>();
@@ -1318,7 +1664,7 @@ public class FacturaService {
      * Guarda la factura en base de datos desde FacturaRequest
      */
     private void guardarFacturaEnBD(FacturaRequest request, String xml, String uuid,
-            BigDecimal subtotal, BigDecimal iva, BigDecimal total) {
+            BigDecimal subtotal, BigDecimal iva, BigDecimal total, Long usuarioId) {
 
         // Crear entidad Factura para Oracle
         Factura facturaOracle = Factura.builder()
@@ -1353,6 +1699,8 @@ public class FacturaService {
                 .receptorDomicilioFiscal("CP " + request.getCodigoPostalReceptor())
                 .receptorRegimenFiscal(request.getRegimenFiscalReceptor())
                 .receptorUsoCfdi(request.getUsoCFDI())
+                // Usuario que emitió la factura
+                .usuario(usuarioId)
                 // Datos de la Factura
                 .codigoFacturacion("FAC-" + uuid.substring(0, 8))
                 .tienda("Tienda Central")
@@ -1372,8 +1720,15 @@ public class FacturaService {
         // Guardar en Oracle
         facturaRepository.save(facturaOracle);
 
-        // Guardar en MongoDB también
-        guardarEnMongoDesdeFacturaRequest(request, xml, uuid, subtotal, iva, total);
+        // Guardar en MongoDB solo si el perfil activo es "mongo"
+        String activeProfile = environment.getActiveProfiles().length > 0 ? environment.getActiveProfiles()[0] : "oracle";
+        if ("mongo".equals(activeProfile) && facturaMongoRepository != null) {
+            try {
+                guardarEnMongoDesdeFacturaRequest(request, xml, uuid, subtotal, iva, total);
+            } catch (Exception e) {
+                logger.warn("No se pudo guardar en MongoDB (puede no estar disponible): {}", e.getMessage());
+            }
+        }
     }
 
     /**
@@ -1381,6 +1736,12 @@ public class FacturaService {
      */
     private void guardarEnMongoDesdeFacturaRequest(FacturaRequest request, String xml, String uuid,
             BigDecimal subtotal, BigDecimal iva, BigDecimal total) {
+
+        // Verificar que MongoDB esté disponible
+        if (facturaMongoRepository == null) {
+            logger.warn("FacturaMongoRepository no está disponible - omitiendo guardado en MongoDB");
+            return;
+        }
 
         // Crear mapas para emisor y receptor
         Map<String, Object> emisor = new HashMap<>();
@@ -1668,25 +2029,69 @@ public class FacturaService {
             datosFactura.put("iva", factura.getIva());
             datosFactura.put("total", factura.getTotal());
 
-            // Intentar desglosar conceptos desde TICKETS_DETALLE usando el UUID
-            List<Map<String, Object>> conceptos = construirConceptosDesdeDetalle(uuid);
+            // Intentar extraer conceptos del XML timbrado primero (contiene todos los datos del catálogo)
+            List<Map<String, Object>> conceptos = null;
+            if (factura.getXmlContent() != null && !factura.getXmlContent().trim().isEmpty()) {
+                try {
+                    conceptos = extraerConceptosDesdeXml(factura.getXmlContent());
+                    if (conceptos != null && !conceptos.isEmpty()) {
+                        logger.info("Conceptos extraídos del XML timbrado: {} renglones", conceptos.size());
+                    }
+                } catch (Exception e) {
+                    logger.warn("Error al extraer conceptos del XML, intentando desde TICKETS_DETALLE: {}", e.getMessage());
+                }
+            }
+            
+            // Si no se pudieron extraer del XML, intentar desde TICKETS_DETALLE (modo automático)
+            if (conceptos == null || conceptos.isEmpty()) {
+                conceptos = construirConceptosDesdeDetalle(uuid);
+                if (conceptos != null && !conceptos.isEmpty()) {
+                    logger.info("Conceptos construidos desde TICKETS_DETALLE: {} renglones", conceptos.size());
+                }
+            }
+            
             if (conceptos != null && !conceptos.isEmpty()) {
                 datosFactura.put("conceptos", conceptos);
             }
-            // Intentar cargar datos de nómina asociados a la factura
-            try {
-                if (nominaOracleDAO != null && conceptoOracleDAO != null) {
-                    var idOpt = conceptoOracleDAO.obtenerIdFacturaPorUuid(uuid);
-                    if (idOpt.isPresent() && idOpt.get() != null) {
-                        Long idFactura = idOpt.get();
-                        java.util.Map<String, Object> nomina = nominaOracleDAO.buscarPorIdFactura(idFactura);
-                        if (nomina != null && !nomina.isEmpty()) {
-                            datosFactura.put("nomina", nomina);
+            // Intentar extraer datos de nómina desde el XML timbrado primero (contiene todos los datos incluyendo campos laborales)
+            Map<String, Object> datosNomina = null;
+            if (factura.getXmlContent() != null && !factura.getXmlContent().trim().isEmpty() && factura.getTipoFactura() != null && factura.getTipoFactura().equals(4)) {
+                try {
+                    datosNomina = extraerDatosNominaDesdeXml(factura.getXmlContent());
+                    if (datosNomina != null && !datosNomina.isEmpty()) {
+                        logger.info("Datos de nómina extraídos del XML timbrado para UUID {}", uuid);
+                        // Agregar correo electrónico desde la factura si está disponible
+                        if (factura.getReceptorCorreo() != null && !factura.getReceptorCorreo().trim().isEmpty()) {
+                            datosNomina.put("correoElectronico", factura.getReceptorCorreo().trim());
+                        }
+                        datosFactura.put("nomina", datosNomina);
+                    }
+                } catch (Exception e) {
+                    logger.warn("Error al extraer datos de nómina del XML, intentando desde BD: {}", e.getMessage());
+                }
+            }
+            
+            // Si no se pudieron extraer del XML, intentar desde la BD
+            if (datosNomina == null || datosNomina.isEmpty()) {
+                try {
+                    if (nominaOracleDAO != null && conceptoOracleDAO != null) {
+                        var idOpt = conceptoOracleDAO.obtenerIdFacturaPorUuid(uuid);
+                        if (idOpt.isPresent() && idOpt.get() != null) {
+                            Long idFactura = idOpt.get();
+                            java.util.Map<String, Object> nomina = nominaOracleDAO.buscarPorIdFactura(idFactura);
+                            if (nomina != null && !nomina.isEmpty()) {
+                                // Agregar correo electrónico desde la factura si está disponible
+                                if (factura.getReceptorCorreo() != null && !factura.getReceptorCorreo().trim().isEmpty()) {
+                                    nomina.put("correoElectronico", factura.getReceptorCorreo().trim());
+                                }
+                                datosFactura.put("nomina", nomina);
+                                logger.info("Datos de nómina obtenidos desde BD para UUID {}", uuid);
+                            }
                         }
                     }
+                } catch (Exception e) {
+                    logger.warn("No se pudo cargar datos de nómina para UUID {}: {}", uuid, e.getMessage());
                 }
-            } catch (Exception e) {
-                logger.warn("No se pudo cargar datos de nómina para UUID {}: {}", uuid, e.getMessage());
             }
             
             // Generar PDF con los datos de la factura
@@ -1759,6 +2164,11 @@ public class FacturaService {
                     return generarPdfPrueba(uuid, logoConfig);
                 }
             }
+            
+            // Verificar si es una Carta Porte (tipo_factura = 3)
+            Integer tipoFacturaValue = factura.getTipoFactura();
+            boolean esCartaPorte = tipoFacturaValue != null && tipoFacturaValue.equals(3);
+            logger.info("🔍 obtenerPdfComoBytes: UUID={}, tipoFactura={}, esCartaPorte={}, serie={}", uuid, tipoFacturaValue, esCartaPorte, factura.getSerie());
 
             Map<String, Object> datosFactura = new HashMap<>();
             datosFactura.put("uuid", factura.getUuid());
@@ -1769,31 +2179,98 @@ public class FacturaService {
             datosFactura.put("nombreEmisor", factura.getEmisorRazonSocial());
             datosFactura.put("rfcReceptor", factura.getReceptorRfc());
             datosFactura.put("nombreReceptor", factura.getReceptorRazonSocial());
-            datosFactura.put("tipoComprobante", mapearTipoComprobante(factura.getTipoFactura()));
+            String tipoComprobanteMapeado = mapearTipoComprobante(factura.getTipoFactura());
+            datosFactura.put("tipoComprobante", tipoComprobanteMapeado);
+            logger.info("🔍 tipoComprobante mapeado: '{}' para tipoFactura={}", tipoComprobanteMapeado, tipoFacturaValue);
             datosFactura.put("subtotal", factura.getSubtotal());
             datosFactura.put("iva", factura.getIva());
             datosFactura.put("total", factura.getTotal());
 
-            // Intentar desglosar conceptos desde TICKETS_DETALLE usando el UUID
-            List<Map<String, Object>> conceptos = construirConceptosDesdeDetalle(uuid);
-            if (conceptos != null && !conceptos.isEmpty()) {
-                datosFactura.put("conceptos", conceptos);
-            }
-
-            // Intentar cargar datos de nómina asociados a la factura
-            try {
-                if (nominaOracleDAO != null && conceptoOracleDAO != null) {
-                    var idOpt = conceptoOracleDAO.obtenerIdFacturaPorUuid(uuid);
-                    if (idOpt.isPresent() && idOpt.get() != null) {
-                        Long idFactura = idOpt.get();
-                        java.util.Map<String, Object> nomina = nominaOracleDAO.buscarPorIdFactura(idFactura);
-                        if (nomina != null && !nomina.isEmpty()) {
-                            datosFactura.put("nomina", nomina);
+            // Para Carta Porte, NO extraer conceptos (se usa el diseño específico agregarSeccionCartaPorte)
+            if (!esCartaPorte) {
+                logger.info("⚠️ NO es Carta Porte, continuando con flujo genérico de conceptos");
+                // Intentar extraer conceptos del XML timbrado primero (contiene todos los datos del catálogo)
+                List<Map<String, Object>> conceptos = null;
+                if (factura.getXmlContent() != null && !factura.getXmlContent().trim().isEmpty()) {
+                    try {
+                        conceptos = extraerConceptosDesdeXml(factura.getXmlContent());
+                        if (conceptos != null && !conceptos.isEmpty()) {
+                            logger.info("Conceptos extraídos del XML timbrado: {} renglones", conceptos.size());
                         }
+                    } catch (Exception e) {
+                        logger.warn("Error al extraer conceptos del XML, intentando desde TICKETS_DETALLE: {}", e.getMessage());
                     }
                 }
-            } catch (Exception e) {
-                logger.warn("No se pudo cargar datos de nómina para UUID {}: {}", uuid, e.getMessage());
+                
+                // Si no se pudieron extraer del XML, intentar desde TICKETS_DETALLE (modo automático)
+                if (conceptos == null || conceptos.isEmpty()) {
+                    conceptos = construirConceptosDesdeDetalle(uuid);
+                    if (conceptos != null && !conceptos.isEmpty()) {
+                        logger.info("Conceptos construidos desde TICKETS_DETALLE: {} renglones", conceptos.size());
+                    }
+                }
+                
+                if (conceptos != null && !conceptos.isEmpty()) {
+                    datosFactura.put("conceptos", conceptos);
+                }
+            } else {
+                // Para Carta Porte, usar CartaPorteService para generar el PDF con el diseño correcto
+                logger.info("✓ Carta Porte detectada (tipoFactura=3), usando CartaPorteService.generarPdfDesdeUuid para generar PDF");
+                if (cartaPorteService != null) {
+                    logger.info("CartaPorteService disponible, generando PDF...");
+                    byte[] pdfCartaPorte = cartaPorteService.generarPdfDesdeUuid(uuid, logoConfig);
+                    if (pdfCartaPorte != null && pdfCartaPorte.length > 100) {
+                        logger.info("✓ PDF de Carta Porte generado exitosamente: {} bytes", pdfCartaPorte.length);
+                        return pdfCartaPorte;
+                    } else {
+                        logger.error("✗ PDF de Carta Porte generado está vacío o inválido ({} bytes)", pdfCartaPorte != null ? pdfCartaPorte.length : 0);
+                        throw new RuntimeException("No se pudo generar el PDF de Carta Porte");
+                    }
+                } else {
+                    logger.error("✗ CartaPorteService no disponible para generar PDF de Carta Porte");
+                    throw new RuntimeException("CartaPorteService no disponible");
+                }
+            }
+
+            // Intentar extraer datos de nómina desde el XML timbrado primero (contiene todos los datos incluyendo campos laborales)
+            Map<String, Object> datosNominaLogo = null;
+            if (factura.getXmlContent() != null && !factura.getXmlContent().trim().isEmpty() && factura.getTipoFactura() != null && factura.getTipoFactura().equals(4)) {
+                try {
+                    datosNominaLogo = extraerDatosNominaDesdeXml(factura.getXmlContent());
+                    if (datosNominaLogo != null && !datosNominaLogo.isEmpty()) {
+                        logger.info("Datos de nómina extraídos del XML timbrado para UUID {}", uuid);
+                        // Agregar correo electrónico desde la factura si está disponible
+                        if (factura.getReceptorCorreo() != null && !factura.getReceptorCorreo().trim().isEmpty()) {
+                            datosNominaLogo.put("correoElectronico", factura.getReceptorCorreo().trim());
+                        }
+                        datosFactura.put("nomina", datosNominaLogo);
+                    }
+                } catch (Exception e) {
+                    logger.warn("Error al extraer datos de nómina del XML, intentando desde BD: {}", e.getMessage());
+                }
+            }
+            
+            // Si no se pudieron extraer del XML, intentar desde la BD
+            if (datosNominaLogo == null || datosNominaLogo.isEmpty()) {
+                try {
+                    if (nominaOracleDAO != null && conceptoOracleDAO != null) {
+                        var idOpt = conceptoOracleDAO.obtenerIdFacturaPorUuid(uuid);
+                        if (idOpt.isPresent() && idOpt.get() != null) {
+                            Long idFactura = idOpt.get();
+                            java.util.Map<String, Object> nomina = nominaOracleDAO.buscarPorIdFactura(idFactura);
+                            if (nomina != null && !nomina.isEmpty()) {
+                                // Agregar correo electrónico desde la factura si está disponible
+                                if (factura.getReceptorCorreo() != null && !factura.getReceptorCorreo().trim().isEmpty()) {
+                                    nomina.put("correoElectronico", factura.getReceptorCorreo().trim());
+                                }
+                                datosFactura.put("nomina", nomina);
+                                logger.info("Datos de nómina obtenidos desde BD para UUID {}", uuid);
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.warn("No se pudo cargar datos de nómina para UUID {}: {}", uuid, e.getMessage());
+                }
             }
 
             byte[] pdfBytes = iTextPdfService.generarPdfConLogo(datosFactura, logoConfig != null ? logoConfig : new HashMap<>());
@@ -1815,6 +2292,10 @@ public class FacturaService {
      * Construye la lista de conceptos para el PDF a partir de TICKETS_DETALLE,
      * resolviendo primero el ID_FACTURA por UUID y consultando por JOIN.
      */
+    /**
+     * Construye conceptos desde TICKETS_DETALLE (modo automático)
+     * Hace JOIN con CATALOGOS_PRODUCTOS_SERVICIOS para obtener campos del catálogo
+     */
     private List<Map<String, Object>> construirConceptosDesdeDetalle(String uuid) {
         try {
             if (conceptoOracleDAO == null || ticketDetalleService == null) {
@@ -1827,28 +2308,369 @@ public class FacturaService {
                 return null;
             }
             Long idFactura = idOpt.get();
+            
+            // MODO AUTOMÁTICO: Consultar desde TICKETS_DETALLE con JOIN a CATALOGOS_PRODUCTOS_SERVICIOS
             List<com.cibercom.facturacion_back.dto.TicketDetalleDto> detalles = ticketDetalleService.buscarDetallesPorIdFactura(idFactura);
             if (detalles == null || detalles.isEmpty()) {
                 logger.info("Sin detalles en TICKETS_DETALLE para ID_FACTURA {}", idFactura);
                 return null;
             }
+            
             List<Map<String, Object>> conceptos = new java.util.ArrayList<>();
             for (com.cibercom.facturacion_back.dto.TicketDetalleDto d : detalles) {
                 Map<String, Object> c = new HashMap<>();
                 c.put("cantidad", d.getCantidad() != null ? d.getCantidad() : java.math.BigDecimal.ONE);
                 c.put("descripcion", d.getDescripcion());
+                // Usar unidad del catálogo si está disponible, sino usar la del detalle
+                String unidad = (d.getUnidadCatalogo() != null && !d.getUnidadCatalogo().trim().isEmpty()) 
+                        ? d.getUnidadCatalogo() : d.getUnidad();
+                c.put("unidad", unidad);
+                // Usar claveUnidad del catálogo si está disponible
+                if (d.getClaveUnidad() != null && !d.getClaveUnidad().trim().isEmpty()) {
+                    c.put("claveUnidad", d.getClaveUnidad());
+                }
                 c.put("valorUnitario", d.getPrecioUnitario());
                 // Usamos SUBTOTAL para "Importe" y IVA_IMPORTE para "IVA"
                 c.put("importe", d.getSubtotal() != null ? d.getSubtotal() : d.getTotal());
                 c.put("iva", d.getIvaImporte());
+                // Campos del catálogo CATALOGOS_PRODUCTOS_SERVICIOS
+                if (d.getClaveProdServ() != null && !d.getClaveProdServ().trim().isEmpty()) {
+                    c.put("claveProdServ", d.getClaveProdServ());
+                }
+                if (d.getObjetoImpuesto() != null && !d.getObjetoImpuesto().trim().isEmpty()) {
+                    c.put("objetoImp", d.getObjetoImpuesto());
+                }
+                // Tasa IVA: priorizar la del catálogo, sino usar la del detalle
+                if (d.getTasaIva() != null) {
+                    c.put("tasaIva", d.getTasaIva());
+                } else if (d.getIvaPorcentaje() != null) {
+                    c.put("tasaIva", d.getIvaPorcentaje());
+                }
                 conceptos.add(c);
             }
-            logger.info("Conceptos construidos desde TICKETS_DETALLE: {} renglones", conceptos.size());
+            logger.info("Conceptos construidos desde TICKETS_DETALLE (modo automático): {} renglones", conceptos.size());
             return conceptos;
         } catch (Exception e) {
             logger.warn("Fallo al construir conceptos desde detalle: {}", e.getMessage());
             return null;
         }
+    }
+    
+    /**
+     * Extrae los conceptos directamente del XML timbrado
+     * Esto incluye todos los campos del catálogo que se enviaron en el XML
+     */
+    private List<Map<String, Object>> extraerConceptosDesdeXml(String xmlContent) {
+        try {
+            if (xmlContent == null || xmlContent.trim().isEmpty()) {
+                return null;
+            }
+            
+            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+            factory.setNamespaceAware(true);
+            DocumentBuilder builder = factory.newDocumentBuilder();
+            Document document = builder.parse(new ByteArrayInputStream(xmlContent.getBytes("UTF-8")));
+            
+            Element root = document.getDocumentElement();
+            
+            // Buscar el namespace de CFDI
+            String cfdiNamespace = root.getNamespaceURI();
+            if (cfdiNamespace == null) {
+                cfdiNamespace = "http://www.sat.gob.mx/cfd/4";
+            }
+            
+            // Buscar nodos Concepto
+            NodeList conceptosNode = root.getElementsByTagNameNS(cfdiNamespace, "Concepto");
+            if (conceptosNode.getLength() == 0) {
+                // Intentar sin namespace
+                conceptosNode = root.getElementsByTagName("Concepto");
+            }
+            
+            if (conceptosNode.getLength() == 0) {
+                logger.info("No se encontraron conceptos en el XML");
+                return null;
+            }
+            
+            List<Map<String, Object>> conceptos = new java.util.ArrayList<>();
+            
+            for (int i = 0; i < conceptosNode.getLength(); i++) {
+                Element conceptoElement = (Element) conceptosNode.item(i);
+                Map<String, Object> concepto = new HashMap<>();
+                
+                // Extraer atributos del concepto
+                String cantidad = conceptoElement.getAttribute("Cantidad");
+                String claveProdServ = conceptoElement.getAttribute("ClaveProdServ");
+                String claveUnidad = conceptoElement.getAttribute("ClaveUnidad");
+                String unidad = conceptoElement.getAttribute("Unidad");
+                String descripcion = conceptoElement.getAttribute("Descripcion");
+                String valorUnitario = conceptoElement.getAttribute("ValorUnitario");
+                String importe = conceptoElement.getAttribute("Importe");
+                String objetoImp = conceptoElement.getAttribute("ObjetoImp");
+                
+                // Convertir valores numéricos a BigDecimal para consistencia
+                BigDecimal cantidadBD = BigDecimal.ONE;
+                if (cantidad != null && !cantidad.isEmpty()) {
+                    try {
+                        cantidadBD = new BigDecimal(cantidad);
+                    } catch (Exception e) {
+                        logger.warn("Error al convertir cantidad '{}' a BigDecimal: {}", cantidad, e.getMessage());
+                    }
+                }
+                
+                BigDecimal valorUnitarioBD = BigDecimal.ZERO;
+                if (valorUnitario != null && !valorUnitario.isEmpty()) {
+                    try {
+                        valorUnitarioBD = new BigDecimal(valorUnitario);
+                    } catch (Exception e) {
+                        logger.warn("Error al convertir valorUnitario '{}' a BigDecimal: {}", valorUnitario, e.getMessage());
+                    }
+                }
+                
+                BigDecimal importeBD = BigDecimal.ZERO;
+                if (importe != null && !importe.isEmpty()) {
+                    try {
+                        importeBD = new BigDecimal(importe);
+                    } catch (Exception e) {
+                        logger.warn("Error al convertir importe '{}' a BigDecimal: {}", importe, e.getMessage());
+                    }
+                }
+                
+                concepto.put("cantidad", cantidadBD);
+                concepto.put("descripcion", descripcion != null ? descripcion : "");
+                concepto.put("unidad", unidad != null && !unidad.isEmpty() ? unidad : "");
+                concepto.put("claveUnidad", claveUnidad != null && !claveUnidad.isEmpty() ? claveUnidad : "");
+                concepto.put("claveProdServ", claveProdServ != null && !claveProdServ.isEmpty() ? claveProdServ : "");
+                concepto.put("valorUnitario", valorUnitarioBD);
+                concepto.put("importe", importeBD);
+                concepto.put("objetoImp", objetoImp != null && !objetoImp.isEmpty() ? objetoImp : "02");
+                
+                // Extraer impuestos del concepto
+                BigDecimal ivaImporte = BigDecimal.ZERO;
+                BigDecimal tasaOCuota = BigDecimal.ZERO;
+                
+                NodeList impuestosNode = conceptoElement.getElementsByTagNameNS(cfdiNamespace, "Impuestos");
+                if (impuestosNode.getLength() == 0) {
+                    impuestosNode = conceptoElement.getElementsByTagName("Impuestos");
+                }
+                
+                if (impuestosNode.getLength() > 0) {
+                    Element impuestosElement = (Element) impuestosNode.item(0);
+                    NodeList trasladosNode = impuestosElement.getElementsByTagNameNS(cfdiNamespace, "Traslado");
+                    if (trasladosNode.getLength() == 0) {
+                        trasladosNode = impuestosElement.getElementsByTagName("Traslado");
+                    }
+                    
+                    for (int j = 0; j < trasladosNode.getLength(); j++) {
+                        Element trasladoElement = (Element) trasladosNode.item(j);
+                        String impuesto = trasladoElement.getAttribute("Impuesto");
+                        if ("002".equals(impuesto)) { // IVA
+                            String importeIva = trasladoElement.getAttribute("Importe");
+                            String tasa = trasladoElement.getAttribute("TasaOCuota");
+                            if (importeIva != null && !importeIva.isEmpty()) {
+                                try {
+                                    ivaImporte = new BigDecimal(importeIva);
+                                } catch (Exception e) {}
+                            }
+                            if (tasa != null && !tasa.isEmpty()) {
+                                try {
+                                    tasaOCuota = new BigDecimal(tasa);
+                                } catch (Exception e) {}
+                            }
+                        }
+                    }
+                }
+                
+                concepto.put("iva", ivaImporte);
+                concepto.put("tasaIva", tasaOCuota);
+                
+                conceptos.add(concepto);
+            }
+            
+            logger.info("Conceptos extraídos del XML: {} renglones", conceptos.size());
+            return conceptos;
+            
+        } catch (Exception e) {
+            logger.warn("Error al extraer conceptos del XML: {}", e.getMessage());
+            return null;
+        }
+    }
+    
+    /**
+     * Extrae los datos de nómina directamente del XML timbrado
+     * Esto incluye todos los campos incluyendo datos laborales y correo electrónico
+     */
+    private Map<String, Object> extraerDatosNominaDesdeXml(String xmlContent) {
+        try {
+            if (xmlContent == null || xmlContent.trim().isEmpty()) {
+                return null;
+            }
+            
+            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+            factory.setNamespaceAware(true);
+            DocumentBuilder builder = factory.newDocumentBuilder();
+            Document document = builder.parse(new ByteArrayInputStream(xmlContent.getBytes("UTF-8")));
+            
+            Element root = document.getDocumentElement();
+            
+            // Buscar el namespace de CFDI
+            String cfdiNamespace = root.getNamespaceURI();
+            if (cfdiNamespace == null) {
+                cfdiNamespace = "http://www.sat.gob.mx/cfd/4";
+            }
+            
+            // Namespace de nómina
+            String nominaNamespace = "http://www.sat.gob.mx/nomina12";
+            
+            Map<String, Object> datosNomina = new HashMap<>();
+            
+            // Extraer datos del Receptor CFDI (incluye DomicilioFiscalReceptor y UsoCFDI)
+            Element receptorElement = obtenerPrimerElementoNS(document, cfdiNamespace, "Receptor");
+            if (receptorElement == null) {
+                receptorElement = obtenerPrimerElemento(document, "Receptor");
+            }
+            if (receptorElement != null) {
+                String domicilioFiscalReceptor = receptorElement.getAttribute("DomicilioFiscalReceptor");
+                if (domicilioFiscalReceptor != null && !domicilioFiscalReceptor.trim().isEmpty()) {
+                    datosNomina.put("domicilioFiscalReceptor", domicilioFiscalReceptor.trim());
+                }
+                String usoCfdi = receptorElement.getAttribute("UsoCFDI");
+                if (usoCfdi != null && !usoCfdi.trim().isEmpty()) {
+                    datosNomina.put("usoCfdi", usoCfdi.trim());
+                }
+            }
+            
+            // Buscar nodo nomina12:Nomina
+            Element nominaElement = obtenerPrimerElementoNS(document, nominaNamespace, "Nomina");
+            if (nominaElement == null) {
+                nominaElement = obtenerPrimerElemento(document, "Nomina");
+            }
+            
+            if (nominaElement == null) {
+                logger.info("No se encontró nodo Nomina en el XML");
+                return datosNomina;
+            }
+            
+            // Extraer atributos del nodo Nomina
+            String tipoNomina = nominaElement.getAttribute("TipoNomina");
+            String fechaPago = nominaElement.getAttribute("FechaPago");
+            String fechaInicialPago = nominaElement.getAttribute("FechaInicialPago");
+            String fechaFinalPago = nominaElement.getAttribute("FechaFinalPago");
+            String numDiasPagados = nominaElement.getAttribute("NumDiasPagados");
+            String totalPercepciones = nominaElement.getAttribute("TotalPercepciones");
+            String totalDeducciones = nominaElement.getAttribute("TotalDeducciones");
+            
+            if (tipoNomina != null && !tipoNomina.isEmpty()) {
+                datosNomina.put("tipoNomina", tipoNomina);
+            }
+            if (fechaPago != null && !fechaPago.isEmpty()) {
+                datosNomina.put("fechaPago", fechaPago);
+                // fechaNomina no está en el XML, usar fechaPago como valor por defecto
+                datosNomina.put("fechaNomina", fechaPago);
+            }
+            if (fechaInicialPago != null && fechaFinalPago != null && !fechaInicialPago.isEmpty() && !fechaFinalPago.isEmpty()) {
+                datosNomina.put("periodoPago", fechaInicialPago + " al " + fechaFinalPago);
+            }
+            if (totalPercepciones != null && !totalPercepciones.isEmpty()) {
+                try {
+                    datosNomina.put("percepciones", new BigDecimal(totalPercepciones));
+                } catch (Exception e) {
+                    logger.warn("Error al convertir TotalPercepciones a BigDecimal: {}", e.getMessage());
+                }
+            }
+            if (totalDeducciones != null && !totalDeducciones.isEmpty()) {
+                try {
+                    datosNomina.put("deducciones", new BigDecimal(totalDeducciones));
+                } catch (Exception e) {
+                    logger.warn("Error al convertir TotalDeducciones a BigDecimal: {}", e.getMessage());
+                }
+            }
+            
+            // Buscar nodo nomina12:Receptor (contiene datos laborales)
+            Element receptorNominaElement = obtenerPrimerElementoNS(nominaElement, nominaNamespace, "Receptor");
+            if (receptorNominaElement == null) {
+                receptorNominaElement = obtenerPrimerElemento(nominaElement, "Receptor");
+            }
+            
+            if (receptorNominaElement != null) {
+                String curp = receptorNominaElement.getAttribute("Curp");
+                String numSeguridadSocial = receptorNominaElement.getAttribute("NumSeguridadSocial");
+                String fechaInicioRelLaboral = receptorNominaElement.getAttribute("FechaInicioRelLaboral");
+                String antiguedad = receptorNominaElement.getAttribute("Antigüedad");
+                String riesgoPuesto = receptorNominaElement.getAttribute("RiesgoPuesto");
+                String salarioDiarioIntegrado = receptorNominaElement.getAttribute("SalarioDiarioIntegrado");
+                
+                if (curp != null && !curp.isEmpty()) {
+                    datosNomina.put("curp", curp);
+                }
+                if (numSeguridadSocial != null && !numSeguridadSocial.isEmpty()) {
+                    datosNomina.put("numSeguridadSocial", numSeguridadSocial);
+                }
+                if (fechaInicioRelLaboral != null && !fechaInicioRelLaboral.isEmpty()) {
+                    datosNomina.put("fechaInicioRelLaboral", fechaInicioRelLaboral);
+                }
+                if (antiguedad != null && !antiguedad.isEmpty()) {
+                    datosNomina.put("antiguedad", antiguedad);
+                }
+                if (riesgoPuesto != null && !riesgoPuesto.isEmpty()) {
+                    datosNomina.put("riesgoPuesto", riesgoPuesto);
+                }
+                if (salarioDiarioIntegrado != null && !salarioDiarioIntegrado.isEmpty()) {
+                    datosNomina.put("salarioDiarioIntegrado", salarioDiarioIntegrado);
+                }
+            }
+            
+            // El nombre y RFC receptor se pueden obtener del nodo Receptor principal
+            if (receptorElement != null) {
+                String nombreReceptor = receptorElement.getAttribute("Nombre");
+                String rfcReceptor = receptorElement.getAttribute("Rfc");
+                if (nombreReceptor != null && !nombreReceptor.isEmpty()) {
+                    datosNomina.put("nombre", nombreReceptor);
+                    datosNomina.put("rfcReceptor", rfcReceptor);
+                }
+            }
+            
+            // El correo electrónico se puede obtener desde la factura si está disponible
+            // (no está en el XML de nómina, pero podemos intentar obtenerlo desde otros campos)
+            
+            logger.info("Datos de nómina extraídos del XML: {} campos", datosNomina.size());
+            return datosNomina;
+            
+        } catch (Exception e) {
+            logger.warn("Error al extraer datos de nómina del XML: {}", e.getMessage());
+            return null;
+        }
+    }
+    
+    /**
+     * Helper para obtener el primer elemento por namespace y localName
+     */
+    private Element obtenerPrimerElementoNS(org.w3c.dom.Node parent, String namespaceURI, String localName) {
+        if (parent == null) return null;
+        org.w3c.dom.NodeList nodeList;
+        if (parent instanceof Document) {
+            nodeList = ((Document) parent).getElementsByTagNameNS(namespaceURI, localName);
+        } else if (parent instanceof Element) {
+            nodeList = ((Element) parent).getElementsByTagNameNS(namespaceURI, localName);
+        } else {
+            return null;
+        }
+        return (nodeList != null && nodeList.getLength() > 0) ? (Element) nodeList.item(0) : null;
+    }
+    
+    /**
+     * Helper para obtener el primer elemento por localName (sin namespace)
+     */
+    private Element obtenerPrimerElemento(org.w3c.dom.Node parent, String localName) {
+        if (parent == null) return null;
+        org.w3c.dom.NodeList nodeList;
+        if (parent instanceof Document) {
+            nodeList = ((Document) parent).getElementsByTagName(localName);
+        } else if (parent instanceof Element) {
+            nodeList = ((Element) parent).getElementsByTagName(localName);
+        } else {
+            return null;
+        }
+        return (nodeList != null && nodeList.getLength() > 0) ? (Element) nodeList.item(0) : null;
     }
     
     /**
@@ -2097,7 +2919,7 @@ public class FacturaService {
             datosFactura.put("tipoComprobante", "R"); // R para Retención
             datosFactura.put("moneda", "MXN");
             
-            // Construir conceptos con la información de retención
+            // Construir conceptos con la información de retención (versión simplificada y profesional)
             List<Map<String, Object>> conceptos = new ArrayList<>();
             
             if (retencionConsulta != null) {
@@ -2115,85 +2937,27 @@ public class FacturaService {
                                     (aplicaIsr && (retencionConsulta.tipoRetencion().equals("ISR_SERVICIOS") || 
                                                    retencionConsulta.tipoRetencion().equals("ISR_ARRENDAMIENTO"))));
                 
-                // Calcular ISR e IVA retenido
-                BigDecimal isrRetenido = java.math.BigDecimal.ZERO;
-                BigDecimal ivaRetenido = java.math.BigDecimal.ZERO;
-                
-                if (aplicaIsr) {
-                    // ISR = 10% del monto base para la mayoría de tipos
-                    isrRetenido = baseRetencion.multiply(new java.math.BigDecimal("0.10"))
-                        .setScale(2, java.math.RoundingMode.HALF_UP);
+                // Construir descripción profesional del concepto
+                StringBuilder descripcionConcepto = new StringBuilder();
+                if (aplicaIsr && aplicaIva) {
+                    descripcionConcepto.append("Retención de ISR e IVA - ").append(tipoRetencionDesc);
+                } else if (aplicaIsr) {
+                    descripcionConcepto.append("Retención de ISR - ").append(tipoRetencionDesc);
+                } else if (aplicaIva) {
+                    descripcionConcepto.append("Retención de IVA - ").append(tipoRetencionDesc);
+                } else {
+                    descripcionConcepto.append("Retención de Pagos - ").append(tipoRetencionDesc);
                 }
                 
-                if (aplicaIva) {
-                    // IVA retenido = 2/3 del IVA total (16% del base)
-                    BigDecimal ivaTotal = baseRetencion.multiply(new java.math.BigDecimal("0.16"));
-                    ivaRetenido = ivaTotal.multiply(new java.math.BigDecimal("2"))
-                        .divide(new java.math.BigDecimal("3"), 2, java.math.RoundingMode.HALF_UP);
-                }
+                // Concepto único y profesional
+                Map<String, Object> concepto = new HashMap<>();
+                concepto.put("cantidad", java.math.BigDecimal.ONE);
+                concepto.put("descripcion", descripcionConcepto.toString());
+                concepto.put("valorUnitario", baseRetencion);
+                concepto.put("importe", baseRetencion);
+                concepto.put("iva", java.math.BigDecimal.ZERO);
+                conceptos.add(concepto);
                 
-                // Ajustar si el monto total retenido es diferente a la suma calculada
-                BigDecimal sumaCalculada = isrRetenido.add(ivaRetenido);
-                if (sumaCalculada.compareTo(java.math.BigDecimal.ZERO) > 0 && 
-                    montoRetenido.compareTo(sumaCalculada) != 0) {
-                    // Proporcionalmente ajustar
-                    if (sumaCalculada.compareTo(java.math.BigDecimal.ZERO) > 0) {
-                        java.math.BigDecimal factor = montoRetenido.divide(sumaCalculada, 4, java.math.RoundingMode.HALF_UP);
-                        isrRetenido = isrRetenido.multiply(factor).setScale(2, java.math.RoundingMode.HALF_UP);
-                        ivaRetenido = ivaRetenido.multiply(factor).setScale(2, java.math.RoundingMode.HALF_UP);
-                    }
-                }
-                
-                // Concepto 1: Monto Base
-                Map<String, Object> conceptoBase = new HashMap<>();
-                conceptoBase.put("cantidad", java.math.BigDecimal.ONE);
-                conceptoBase.put("descripcion", tipoRetencionDesc);
-                conceptoBase.put("valorUnitario", baseRetencion);
-                conceptoBase.put("importe", baseRetencion);
-                conceptoBase.put("iva", java.math.BigDecimal.ZERO);
-                conceptos.add(conceptoBase);
-                
-                // Concepto 2: ISR Retenido (si aplica)
-                if (aplicaIsr && isrRetenido.compareTo(java.math.BigDecimal.ZERO) > 0) {
-                    Map<String, Object> conceptoIsr = new HashMap<>();
-                    conceptoIsr.put("cantidad", java.math.BigDecimal.ONE);
-                    conceptoIsr.put("descripcion", "ISR Retenido");
-                    conceptoIsr.put("valorUnitario", isrRetenido);
-                    conceptoIsr.put("importe", isrRetenido);
-                    conceptoIsr.put("iva", java.math.BigDecimal.ZERO);
-                    conceptos.add(conceptoIsr);
-                }
-                
-                // Concepto 3: IVA Retenido (si aplica)
-                if (aplicaIva && ivaRetenido.compareTo(java.math.BigDecimal.ZERO) > 0) {
-                    Map<String, Object> conceptoIva = new HashMap<>();
-                    conceptoIva.put("cantidad", java.math.BigDecimal.ONE);
-                    conceptoIva.put("descripcion", "IVA Retenido");
-                    conceptoIva.put("valorUnitario", ivaRetenido);
-                    conceptoIva.put("importe", ivaRetenido);
-                    conceptoIva.put("iva", java.math.BigDecimal.ZERO);
-                    conceptos.add(conceptoIva);
-                }
-                
-                // Concepto 4: Total Retenido
-                Map<String, Object> conceptoTotal = new HashMap<>();
-                conceptoTotal.put("cantidad", java.math.BigDecimal.ONE);
-                conceptoTotal.put("descripcion", "Total Retenido");
-                conceptoTotal.put("valorUnitario", montoRetenido);
-                conceptoTotal.put("importe", montoRetenido);
-                conceptoTotal.put("iva", java.math.BigDecimal.ZERO);
-                conceptos.add(conceptoTotal);
-                
-                // Agregar comentarios si existen
-                if (retencionConsulta.comentarios() != null && !retencionConsulta.comentarios().isBlank()) {
-                    Map<String, Object> conceptoComentario = new HashMap<>();
-                    conceptoComentario.put("cantidad", java.math.BigDecimal.ONE);
-                    conceptoComentario.put("descripcion", retencionConsulta.comentarios());
-                    conceptoComentario.put("valorUnitario", java.math.BigDecimal.ZERO);
-                    conceptoComentario.put("importe", java.math.BigDecimal.ZERO);
-                    conceptoComentario.put("iva", java.math.BigDecimal.ZERO);
-                    conceptos.add(conceptoComentario);
-                }
             } else {
                 // Fallback: usar datos de la factura
                 Map<String, Object> conceptoFallback = new HashMap<>();
@@ -2203,16 +2967,6 @@ public class FacturaService {
                 conceptoFallback.put("importe", factura.getSubtotal() != null ? factura.getSubtotal() : java.math.BigDecimal.ZERO);
                 conceptoFallback.put("iva", java.math.BigDecimal.ZERO);
                 conceptos.add(conceptoFallback);
-                
-                if (factura.getTotal() != null && factura.getTotal().compareTo(factura.getSubtotal() != null ? factura.getSubtotal() : java.math.BigDecimal.ZERO) > 0) {
-                    Map<String, Object> conceptoTotal = new HashMap<>();
-                    conceptoTotal.put("cantidad", java.math.BigDecimal.ONE);
-                    conceptoTotal.put("descripcion", "Monto Total Retenido");
-                    conceptoTotal.put("valorUnitario", factura.getTotal());
-                    conceptoTotal.put("importe", factura.getTotal());
-                    conceptoTotal.put("iva", java.math.BigDecimal.ZERO);
-                    conceptos.add(conceptoTotal);
-                }
             }
             
             datosFactura.put("conceptos", conceptos);
@@ -2229,14 +2983,78 @@ public class FacturaService {
                 montoRetenidoCalc = factura.getTotal() != null ? factura.getTotal() : java.math.BigDecimal.ZERO;
             }
             
-            // Subtotal = monto base
+            // Para retenciones: Subtotal = monto base, Total = monto retenido
             BigDecimal subtotal = baseRetencionCalc;
-            // Total = monto retenido
             BigDecimal total = montoRetenidoCalc;
             
             datosFactura.put("subtotal", subtotal);
             datosFactura.put("iva", java.math.BigDecimal.ZERO); // Las retenciones no tienen IVA adicional
             datosFactura.put("total", total);
+            
+            // Construir datosRetencion estructurado para el diseño específico (igual que generarPdfPreview)
+            Map<String, Object> datosRetencion = new HashMap<>();
+            if (retencionConsulta != null) {
+                String tipoRetencion = retencionConsulta.tipoRetencion() != null ? retencionConsulta.tipoRetencion() : null;
+                String claveRetencion = retencionConsulta.claveRetencion() != null ? retencionConsulta.claveRetencion() : null;
+                
+                // Determinar ISR e IVA retenidos basándose en el campo impuesto
+                java.math.BigDecimal isrRetenido = java.math.BigDecimal.ZERO;
+                java.math.BigDecimal ivaRetenido = java.math.BigDecimal.ZERO;
+                String impuesto = retencionConsulta.impuesto() != null ? retencionConsulta.impuesto() : "";
+                if (impuesto.contains("ISR") || impuesto.contains("001")) {
+                    isrRetenido = montoRetenidoCalc; // Si el impuesto es ISR, todo el monto retenido es ISR
+                } else if (impuesto.contains("IVA") || impuesto.contains("002")) {
+                    ivaRetenido = montoRetenidoCalc; // Si el impuesto es IVA, todo el monto retenido es IVA
+                }
+                
+                // Formatear período
+                String periodoMes = null;
+                if (retencionConsulta.periodoMesIni() != null) {
+                    periodoMes = String.format("%02d", retencionConsulta.periodoMesIni());
+                }
+                String periodoAnio = null;
+                if (retencionConsulta.periodoEjercicio() != null) {
+                    periodoAnio = retencionConsulta.periodoEjercicio().toString();
+                }
+                
+                // Formatear fecha de pago
+                String fechaPago = null;
+                if (retencionConsulta.fechaRetencion() != null) {
+                    fechaPago = retencionConsulta.fechaRetencion().toString();
+                }
+                
+                datosRetencion.put("tipoRetencion", tipoRetencion);
+                datosRetencion.put("cveRetenc", claveRetencion);
+                datosRetencion.put("descripcionTipo", tipoRetencion != null ? obtenerDescripcionTipoRetencion(tipoRetencion) : "");
+                datosRetencion.put("concepto", retencionConsulta.comentarios() != null ? retencionConsulta.comentarios() : "");
+                datosRetencion.put("montoBase", baseRetencionCalc);
+                // Estos campos no están disponibles en RetencionConsulta, usar valores por defecto
+                datosRetencion.put("montoTotGravado", baseRetencionCalc); // Asumir que todo es gravado
+                datosRetencion.put("montoTotExento", java.math.BigDecimal.ZERO);
+                datosRetencion.put("periodoMes", periodoMes);
+                datosRetencion.put("periodoAnio", periodoAnio);
+                datosRetencion.put("fechaPago", fechaPago);
+                datosRetencion.put("isrRetenido", isrRetenido);
+                datosRetencion.put("ivaRetenido", ivaRetenido);
+                datosRetencion.put("montoRetenido", montoRetenidoCalc);
+                // Nota: impRetenidos no está disponible en RetencionConsulta, se puede construir si es necesario
+            } else {
+                // Fallback con datos mínimos
+                datosRetencion.put("tipoRetencion", null);
+                datosRetencion.put("cveRetenc", null);
+                datosRetencion.put("descripcionTipo", "");
+                datosRetencion.put("concepto", "");
+                datosRetencion.put("montoBase", baseRetencionCalc);
+                datosRetencion.put("montoTotGravado", baseRetencionCalc);
+                datosRetencion.put("montoTotExento", java.math.BigDecimal.ZERO);
+                datosRetencion.put("periodoMes", null);
+                datosRetencion.put("periodoAnio", null);
+                datosRetencion.put("fechaPago", null);
+                datosRetencion.put("isrRetenido", java.math.BigDecimal.ZERO);
+                datosRetencion.put("ivaRetenido", java.math.BigDecimal.ZERO);
+                datosRetencion.put("montoRetenido", montoRetenidoCalc);
+            }
+            datosFactura.put("datosRetencion", datosRetencion);
             
             // Generar PDF usando ITextPdfService
             try {
@@ -2353,6 +3171,182 @@ public class FacturaService {
                    uuidLimpio.substring(12, 16) + "-" +
                    uuidLimpio.substring(16, 20) + "-" +
                    uuidLimpio.substring(20, 32);
+        }
+    }
+
+    /**
+     * Escapa caracteres especiales XML
+     */
+    private String escapeXml(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.replace("&", "&amp;")
+                .replace("\"", "&quot;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;");
+    }
+
+    /**
+     * Genera un PDF de vista previa sin timbrar a partir de FacturaFrontendRequest
+     */
+    public byte[] generarPdfPreview(FacturaFrontendRequest request, Map<String, Object> logoConfig) {
+        try {
+            logger.info("Generando PDF de vista previa para RFC receptor: {}", request.getRfc());
+
+            // Calcular totales desde conceptos si están disponibles (modo manual)
+            BigDecimal subtotal = BigDecimal.ZERO;
+            BigDecimal iva = BigDecimal.ZERO;
+            BigDecimal total = BigDecimal.ZERO;
+            
+            List<Map<String, Object>> conceptos = new ArrayList<>();
+
+            // Si hay conceptos en el request (modo manual), calcular desde ellos
+            if (request.getConceptos() != null && !request.getConceptos().isEmpty()) {
+                logger.info("Calculando totales desde conceptos del request (modo manual)");
+                for (FacturaFrontendRequest.Concepto concepto : request.getConceptos()) {
+                    BigDecimal cantidad = concepto.getCantidad() != null ? concepto.getCantidad() : BigDecimal.ONE;
+                    BigDecimal precioUnitario = concepto.getPrecioUnitario() != null ? concepto.getPrecioUnitario() : BigDecimal.ZERO;
+                    BigDecimal importe = concepto.getImporte() != null ? concepto.getImporte() : precioUnitario.multiply(cantidad);
+                    BigDecimal tasaIva = concepto.getTasaIva() != null ? concepto.getTasaIva() : BigDecimal.ZERO;
+                    BigDecimal ivaConcepto = importe.multiply(tasaIva);
+                    
+                    subtotal = subtotal.add(importe);
+                    iva = iva.add(ivaConcepto);
+                    
+                    // Construir mapa del concepto para el PDF
+                    Map<String, Object> c = new HashMap<>();
+                    c.put("cantidad", cantidad);
+                    c.put("descripcion", concepto.getDescripcion() != null ? concepto.getDescripcion() : "Producto/Servicio");
+                    c.put("unidad", concepto.getUnidad() != null ? concepto.getUnidad() : "");
+                    c.put("claveUnidad", concepto.getClaveUnidad() != null ? concepto.getClaveUnidad() : "");
+                    c.put("claveProdServ", concepto.getClaveProdServ() != null ? concepto.getClaveProdServ() : "");
+                    c.put("valorUnitario", precioUnitario);
+                    c.put("importe", importe);
+                    c.put("iva", ivaConcepto);
+                    c.put("tasaIva", tasaIva);
+                    c.put("objetoImp", concepto.getObjetoImp() != null ? concepto.getObjetoImp() : "02");
+                    conceptos.add(c);
+                }
+                total = subtotal.add(iva);
+            } else {
+                // Modo automático: intentar obtener desde ticket
+                try {
+                    if (ticketService != null && request.getTienda() != null && request.getBoleta() != null) {
+                        TicketSearchRequest tsr = new TicketSearchRequest();
+                        tsr.setCodigoTienda(request.getTienda());
+                        tsr.setTerminalId(toInt(request.getTerminal()));
+                        tsr.setFecha(request.getFecha() != null ? request.getFecha().toString() : null);
+                        tsr.setFolio(toInt(request.getBoleta()));
+
+                        List<TicketDto> tickets = ticketService.buscarTickets(tsr);
+                        if (tickets != null && !tickets.isEmpty()) {
+                            TicketDto t = tickets.get(0);
+                            if (t.getSubtotal() != null) subtotal = t.getSubtotal();
+                            if (t.getIva() != null) {
+                                iva = t.getIva();
+                            } else {
+                                iva = subtotal.multiply(new BigDecimal("0.16"));
+                            }
+                            if (t.getTotal() != null) {
+                                total = t.getTotal();
+                            } else {
+                                total = subtotal.add(iva);
+                            }
+                            
+                            // Obtener detalles del ticket
+                            if (ticketDetalleService != null && t.getIdTicket() != null) {
+                                List<com.cibercom.facturacion_back.dto.TicketDetalleDto> detalles = 
+                                    ticketDetalleService.buscarDetallesPorIdTicket(t.getIdTicket());
+                                if (detalles != null && !detalles.isEmpty()) {
+                                    for (com.cibercom.facturacion_back.dto.TicketDetalleDto d : detalles) {
+                                        Map<String, Object> c = new HashMap<>();
+                                        c.put("cantidad", d.getCantidad() != null ? d.getCantidad() : BigDecimal.ONE);
+                                        c.put("descripcion", d.getDescripcion() != null ? d.getDescripcion() : "Producto");
+                                        String unidad = (d.getUnidadCatalogo() != null && !d.getUnidadCatalogo().trim().isEmpty()) 
+                                                ? d.getUnidadCatalogo() : d.getUnidad();
+                                        c.put("unidad", unidad);
+                                        if (d.getClaveUnidad() != null && !d.getClaveUnidad().trim().isEmpty()) {
+                                            c.put("claveUnidad", d.getClaveUnidad());
+                                        }
+                                        c.put("valorUnitario", d.getPrecioUnitario() != null ? d.getPrecioUnitario() : BigDecimal.ZERO);
+                                        c.put("importe", d.getSubtotal() != null ? d.getSubtotal() : BigDecimal.ZERO);
+                                        c.put("iva", d.getIvaImporte() != null ? d.getIvaImporte() : BigDecimal.ZERO);
+                                        if (d.getClaveProdServ() != null && !d.getClaveProdServ().trim().isEmpty()) {
+                                            c.put("claveProdServ", d.getClaveProdServ());
+                                        }
+                                        if (d.getTasaIva() != null) {
+                                            c.put("tasaIva", d.getTasaIva());
+                                        } else if (d.getIvaPorcentaje() != null) {
+                                            c.put("tasaIva", d.getIvaPorcentaje());
+                                        }
+                                        if (d.getObjetoImpuesto() != null && !d.getObjetoImpuesto().trim().isEmpty()) {
+                                            c.put("objetoImp", d.getObjetoImpuesto());
+                                        }
+                                        conceptos.add(c);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.warn("Fallo al buscar ticket para totales en preview: {}", e.getMessage());
+                }
+            }
+
+            // Si no hay conceptos, agregar uno genérico
+            if (conceptos.isEmpty()) {
+                subtotal = new BigDecimal("1000.00"); // Valor por defecto
+                iva = subtotal.multiply(new BigDecimal("0.16"));
+                total = subtotal.add(iva);
+                
+                Map<String, Object> concepto = new HashMap<>();
+                concepto.put("cantidad", BigDecimal.ONE);
+                concepto.put("descripcion", "Producto/Servicio");
+                concepto.put("valorUnitario", subtotal);
+                concepto.put("importe", subtotal);
+                concepto.put("iva", iva);
+                concepto.put("tasaIva", new BigDecimal("0.16"));
+                conceptos.add(concepto);
+            }
+
+            // Construir datos de factura para el PDF
+            Map<String, Object> datosFactura = new HashMap<>();
+            datosFactura.put("uuid", "PREVIEW-" + java.util.UUID.randomUUID().toString());
+            datosFactura.put("serie", "A");
+            datosFactura.put("folio", "PREVIEW");
+            datosFactura.put("fechaTimbrado", LocalDateTime.now());
+            datosFactura.put("rfcEmisor", rfcEmisorDefault);
+            datosFactura.put("nombreEmisor", nombreEmisorDefault);
+            datosFactura.put("rfcReceptor", request.getRfc());
+            
+            // Determinar nombre del receptor
+            String nombreReceptor = "";
+            if (request.getRfc() != null && request.getRfc().length() == 12) {
+                // Persona moral
+                nombreReceptor = request.getRazonSocial() != null ? request.getRazonSocial() : "";
+            } else {
+                // Persona física
+                StringBuilder nombreBuilder = new StringBuilder();
+                if (request.getNombre() != null) nombreBuilder.append(request.getNombre());
+                if (request.getPaterno() != null) nombreBuilder.append(" ").append(request.getPaterno());
+                if (request.getMaterno() != null) nombreBuilder.append(" ").append(request.getMaterno());
+                nombreReceptor = nombreBuilder.toString().trim();
+            }
+            datosFactura.put("nombreReceptor", nombreReceptor);
+            datosFactura.put("tipoComprobante", "I"); // Ingreso
+            datosFactura.put("subtotal", subtotal);
+            datosFactura.put("iva", iva);
+            datosFactura.put("total", total);
+            datosFactura.put("conceptos", conceptos);
+
+            // Generar PDF
+            byte[] pdfBytes = iTextPdfService.generarPdfConLogo(datosFactura, logoConfig != null ? logoConfig : new HashMap<>());
+            logger.info("PDF de vista previa generado exitosamente: {} bytes", pdfBytes != null ? pdfBytes.length : 0);
+            return pdfBytes;
+        } catch (Exception e) {
+            logger.error("Error al generar PDF de vista previa: {}", e.getMessage(), e);
+            throw new RuntimeException("Error al generar PDF de vista previa: " + e.getMessage(), e);
         }
     }
 }

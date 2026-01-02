@@ -49,6 +49,27 @@ public class FacturaFrontendRequest {
 
     private Boolean guardarEnMongo;
 
+    // Campos para relaciones de CFDI (sustitución)
+    private String uuidCfdiRelacionado;
+    private String tipoRelacion;
+
+    // Conceptos de la factura (para modo manual)
+    private java.util.List<Concepto> conceptos;
+
+    // Clase interna para Concepto
+    @Data
+    public static class Concepto {
+        private String descripcion;
+        private java.math.BigDecimal cantidad;
+        private String unidad;
+        private java.math.BigDecimal precioUnitario;
+        private java.math.BigDecimal importe;
+        private String claveProdServ;
+        private String claveUnidad;
+        private String objetoImp;
+        private java.math.BigDecimal tasaIva;
+    }
+
     // Getters explícitos para asegurar compilación
     public String getRfc() { return rfc; }
     public String getCorreoElectronico() { return correoElectronico; }
@@ -70,4 +91,8 @@ public class FacturaFrontendRequest {
     public String getFormaPago() { return formaPago; }
     public Boolean getIepsDesglosado() { return iepsDesglosado; }
     public Boolean getGuardarEnMongo() { return guardarEnMongo; }
+    public String getUuidCfdiRelacionado() { return uuidCfdiRelacionado; }
+    public String getTipoRelacion() { return tipoRelacion; }
+    public java.util.List<Concepto> getConceptos() { return conceptos; }
+    public void setConceptos(java.util.List<Concepto> conceptos) { this.conceptos = conceptos; }
 }

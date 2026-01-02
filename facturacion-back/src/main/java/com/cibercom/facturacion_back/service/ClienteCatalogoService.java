@@ -32,13 +32,47 @@ public class ClienteCatalogoService {
         }
         String normalized = rfc.trim().toUpperCase();
         log.info("Consultando tabla CLIENTES por RFC: {}", normalized);
+        
+        // Primero intentar búsqueda exacta normalizada
         Optional<ClienteCatalogo> result = clienteCatalogoRepository.findByRfcNormalized(normalized);
-        if (result.isEmpty()) {
-            log.info("CLIENTES RFC {} no encontrado con igualdad exacta; probando ignorar prefijo", normalized);
-            result = clienteCatalogoRepository.findByRfcOrPrefixed(normalized);
+        if (result.isPresent()) {
+            log.info("CLIENTES RFC {} encontrado con igualdad exacta normalizada", normalized);
+            return result;
         }
-        log.info("Resultado CLIENTES RFC {}: {}", normalized, result.isPresent() ? "ENCONTRADO" : "NO_ENCONTRADO");
-        return result;
+        
+        // Si no se encuentra, intentar ignorar prefijo
+        log.info("CLIENTES RFC {} no encontrado con igualdad exacta; probando ignorar prefijo", normalized);
+        result = clienteCatalogoRepository.findByRfcOrPrefixed(normalized);
+        if (result.isPresent()) {
+            log.info("CLIENTES RFC {} encontrado con búsqueda que ignora prefijo", normalized);
+            return result;
+        }
+        
+        // Si aún no se encuentra, intentar búsqueda parcial (solo si el RFC tiene al menos 3 caracteres)
+        if (normalized.length() >= 3) {
+            log.info("CLIENTES RFC {} no encontrado con búsqueda exacta; probando búsqueda parcial", normalized);
+            List<ClienteCatalogo> resultadosParciales = buscarPorRFCParcial(normalized, 10);
+            // Buscar coincidencia exacta en los resultados parciales
+            for (ClienteCatalogo c : resultadosParciales) {
+                if (c.getRfc() != null && c.getRfc().trim().toUpperCase().equals(normalized)) {
+                    log.info("CLIENTES RFC {} encontrado en búsqueda parcial con coincidencia exacta", normalized);
+                    return Optional.of(c);
+                }
+            }
+            // Si hay un solo resultado parcial y es muy similar, usarlo
+            if (resultadosParciales.size() == 1) {
+                ClienteCatalogo unico = resultadosParciales.get(0);
+                String rfcUnico = unico.getRfc() != null ? unico.getRfc().trim().toUpperCase() : "";
+                // Verificar si el RFC buscado está contenido en el encontrado o viceversa
+                if (rfcUnico.contains(normalized) || normalized.contains(rfcUnico)) {
+                    log.info("CLIENTES RFC {} encontrado en búsqueda parcial con coincidencia parcial (único resultado)", normalized);
+                    return Optional.of(unico);
+                }
+            }
+        }
+        
+        log.info("Resultado CLIENTES RFC {}: NO_ENCONTRADO", normalized);
+        return Optional.empty();
     }
 
     public long contar() {
@@ -117,5 +151,51 @@ public class ClienteCatalogoService {
         }
         log.info("CLIENTES muestra: {}", out);
         return out;
+    }
+
+    /**
+     * Busca clientes por RFC parcial (para autocompletado)
+     * @param rfcParcial RFC parcial a buscar (mínimo 3 caracteres)
+     * @param limit Límite de resultados (default 10)
+     * @return Lista de clientes que coinciden con el RFC parcial
+     */
+    public List<ClienteCatalogo> buscarPorRFCParcial(String rfcParcial, int limit) {
+        if (!StringUtils.hasText(rfcParcial) || rfcParcial.trim().length() < 3) {
+            log.warn("Búsqueda parcial RFC: texto muy corto o vacío");
+            return List.of();
+        }
+        String normalized = rfcParcial.trim().toUpperCase();
+        int maxResults = Math.max(1, Math.min(limit, 50)); // Limitar entre 1 y 50
+        
+        try {
+            List<ClienteCatalogo> resultados = jdbcTemplate.query(
+                    "SELECT * FROM (SELECT * FROM CLIENTES WHERE UPPER(RFC) LIKE ? ORDER BY RFC) WHERE ROWNUM <= ?",
+                    ps -> {
+                        ps.setString(1, "%" + normalized + "%");
+                        ps.setInt(2, maxResults);
+                    },
+                    (rs, rowNum) -> {
+                        ClienteCatalogo c = new ClienteCatalogo();
+                        c.setIdCliente(rs.getLong("ID_CLIENTE"));
+                        c.setRfc(rs.getString("RFC"));
+                        c.setRazonSocial(rs.getString("RAZON_SOCIAL"));
+                        c.setNombre(rs.getString("NOMBRE"));
+                        c.setPaterno(rs.getString("PATERNO"));
+                        c.setMaterno(rs.getString("MATERNO"));
+                        c.setCorreoElectronico(rs.getString("CORREO_ELECTRONICO"));
+                        c.setDomicilioFiscal(rs.getString("DOMICILIO_FISCAL"));
+                        c.setRegimenFiscal(rs.getString("REGIMEN_FISCAL"));
+                        c.setPais(rs.getString("PAIS"));
+                        c.setRegistroTributario(rs.getString("REGISTRO_TRIBUTARIO"));
+                        c.setUsoCfdi(rs.getString("USO_CFDI"));
+                        return c;
+                    }
+            );
+            log.info("Búsqueda parcial RFC '{}': {} resultados", normalized, resultados.size());
+            return resultados;
+        } catch (Exception e) {
+            log.error("Error en búsqueda parcial RFC", e);
+            return List.of();
+        }
     }
 }

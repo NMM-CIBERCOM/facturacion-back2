@@ -32,8 +32,20 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 
 @Service
 @Profile("oracle")
@@ -49,6 +61,9 @@ public class CartaPorteService {
     private final CartaPorteXmlBuilder cartaPorteXmlBuilder;
     private final CartaPorteXmlSanitizer cartaPorteXmlSanitizer;
     private final PacClient pacClient;
+    private final ITextPdfService iTextPdfService;
+    private final CorreoService correoService;
+    private final FormatoCorreoService formatoCorreoService;
 
     @Value("${facturacion.emisor.rfc:XAXX010101000}")
     private String rfcEmisorDefault;
@@ -62,13 +77,19 @@ public class CartaPorteService {
     @Value("${facturacion.emisor.cp:58000}")
     private String cpEmisorDefault;
 
+    @Value("${server.base-url:http://localhost:8080}")
+    private String serverBaseUrl;
+
     public CartaPorteService(CartaPorteDAO cartaPorteDAO,
                              UuidFacturaOracleDAO uuidFacturaOracleDAO,
                              ConceptoOracleDAO conceptoOracleDAO,
                              ClienteCatalogoService clienteCatalogoService,
                              CartaPorteXmlBuilder cartaPorteXmlBuilder,
                              CartaPorteXmlSanitizer cartaPorteXmlSanitizer,
-                             PacClient pacClient) {
+                             PacClient pacClient,
+                             ITextPdfService iTextPdfService,
+                             CorreoService correoService,
+                             FormatoCorreoService formatoCorreoService) {
         this.cartaPorteDAO = cartaPorteDAO;
         this.uuidFacturaOracleDAO = uuidFacturaOracleDAO;
         this.conceptoOracleDAO = conceptoOracleDAO;
@@ -76,17 +97,28 @@ public class CartaPorteService {
         this.cartaPorteXmlBuilder = cartaPorteXmlBuilder;
         this.cartaPorteXmlSanitizer = cartaPorteXmlSanitizer;
         this.pacClient = pacClient;
+        this.iTextPdfService = iTextPdfService;
+        this.correoService = correoService;
+        this.formatoCorreoService = formatoCorreoService;
     }
 
-    public SaveResult guardar(CartaPorteSaveRequest request) {
-        logger.info("Procesando solicitud de Carta Porte para RFC: {}", request.getRfcCompleto());
+    private String construirRfcCompleto(CartaPorteSaveRequest request) {
+        if (request.getRfcIniciales() != null && request.getRfcFecha() != null && request.getRfcHomoclave() != null) {
+            return request.getRfcIniciales() + request.getRfcFecha() + request.getRfcHomoclave();
+        }
+        return null;
+    }
+
+    public SaveResult guardar(CartaPorteSaveRequest request, Long usuario) {
+        String rfcCompleto = construirRfcCompleto(request);
+        logger.info("Procesando solicitud de Carta Porte para RFC: {}", rfcCompleto);
         normalizeRequest(request);
 
         BigDecimal subtotal = parsePrecio(request.getPrecio()).setScale(2, RoundingMode.HALF_UP);
         BigDecimal iva = subtotal.multiply(new BigDecimal("0.16")).setScale(2, RoundingMode.HALF_UP);
         BigDecimal total = subtotal.add(iva).setScale(2, RoundingMode.HALF_UP);
 
-        String rfcReceptor = request.getRfcCompleto();
+        String rfcReceptor = rfcCompleto;
         Long idReceptor = resolverIdReceptorPorRfc(rfcReceptor, request.getRazonSocial());
 
         String folio = request.getNumeroSerie();
@@ -96,7 +128,10 @@ public class CartaPorteService {
         }
 
         try {
-            // PRIMERO: Timbrar con Finkok para obtener el UUID real
+            // PASO 1: Timbrar directamente con Finkok (sin verificar existencia previa)
+            // NO se guarda nada en BD antes de esto
+            logger.info("🔄 Enviando Carta Porte a Finkok para timbrar...");
+            
             PacTimbradoResponse pacResponse = timbrarConFinkok(request, folio, null, total);
             
             if (pacResponse == null || pacResponse.getUuid() == null || pacResponse.getUuid().trim().isEmpty()) {
@@ -104,58 +139,92 @@ public class CartaPorteService {
             }
             
             String uuidFinkok = pacResponse.getUuid().trim().toUpperCase();
-            logger.info("UUID obtenido de Finkok: {}", uuidFinkok);
-            
-            // SEGUNDO: Guardar en FACTURAS con el UUID de Finkok y estatus EMITIDA (0)
             String xmlTimbrado = pacResponse.getXmlTimbrado() != null ? pacResponse.getXmlTimbrado() : null;
-            // Estado EMITIDA = "0" cuando Finkok la devuelve timbrada
-            String estadoEmitida = EstadoFactura.EMITIDA.getCodigo(); // "0"
-            String estadoDescripcion = EstadoFactura.EMITIDA.getDescripcion(); // "EMITIDA"
-            // TIPO_FACTURA: 3 = Factura global/compuesta, pero para Carta Porte podría ser diferente
-            // Por ahora usamos 3 (igual que factura global), pero se puede ajustar si hay un tipo específico
-            Integer tipoFactura = 3; // Ajustar según tu catálogo de tipos de factura
+            logger.info("✅ Carta Porte timbrada exitosamente. UUID obtenido de Finkok: {} - Ahora se guardará en BD", uuidFinkok);
             
-            boolean okFactura = uuidFacturaOracleDAO.insertarBasicoConIdReceptor(
-                    uuidFinkok,
-                    xmlTimbrado,
-                    SERIE_CP,
-                    folio,
-                    subtotal,
-                    iva,
-                    BigDecimal.ZERO,
-                    total,
-                    "99",
-                    request.getUsoCfdi(),
-                    estadoEmitida, // "0" = EMITIDA
-                    estadoDescripcion, // "EMITIDA"
-                    "PUE",
-                    rfcReceptor,
-                    rfcEmisorDefault,
-                    null,
-                    idReceptor,
-                    tipoFactura // 3 = tipo factura (ajustar si hay tipo específico para Carta Porte)
-            );
-
-            if (!okFactura) {
-                String err = uuidFacturaOracleDAO.getLastInsertError();
-                throw new RuntimeException(err != null && !err.isBlank()
-                        ? err
-                        : "No se pudo insertar registro en FACTURAS");
-            }
-
-            // TERCERO: Obtener el ID_FACTURA generado usando el UUID de Finkok
+            // PASO 2: Guardar en FACTURAS con el UUID de Finkok (solo si no existe ya con este UUID)
+            // Verificar si ya existe una factura con este UUID (por si otra llamada guardó entre tanto)
             java.util.Optional<Long> idFacturaOpt = conceptoOracleDAO.obtenerIdFacturaPorUuid(uuidFinkok);
-            if (idFacturaOpt.isEmpty()) {
-                logger.warn("No se pudo obtener ID_FACTURA para UUID: {}", uuidFinkok);
-                throw new RuntimeException("No se pudo obtener ID_FACTURA después de insertar en FACTURAS");
+            
+            if (idFacturaOpt.isPresent()) {
+                // Ya existe en BD con este UUID, usar el ID_FACTURA existente
+                logger.info("✅ Factura ya existe en BD con UUID: {}, ID_FACTURA: {} (NO se insertará duplicado)", 
+                           uuidFinkok, idFacturaOpt.get());
+            } else {
+                // NO existe en BD, guardar nueva factura con UUID de Finkok
+                logger.info("💾 Guardando nueva factura en BD con UUID de Finkok: {}", uuidFinkok);
+                
+                // Estado EMITIDA = "0" cuando Finkok la devuelve timbrada
+                String estadoEmitida = EstadoFactura.EMITIDA.getCodigo(); // "0"
+                String estadoDescripcion = EstadoFactura.EMITIDA.getDescripcion(); // "EMITIDA"
+                Integer tipoFactura = 3; // Tipo factura para Carta Porte
+                
+                boolean okFactura = uuidFacturaOracleDAO.insertarBasicoConIdReceptor(
+                        uuidFinkok,
+                        xmlTimbrado,
+                        SERIE_CP,
+                        folio,
+                        subtotal,
+                        iva,
+                        BigDecimal.ZERO,
+                        total,
+                        "99",
+                        request.getUsoCfdi(),
+                        estadoEmitida, // "0" = EMITIDA
+                        estadoDescripcion, // "EMITIDA"
+                        "PUE",
+                        rfcReceptor,
+                        rfcEmisorDefault,
+                        null,
+                        idReceptor,
+                        tipoFactura,
+                        usuario // usuario que emitió la carta porte
+                );
+
+                if (!okFactura) {
+                    String err = uuidFacturaOracleDAO.getLastInsertError();
+                    // Verificar si el error es por duplicado (otra llamada guardó entre tanto)
+                    if (err != null && (err.contains("unique") || err.contains("duplicate") || err.contains("ORA-00001"))) {
+                        logger.warn("⚠️ Intento de insertar duplicado detectado. Otra llamada guardó primero. Obteniendo ID_FACTURA existente...");
+                        idFacturaOpt = conceptoOracleDAO.obtenerIdFacturaPorUuid(uuidFinkok);
+                        if (idFacturaOpt.isPresent()) {
+                            logger.info("✅ Factura duplicada encontrada. Usando ID_FACTURA existente: {}", idFacturaOpt.get());
+                        } else {
+                            throw new RuntimeException("Error al insertar en FACTURAS y no se pudo obtener ID_FACTURA existente: " + err);
+                        }
+                    } else {
+                        throw new RuntimeException(err != null && !err.isBlank()
+                                ? err
+                                : "No se pudo insertar registro en FACTURAS");
+                    }
+                } else {
+                    // Insertó correctamente, obtener el ID_FACTURA generado
+                    idFacturaOpt = conceptoOracleDAO.obtenerIdFacturaPorUuid(uuidFinkok);
+                    if (idFacturaOpt.isEmpty()) {
+                        logger.warn("⚠️ No se pudo obtener ID_FACTURA para UUID: {}", uuidFinkok);
+                        throw new RuntimeException("No se pudo obtener ID_FACTURA después de insertar en FACTURAS");
+                    }
+                    logger.info("✅ Factura guardada exitosamente. ID_FACTURA: {}, UUID: {}", idFacturaOpt.get(), uuidFinkok);
+                }
             }
 
-            // CUARTO: Guardar en CARTA_PORTE y relacionar con FACTURAS
-            Long idGenerado = cartaPorteDAO.insertar(request);
-            Long idFactura = idFacturaOpt.get();
-            cartaPorteDAO.actualizarIdFactura(idGenerado, idFactura);
-            logger.info("Carta Porte guardada y relacionada con Factura: idCartaPorte={}, idFactura={}, uuid={}", 
-                    idGenerado, idFactura, uuidFinkok);
+            // PASO 3: Guardar en CARTA_PORTE con el ID_FACTURA obtenido
+            // Verificar si ya existe CARTA_PORTE con este ID_FACTURA (por si otra llamada guardó entre tanto)
+            java.util.Optional<Long> idCartaPorteExistente = cartaPorteDAO.buscarPorIdFactura(idFacturaOpt.get());
+            Long idGenerado;
+            if (idCartaPorteExistente.isPresent()) {
+                // Ya existe carta porte, usar el ID existente
+                idGenerado = idCartaPorteExistente.get();
+                logger.info("✅ Carta Porte ya existe con ID: {}, ID_FACTURA: {}, UUID: {}", 
+                        idGenerado, idFacturaOpt.get(), uuidFinkok);
+            } else {
+                // No existe, guardar nueva carta porte
+                idGenerado = cartaPorteDAO.insertar(request);
+                Long idFactura = idFacturaOpt.get();
+                cartaPorteDAO.actualizarIdFactura(idGenerado, idFactura);
+                logger.info("✅ Carta Porte guardada y relacionada con Factura: idCartaPorte={}, idFactura={}, uuid={}", 
+                        idGenerado, idFactura, uuidFinkok);
+            }
             
             return new SaveResult(idGenerado, uuidFinkok, pacResponse);
         } catch (RuntimeException e) {
@@ -693,5 +762,801 @@ public class CartaPorteService {
         } catch (Exception e) {
             logger.warn("No se pudo guardar el XML sanitizado: {}", e.getMessage());
         }
+    }
+
+    /**
+     * Genera PDF de Carta Porte desde UUID (para correos y descargas)
+     * Extrae los datos del XML timbrado y genera el PDF con el diseño específico
+     */
+    public byte[] generarPdfDesdeUuid(String uuid, Map<String, Object> logoConfig) throws java.io.IOException {
+        try {
+            logger.info("Generando PDF de Carta Porte desde UUID: {}", uuid);
+            
+            // Obtener datos básicos de la factura
+            Optional<UuidFacturaOracleDAO.Result> optFactura = uuidFacturaOracleDAO.obtenerBasicosPorUuid(uuid);
+            if (!optFactura.isPresent() || optFactura.get().xmlContent == null || optFactura.get().xmlContent.trim().isEmpty()) {
+                logger.warn("No se encontró XML para Carta Porte UUID: {}", uuid);
+                return null;
+            }
+            
+            UuidFacturaOracleDAO.Result facturaResult = optFactura.get();
+            String xmlContent = facturaResult.xmlContent;
+            
+            // Obtener logoConfig si no se proporcionó
+            Map<String, Object> logoConfigFinal = logoConfig;
+            if (logoConfigFinal == null) {
+                logoConfigFinal = obtenerLogoConfig();
+            }
+            
+            // Parsear XML y extraer datos del complemento de Carta Porte
+            // Por ahora, crear un datosCartaPorte mínimo para que el diseño funcione
+            // TODO: En el futuro, parsear completamente el XML para extraer todos los datos
+            Map<String, Object> datosFactura = new HashMap<>();
+            datosFactura.put("uuid", uuid);
+            datosFactura.put("serie", facturaResult.serie != null ? facturaResult.serie : "CP");
+            datosFactura.put("folio", facturaResult.folio != null ? facturaResult.folio : "");
+            // UuidFacturaOracleDAO.Result tiene fechaFactura (Instant), convertir a LocalDateTime
+            LocalDateTime fechaTimbrado = LocalDateTime.now();
+            if (facturaResult.fechaFactura != null) {
+                fechaTimbrado = LocalDateTime.ofInstant(facturaResult.fechaFactura, java.time.ZoneId.systemDefault());
+            }
+            datosFactura.put("fechaTimbrado", fechaTimbrado);
+            datosFactura.put("rfcEmisor", facturaResult.rfcEmisor != null ? facturaResult.rfcEmisor : rfcEmisorDefault);
+            datosFactura.put("nombreEmisor", nombreEmisorDefault);
+            datosFactura.put("rfcReceptor", facturaResult.rfcReceptor != null ? facturaResult.rfcReceptor : "XAXX010101000");
+            datosFactura.put("nombreReceptor", facturaResult.rfcReceptor != null ? facturaResult.rfcReceptor : "");
+            datosFactura.put("tipoComprobante", "T"); // T para Carta Porte
+            datosFactura.put("subtotal", facturaResult.subtotal != null ? facturaResult.subtotal : BigDecimal.ZERO);
+            datosFactura.put("iva", facturaResult.iva != null ? facturaResult.iva : BigDecimal.ZERO);
+            datosFactura.put("total", facturaResult.total != null ? facturaResult.total : BigDecimal.ZERO);
+            datosFactura.put("moneda", "MXN");
+            
+            // Parsear XML y extraer datos del complemento de Carta Porte
+            // IMPORTANTE: Usar la misma estructura que generarPdfPreview para que el PDF se vea igual
+            Map<String, Object> datosCartaPorte = extraerDatosCartaPorteDesdeXml(xmlContent);
+            if (datosCartaPorte == null) {
+                datosCartaPorte = new HashMap<>();
+            }
+            
+            // SIEMPRE asegurar que datosCartaPorte tenga al menos un campo para que esCartaPorte lo detecte
+            // Extraer descripción del concepto si no está en datosCartaPorte
+            if (!datosCartaPorte.containsKey("descripcion") || datosCartaPorte.get("descripcion") == null) {
+                try {
+                    String descripcion = extraerDescripcionConceptoDesdeXml(xmlContent);
+                    if (descripcion != null && !descripcion.trim().isEmpty()) {
+                        datosCartaPorte.put("descripcion", descripcion);
+                    } else {
+                        datosCartaPorte.put("descripcion", "Carta Porte");
+                    }
+                } catch (Exception e) {
+                    logger.warn("Error al extraer descripción del concepto: {}", e.getMessage());
+                    datosCartaPorte.put("descripcion", "Carta Porte");
+                }
+            }
+            
+            // Asegurar que siempre tenga ubicaciones, mercancías y figuras (igual que generarPdfPreview)
+            // Si no están en los datos extraídos, crear listas vacías
+            if (!datosCartaPorte.containsKey("ubicaciones")) {
+                datosCartaPorte.put("ubicaciones", new ArrayList<>());
+            }
+            if (!datosCartaPorte.containsKey("mercancias")) {
+                datosCartaPorte.put("mercancias", new ArrayList<>());
+            }
+            if (!datosCartaPorte.containsKey("figurasTransporte")) {
+                datosCartaPorte.put("figurasTransporte", new ArrayList<>());
+            }
+            
+            // Log para diagnóstico
+            logger.info("📋 Datos Carta Porte extraídos: descripcion={}, ubicaciones={}, mercancias={}, figuras={}", 
+                datosCartaPorte.get("descripcion"),
+                datosCartaPorte.containsKey("ubicaciones") ? ((List<?>) datosCartaPorte.get("ubicaciones")).size() : 0,
+                datosCartaPorte.containsKey("mercancias") ? ((List<?>) datosCartaPorte.get("mercancias")).size() : 0,
+                datosCartaPorte.containsKey("figurasTransporte") ? ((List<?>) datosCartaPorte.get("figurasTransporte")).size() : 0);
+            
+            datosFactura.put("datosCartaPorte", datosCartaPorte);
+            
+            // También mantener conceptos para compatibilidad (igual que en generarPdfPreview)
+            List<Map<String, Object>> conceptos = new ArrayList<>();
+            Map<String, Object> concepto = new HashMap<>();
+            BigDecimal subtotalFactura = facturaResult.subtotal != null ? facturaResult.subtotal : BigDecimal.ZERO;
+            BigDecimal ivaFactura = facturaResult.iva != null ? facturaResult.iva : BigDecimal.ZERO;
+            String descripcionConcepto = datosCartaPorte.containsKey("descripcion") && datosCartaPorte.get("descripcion") != null 
+                ? datosCartaPorte.get("descripcion").toString() 
+                : "Carta Porte";
+            
+            concepto.put("cantidad", BigDecimal.ONE);
+            concepto.put("descripcion", descripcionConcepto);
+            concepto.put("valorUnitario", subtotalFactura);
+            concepto.put("importe", subtotalFactura);
+            concepto.put("iva", ivaFactura);
+            conceptos.add(concepto);
+            datosFactura.put("conceptos", conceptos);
+            
+            // Generar PDF usando ITextPdfService
+            logger.info("Generando PDF de Carta Porte con {} campos en datosCartaPorte (ubicaciones: {}, mercancias: {}, figuras: {})", 
+                datosCartaPorte.size(),
+                datosCartaPorte.containsKey("ubicaciones") ? ((List<?>) datosCartaPorte.get("ubicaciones")).size() : 0,
+                datosCartaPorte.containsKey("mercancias") ? ((List<?>) datosCartaPorte.get("mercancias")).size() : 0,
+                datosCartaPorte.containsKey("figurasTransporte") ? ((List<?>) datosCartaPorte.get("figurasTransporte")).size() : 0);
+            byte[] pdfBytes = iTextPdfService.generarPdfConLogo(datosFactura, logoConfigFinal != null ? logoConfigFinal : new HashMap<>());
+            if (pdfBytes == null || pdfBytes.length < 100) {
+                logger.error("PDF de Carta Porte generado está vacío o inválido ({} bytes)", pdfBytes != null ? pdfBytes.length : 0);
+                throw new RuntimeException("PDF de Carta Porte generado está vacío o inválido");
+            }
+            logger.info("PDF de Carta Porte generado desde UUID exitosamente: {} bytes", pdfBytes.length);
+            return pdfBytes;
+            
+        } catch (Exception e) {
+            logger.error("Error al generar PDF de Carta Porte desde UUID {}: {}", uuid, e.getMessage(), e);
+            throw e; // Re-lanzar la excepción para que FacturaService no continúe con el flujo genérico
+        }
+    }
+    
+    /**
+     * Genera un PDF de vista previa sin timbrar a partir de CartaPorteSaveRequest
+     */
+    public byte[] generarPdfPreview(CartaPorteSaveRequest request, Map<String, Object> logoConfig) {
+        try {
+            String rfcCompleto = construirRfcCompleto(request);
+            logger.info("Generando PDF de vista previa para carta porte, RFC: {}", rfcCompleto);
+
+            // Obtener logoConfig si no se proporcionó
+            Map<String, Object> logoConfigFinal = logoConfig;
+            if (logoConfigFinal == null) {
+                logoConfigFinal = obtenerLogoConfig();
+            }
+
+            // Construir datos de la carta porte para el PDF
+            Map<String, Object> datosFactura = new HashMap<>();
+            datosFactura.put("uuid", "PREVIEW-" + UUID.randomUUID().toString());
+            datosFactura.put("serie", "CP");
+            datosFactura.put("folio", "PREVIEW");
+            datosFactura.put("fechaTimbrado", LocalDateTime.now());
+            datosFactura.put("rfcEmisor", rfcEmisorDefault);
+            datosFactura.put("nombreEmisor", nombreEmisorDefault);
+            datosFactura.put("rfcReceptor", rfcCompleto != null ? rfcCompleto : "XAXX010101000");
+            
+            // Determinar nombre del receptor
+            String nombreReceptor = "";
+            if (request.getRazonSocial() != null && !request.getRazonSocial().trim().isEmpty()) {
+                nombreReceptor = request.getRazonSocial();
+            } else {
+                StringBuilder nombreBuilder = new StringBuilder();
+                if (request.getNombre() != null) nombreBuilder.append(request.getNombre());
+                if (request.getPaterno() != null) nombreBuilder.append(" ").append(request.getPaterno());
+                if (request.getMaterno() != null) nombreBuilder.append(" ").append(request.getMaterno());
+                nombreReceptor = nombreBuilder.toString().trim();
+            }
+            datosFactura.put("nombreReceptor", nombreReceptor.isEmpty() ? datosFactura.get("rfcReceptor") : nombreReceptor);
+            datosFactura.put("tipoComprobante", "T"); // T para Carta Porte (Transporte)
+            datosFactura.put("moneda", "MXN");
+            
+            // Construir conceptos
+            List<Map<String, Object>> conceptos = new ArrayList<>();
+            Map<String, Object> concepto = new HashMap<>();
+            BigDecimal precio = request.getPrecio() != null ? parsePrecio(request.getPrecio()) : BigDecimal.ZERO;
+            BigDecimal subtotal = precio.setScale(2, RoundingMode.HALF_UP);
+            BigDecimal iva = subtotal.multiply(new BigDecimal("0.16")).setScale(2, RoundingMode.HALF_UP);
+            BigDecimal total = subtotal.add(iva);
+            
+            String descripcionConcepto = request.getDescripcion() != null && !request.getDescripcion().trim().isEmpty() 
+                ? request.getDescripcion() 
+                : "Carta Porte";
+            
+            // Extraer datos del complemento
+            CartaPorteComplement complemento = request.getComplemento();
+            Ubicacion ubicacionOrigen = null;
+            Ubicacion ubicacionDestino = null;
+            Autotransporte autotransporte = null;
+            TransporteFerroviario transporteFerroviario = null;
+            String bienesTransportadosStr = "";
+            
+            if (complemento != null) {
+                // Extraer ubicaciones
+                if (complemento.getUbicaciones() != null && !complemento.getUbicaciones().isEmpty()) {
+                    ubicacionOrigen = encontrarUbicacion(complemento, "01");
+                    ubicacionDestino = encontrarUbicacion(complemento, "02");
+                }
+                
+                // Extraer datos de transporte
+                if (complemento.getMercancias() != null) {
+                    autotransporte = complemento.getMercancias().getAutotransporte();
+                    transporteFerroviario = complemento.getMercancias().getTransporteFerroviario();
+                    
+                    // Extraer bienes transportados de las mercancías
+                    if (complemento.getMercancias().getMercancias() != null && !complemento.getMercancias().getMercancias().isEmpty()) {
+                        List<String> bienes = new ArrayList<>();
+                        for (Mercancia mercancia : complemento.getMercancias().getMercancias()) {
+                            if (mercancia.getDescripcion() != null && !mercancia.getDescripcion().trim().isEmpty()) {
+                                bienes.add(mercancia.getDescripcion());
+                            }
+                        }
+                        bienesTransportadosStr = String.join(", ", bienes);
+                    }
+                }
+            }
+            
+            // Guardar información estructurada de Carta Porte para el diseño específico
+            Map<String, Object> datosCartaPorte = new HashMap<>();
+            datosCartaPorte.put("descripcion", descripcionConcepto);
+            datosCartaPorte.put("precio", precio);
+            datosCartaPorte.put("tipoTransporte", request.getTipoTransporte());
+            
+            // Datos de autotransporte
+            if (autotransporte != null) {
+                datosCartaPorte.put("permisoSCT", autotransporte.getPermSct());
+                datosCartaPorte.put("numeroPermisoSCT", autotransporte.getNumPermisoSct());
+                if (autotransporte.getIdentificacionVehicular() != null) {
+                    datosCartaPorte.put("placasVehiculo", autotransporte.getIdentificacionVehicular().getPlacaVm());
+                    datosCartaPorte.put("configVehicular", autotransporte.getIdentificacionVehicular().getConfigVehicular());
+                }
+            } else {
+                // Intentar obtener de los campos directos del request como fallback
+                datosCartaPorte.put("permisoSCT", request.getPermisoSCT() != null ? request.getPermisoSCT() : request.getPermisoSct());
+                datosCartaPorte.put("numeroPermisoSCT", request.getNumeroPermisoSCT() != null ? request.getNumeroPermisoSCT() : request.getNoPermisoSct());
+                datosCartaPorte.put("placasVehiculo", request.getPlacasVehiculo());
+                datosCartaPorte.put("configVehicular", request.getConfigVehicular());
+            }
+            
+            // Transportista - buscar en figura de transporte (TipoFigura con tipoFigura="02" es Transportista)
+            String nombreTransportista = "";
+            String rfcTransportista = "";
+            if (complemento != null && complemento.getFiguraTransporte() != null) {
+                FiguraTransporte figuraTransporte = complemento.getFiguraTransporte();
+                if (figuraTransporte.getTiposFigura() != null && !figuraTransporte.getTiposFigura().isEmpty()) {
+                    // Buscar transportista (tipoFigura="02")
+                    for (TipoFigura tipoFigura : figuraTransporte.getTiposFigura()) {
+                        if ("02".equals(tipoFigura.getTipoFigura())) {
+                            nombreTransportista = tipoFigura.getNombreFigura() != null ? tipoFigura.getNombreFigura() : "";
+                            rfcTransportista = tipoFigura.getRfcFigura() != null ? tipoFigura.getRfcFigura() : "";
+                            break;
+                        }
+                    }
+                }
+            }
+            if (nombreTransportista.isEmpty() && request.getNombreTransportista() != null) {
+                nombreTransportista = request.getNombreTransportista();
+            }
+            if (rfcTransportista.isEmpty() && request.getRfcTransportista() != null) {
+                rfcTransportista = request.getRfcTransportista();
+            }
+            datosCartaPorte.put("nombreTransportista", nombreTransportista);
+            datosCartaPorte.put("rfcTransportista", rfcTransportista);
+            
+            datosCartaPorte.put("bienesTransportados", bienesTransportadosStr.isEmpty() ? (request.getBienesTransportados() != null ? request.getBienesTransportados() : "") : bienesTransportadosStr);
+            
+            // Origen y Destino desde ubicaciones
+            if (ubicacionOrigen != null) {
+                datosCartaPorte.put("origen", ubicacionOrigen.getNombreRemitenteDestinatario() != null ? ubicacionOrigen.getNombreRemitenteDestinatario() : "");
+                String domOrigenStr = resumenUbicacion(ubicacionOrigen);
+                datosCartaPorte.put("origenDomicilio", domOrigenStr != null ? domOrigenStr : "");
+                // Extraer solo la fecha (sin hora) de fechaHoraSalidaLlegada
+                String fechaSalida = ubicacionOrigen.getFechaHoraSalidaLlegada();
+                if (fechaSalida != null && fechaSalida.length() >= 10) {
+                    datosCartaPorte.put("fechaSalida", fechaSalida.substring(0, 10));
+                } else {
+                    datosCartaPorte.put("fechaSalida", fechaSalida != null ? fechaSalida : "");
+                }
+                if (ubicacionOrigen.getDistanciaRecorrida() != null && !ubicacionOrigen.getDistanciaRecorrida().trim().isEmpty()) {
+                    datosCartaPorte.put("distanciaRecorrida", ubicacionOrigen.getDistanciaRecorrida());
+                }
+            } else {
+                datosCartaPorte.put("origen", request.getOrigen() != null ? request.getOrigen() : "");
+                datosCartaPorte.put("origenDomicilio", request.getOrigenDomicilio() != null ? request.getOrigenDomicilio() : "");
+                datosCartaPorte.put("fechaSalida", request.getFechaSalida() != null ? request.getFechaSalida() : "");
+                datosCartaPorte.put("distanciaRecorrida", request.getDistanciaRecorrida() != null ? request.getDistanciaRecorrida() : "");
+            }
+            
+            if (ubicacionDestino != null) {
+                datosCartaPorte.put("destino", ubicacionDestino.getNombreRemitenteDestinatario() != null ? ubicacionDestino.getNombreRemitenteDestinatario() : "");
+                String domDestinoStr = resumenUbicacion(ubicacionDestino);
+                datosCartaPorte.put("destinoDomicilio", domDestinoStr != null ? domDestinoStr : "");
+                // Extraer solo la fecha (sin hora) de fechaHoraSalidaLlegada
+                String fechaLlegada = ubicacionDestino.getFechaHoraSalidaLlegada();
+                if (fechaLlegada != null && fechaLlegada.length() >= 10) {
+                    datosCartaPorte.put("fechaLlegada", fechaLlegada.substring(0, 10));
+                } else {
+                    datosCartaPorte.put("fechaLlegada", fechaLlegada != null ? fechaLlegada : "");
+                }
+            } else {
+                datosCartaPorte.put("destino", request.getDestino() != null ? request.getDestino() : "");
+                datosCartaPorte.put("destinoDomicilio", request.getDestinoDomicilio() != null ? request.getDestinoDomicilio() : "");
+                datosCartaPorte.put("fechaLlegada", request.getFechaLlegada() != null ? request.getFechaLlegada() : "");
+            }
+            
+            // Distancia total si está en el complemento
+            if (complemento != null && complemento.getTotalDistRec() != null && !complemento.getTotalDistRec().trim().isEmpty()) {
+                datosCartaPorte.put("distanciaRecorrida", complemento.getTotalDistRec());
+            }
+            
+            // Agregar listas completas para el PDF: UBICACIONES, MERCANCIAS, FIGURAS DE TRANSPORTE
+            if (complemento != null) {
+                // UBICACIONES - lista completa
+                List<Map<String, Object>> ubicacionesList = new ArrayList<>();
+                if (complemento.getUbicaciones() != null) {
+                    for (Ubicacion u : complemento.getUbicaciones()) {
+                        Map<String, Object> ubicacionMap = new HashMap<>();
+                        ubicacionMap.put("tipoUbicacion", u.getTipoUbicacion());
+                        ubicacionMap.put("nombreRemitenteDestinatario", u.getNombreRemitenteDestinatario());
+                        ubicacionMap.put("rfcRemitenteDestinatario", u.getRfcRemitenteDestinatario());
+                        ubicacionMap.put("fechaHoraSalidaLlegada", u.getFechaHoraSalidaLlegada());
+                        ubicacionMap.put("distanciaRecorrida", u.getDistanciaRecorrida());
+                        if (u.getDomicilio() != null) {
+                            Map<String, Object> domicilioMap = new HashMap<>();
+                            domicilioMap.put("calle", u.getDomicilio().getCalle());
+                            domicilioMap.put("numeroExterior", u.getDomicilio().getNumeroExterior());
+                            domicilioMap.put("numeroInterior", u.getDomicilio().getNumeroInterior());
+                            domicilioMap.put("colonia", u.getDomicilio().getColonia());
+                            domicilioMap.put("municipio", u.getDomicilio().getMunicipio());
+                            domicilioMap.put("estado", u.getDomicilio().getEstado());
+                            domicilioMap.put("pais", u.getDomicilio().getPais());
+                            domicilioMap.put("codigoPostal", u.getDomicilio().getCodigoPostal());
+                            ubicacionMap.put("domicilio", domicilioMap);
+                        }
+                        ubicacionesList.add(ubicacionMap);
+                    }
+                }
+                datosCartaPorte.put("ubicaciones", ubicacionesList);
+                
+                // MERCANCIAS - lista completa
+                List<Map<String, Object>> mercanciasList = new ArrayList<>();
+                if (complemento.getMercancias() != null && complemento.getMercancias().getMercancias() != null) {
+                    for (Mercancia m : complemento.getMercancias().getMercancias()) {
+                        Map<String, Object> mercanciaMap = new HashMap<>();
+                        mercanciaMap.put("bienesTransp", m.getBienesTransp());
+                        mercanciaMap.put("descripcion", m.getDescripcion());
+                        mercanciaMap.put("cantidad", m.getCantidad());
+                        mercanciaMap.put("claveUnidad", m.getClaveUnidad());
+                        mercanciaMap.put("unidad", m.getUnidad());
+                        mercanciaMap.put("pesoEnKg", m.getPesoEnKg());
+                        mercanciaMap.put("valorMercancia", m.getValorMercancia());
+                        mercanciaMap.put("materialPeligroso", m.getMaterialPeligroso());
+                        mercanciaMap.put("cveMaterialPeligroso", m.getCveMaterialPeligroso());
+                        mercanciasList.add(mercanciaMap);
+                    }
+                }
+                datosCartaPorte.put("mercancias", mercanciasList);
+                
+                // FIGURAS DE TRANSPORTE - lista completa
+                List<Map<String, Object>> figurasList = new ArrayList<>();
+                if (complemento.getFiguraTransporte() != null && complemento.getFiguraTransporte().getTiposFigura() != null) {
+                    for (TipoFigura tf : complemento.getFiguraTransporte().getTiposFigura()) {
+                        Map<String, Object> figuraMap = new HashMap<>();
+                        figuraMap.put("tipoFigura", tf.getTipoFigura());
+                        figuraMap.put("rfcFigura", tf.getRfcFigura());
+                        figuraMap.put("nombreFigura", tf.getNombreFigura());
+                        figuraMap.put("numLicencia", tf.getNumLicencia());
+                        figuraMap.put("numRegIdTribFigura", tf.getNumRegIdTribFigura());
+                        figuraMap.put("residenciaFiscalFigura", tf.getResidenciaFiscalFigura());
+                        figurasList.add(figuraMap);
+                    }
+                }
+                datosCartaPorte.put("figurasTransporte", figurasList);
+            }
+            
+            datosFactura.put("datosCartaPorte", datosCartaPorte);
+            
+            // También mantener conceptos para compatibilidad
+            concepto.put("cantidad", BigDecimal.ONE);
+            concepto.put("descripcion", descripcionConcepto);
+            concepto.put("valorUnitario", subtotal);
+            concepto.put("importe", subtotal);
+            concepto.put("iva", iva);
+            conceptos.add(concepto);
+            datosFactura.put("conceptos", conceptos);
+            
+            datosFactura.put("subtotal", subtotal);
+            datosFactura.put("iva", iva);
+            datosFactura.put("total", total);
+            
+            // Generar PDF usando ITextPdfService
+            byte[] pdfBytes = iTextPdfService.generarPdfConLogo(datosFactura, logoConfigFinal != null ? logoConfigFinal : new HashMap<>());
+            logger.info("PDF de vista previa de carta porte generado exitosamente: {} bytes", pdfBytes != null ? pdfBytes.length : 0);
+            return pdfBytes;
+        } catch (Exception e) {
+            logger.error("Error al generar PDF de vista previa de carta porte: {}", e.getMessage(), e);
+            throw new RuntimeException("Error al generar PDF de vista previa de carta porte: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Obtiene la configuración de logo y colores para el PDF
+     */
+    private Map<String, Object> obtenerLogoConfig() {
+        Map<String, Object> logoConfig = new HashMap<>();
+        Map<String, Object> customColors = new HashMap<>();
+        
+        // Obtener configuración de formato (color)
+        com.cibercom.facturacion_back.dto.FormatoCorreoDto configuracionFormato = null;
+        try {
+            com.cibercom.facturacion_back.dto.ConfiguracionCorreoResponseDto configResponse = correoService.obtenerConfiguracionMensajes();
+            if (configResponse != null && configResponse.getFormatoCorreo() != null) {
+                configuracionFormato = configResponse.getFormatoCorreo();
+                logger.info("Usando color de formato de configuración de mensajes: {}", configuracionFormato.getColorTexto());
+            } else {
+                configuracionFormato = formatoCorreoService.obtenerConfiguracionActiva();
+                logger.info("Usando color de formato activo (archivo): {}", configuracionFormato != null ? configuracionFormato.getColorTexto() : null);
+            }
+        } catch (Exception e) {
+            logger.warn("No se pudo obtener FormatoCorreo: {}", e.getMessage());
+        }
+        
+        // Establecer color primario
+        String colorPrimario = (configuracionFormato != null && configuracionFormato.getColorTexto() != null && !configuracionFormato.getColorTexto().isEmpty())
+            ? configuracionFormato.getColorTexto().trim()
+            : "#1d4ed8";
+        customColors.put("primary", colorPrimario);
+        logoConfig.put("customColors", customColors);
+        
+        // Intentar usar logoBase64 activo persistido
+        String logoBase64Activo = leerLogoBase64Activo();
+        if (logoBase64Activo != null && !logoBase64Activo.isBlank()) {
+            logoConfig.put("logoBase64", logoBase64Activo.trim());
+            logger.info("Usando logoBase64 activo para PDF de carta porte");
+        } else {
+            // Fallback: usar el mismo endpoint PNG que en el correo
+            String logoEndpoint = serverBaseUrl + "/api/logos/cibercom-png";
+            logoConfig.put("logoUrl", logoEndpoint);
+            logger.info("Logo para PDF de carta porte (fallback URL): {}", logoEndpoint);
+        }
+        
+        logger.info("Color primario seleccionado para PDF de carta porte: {}", colorPrimario);
+        return logoConfig;
+    }
+    
+    private String leerLogoBase64Activo() {
+        try {
+            java.nio.file.Path p = getLogoBase64Path();
+            if (java.nio.file.Files.exists(p)) {
+                String content = java.nio.file.Files.readString(p);
+                if (content != null && !content.trim().isEmpty()) {
+                    logger.info("Logo activo leído desde: {}", p.toAbsolutePath());
+                    return content.trim();
+                }
+            } else {
+                logger.warn("Archivo de logo no encontrado en: {}", p.toAbsolutePath());
+            }
+        } catch (Exception e) {
+            logger.warn("No se pudo leer logo activo para PDF: {}", e.getMessage());
+        }
+        return null;
+    }
+    
+    private java.nio.file.Path getLogoBase64Path() {
+        // Intentar usar variable de entorno o propiedad del sistema
+        String tomcatBase = System.getProperty("catalina.base");
+        if (tomcatBase != null && !tomcatBase.isEmpty()) {
+            // Si estamos en Tomcat, guardar en conf/ dentro de Tomcat
+            return java.nio.file.Paths.get(tomcatBase, "conf", "logo-base64.txt");
+        }
+        
+        // Fallback: usar directorio de trabajo actual/config
+        String userDir = System.getProperty("user.dir");
+        if (userDir != null && !userDir.isEmpty()) {
+            return java.nio.file.Paths.get(userDir, "config", "logo-base64.txt");
+        }
+        
+        // Último fallback: directorio temporal
+        return java.nio.file.Paths.get(System.getProperty("java.io.tmpdir"), "logo-base64.txt");
+    }
+    
+    /**
+     * Extrae datos del complemento de Carta Porte desde el XML timbrado
+     * Similar a extraerDatosNominaDesdeXml en FacturaService
+     */
+    private Map<String, Object> extraerDatosCartaPorteDesdeXml(String xmlContent) {
+        try {
+            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+            factory.setNamespaceAware(true);
+            DocumentBuilder builder = factory.newDocumentBuilder();
+            Document document = builder.parse(new ByteArrayInputStream(xmlContent.getBytes(StandardCharsets.UTF_8)));
+            
+            Map<String, Object> datosCartaPorte = new HashMap<>();
+            
+            // Buscar el namespace de Carta Porte (puede ser 20, 30 o 31)
+            String cartaPorteNamespace = null;
+            String[] namespaces = {
+                "http://www.sat.gob.mx/CartaPorte31",
+                "http://www.sat.gob.mx/CartaPorte30",
+                "http://www.sat.gob.mx/CartaPorte20"
+            };
+            
+            Element cartaPorteElement = null;
+            for (String ns : namespaces) {
+                cartaPorteElement = obtenerPrimerElementoNS(document, ns, "CartaPorte");
+                if (cartaPorteElement != null) {
+                    cartaPorteNamespace = ns;
+                    break;
+                }
+            }
+            
+            // Fallback: buscar sin namespace
+            if (cartaPorteElement == null) {
+                cartaPorteElement = obtenerPrimerElemento(document, "CartaPorte");
+            }
+            
+            if (cartaPorteElement == null) {
+                logger.warn("No se encontró nodo CartaPorte en el XML");
+                return datosCartaPorte;
+            }
+            
+            logger.info("Carta Porte encontrado con namespace: {}", cartaPorteNamespace != null ? cartaPorteNamespace : "sin namespace");
+            
+            // Extraer TotalDistRec
+            String totalDistRec = getAttribute(cartaPorteElement, "TotalDistRec");
+            if (totalDistRec != null && !totalDistRec.trim().isEmpty()) {
+                datosCartaPorte.put("distanciaRecorrida", totalDistRec.trim());
+            }
+            
+            // Extraer Ubicaciones
+            List<Map<String, Object>> ubicacionesList = new ArrayList<>();
+            Element ubicacionesElement = null;
+            if (cartaPorteNamespace != null) {
+                ubicacionesElement = obtenerPrimerElementoNS(cartaPorteElement, cartaPorteNamespace, "Ubicaciones");
+            }
+            if (ubicacionesElement == null) {
+                ubicacionesElement = obtenerPrimerElemento(cartaPorteElement, "Ubicaciones");
+            }
+            if (ubicacionesElement != null) {
+                NodeList ubicacionNodeList = ubicacionesElement.getElementsByTagNameNS(cartaPorteNamespace != null ? cartaPorteNamespace : "*", "Ubicacion");
+                if (ubicacionNodeList.getLength() == 0 && cartaPorteNamespace != null) {
+                    ubicacionNodeList = ubicacionesElement.getElementsByTagName("Ubicacion");
+                }
+                for (int i = 0; i < ubicacionNodeList.getLength(); i++) {
+                    Element ubicacionElement = (Element) ubicacionNodeList.item(i);
+                    Map<String, Object> ubicacionMap = new HashMap<>();
+                    ubicacionMap.put("tipoUbicacion", getAttribute(ubicacionElement, "TipoUbicacion"));
+                    ubicacionMap.put("nombreRemitenteDestinatario", getAttribute(ubicacionElement, "NombreRemitenteDestinatario"));
+                    ubicacionMap.put("rfcRemitenteDestinatario", getAttribute(ubicacionElement, "RFCRemitenteDestinatario"));
+                    ubicacionMap.put("fechaHoraSalidaLlegada", getAttribute(ubicacionElement, "FechaHoraSalidaLlegada"));
+                    ubicacionMap.put("distanciaRecorrida", getAttribute(ubicacionElement, "DistanciaRecorrida"));
+                    
+                    // Extraer Domicilio
+                    Element domicilioElement = null;
+                    if (cartaPorteNamespace != null) {
+                        domicilioElement = obtenerPrimerElementoNS(ubicacionElement, cartaPorteNamespace, "Domicilio");
+                    }
+                    if (domicilioElement == null) {
+                        domicilioElement = obtenerPrimerElemento(ubicacionElement, "Domicilio");
+                    }
+                    if (domicilioElement != null) {
+                        Map<String, Object> domicilioMap = new HashMap<>();
+                        domicilioMap.put("calle", getAttribute(domicilioElement, "Calle"));
+                        domicilioMap.put("numeroExterior", getAttribute(domicilioElement, "NumeroExterior"));
+                        domicilioMap.put("numeroInterior", getAttribute(domicilioElement, "NumeroInterior"));
+                        domicilioMap.put("colonia", getAttribute(domicilioElement, "Colonia"));
+                        domicilioMap.put("municipio", getAttribute(domicilioElement, "Municipio"));
+                        domicilioMap.put("estado", getAttribute(domicilioElement, "Estado"));
+                        domicilioMap.put("pais", getAttribute(domicilioElement, "Pais"));
+                        domicilioMap.put("codigoPostal", getAttribute(domicilioElement, "CodigoPostal"));
+                        ubicacionMap.put("domicilio", domicilioMap);
+                    }
+                    ubicacionesList.add(ubicacionMap);
+                }
+            }
+            datosCartaPorte.put("ubicaciones", ubicacionesList);
+            
+            // Extraer Mercancias
+            List<Map<String, Object>> mercanciasList = new ArrayList<>();
+            Element mercanciasElement = null;
+            if (cartaPorteNamespace != null) {
+                mercanciasElement = obtenerPrimerElementoNS(cartaPorteElement, cartaPorteNamespace, "Mercancias");
+            }
+            if (mercanciasElement == null) {
+                mercanciasElement = obtenerPrimerElemento(cartaPorteElement, "Mercancias");
+            }
+            if (mercanciasElement != null) {
+                // Extraer Autotransporte
+                Element autotransporteElement = null;
+                if (cartaPorteNamespace != null) {
+                    autotransporteElement = obtenerPrimerElementoNS(mercanciasElement, cartaPorteNamespace, "Autotransporte");
+                }
+                if (autotransporteElement == null) {
+                    autotransporteElement = obtenerPrimerElemento(mercanciasElement, "Autotransporte");
+                }
+                if (autotransporteElement != null) {
+                    datosCartaPorte.put("permisoSCT", getAttribute(autotransporteElement, "PermSCT"));
+                    datosCartaPorte.put("numeroPermisoSCT", getAttribute(autotransporteElement, "NumPermisoSCT"));
+                    
+                    // Extraer IdentificacionVehicular
+                    Element identVehicularElement = null;
+                    if (cartaPorteNamespace != null) {
+                        identVehicularElement = obtenerPrimerElementoNS(autotransporteElement, cartaPorteNamespace, "IdentificacionVehicular");
+                    }
+                    if (identVehicularElement == null) {
+                        identVehicularElement = obtenerPrimerElemento(autotransporteElement, "IdentificacionVehicular");
+                    }
+                    if (identVehicularElement != null) {
+                        datosCartaPorte.put("placasVehiculo", getAttribute(identVehicularElement, "PlacaVM"));
+                        datosCartaPorte.put("configVehicular", getAttribute(identVehicularElement, "ConfigVehicular"));
+                    }
+                    datosCartaPorte.put("tipoTransporte", "01"); // Autotransporte
+                }
+                
+                // Extraer Mercancia (lista)
+                NodeList mercanciaNodeList = mercanciasElement.getElementsByTagNameNS(cartaPorteNamespace != null ? cartaPorteNamespace : "*", "Mercancia");
+                if (mercanciaNodeList.getLength() == 0 && cartaPorteNamespace != null) {
+                    mercanciaNodeList = mercanciasElement.getElementsByTagName("Mercancia");
+                }
+                for (int i = 0; i < mercanciaNodeList.getLength(); i++) {
+                    Element mercanciaElement = (Element) mercanciaNodeList.item(i);
+                    Map<String, Object> mercanciaMap = new HashMap<>();
+                    mercanciaMap.put("bienesTransp", getAttribute(mercanciaElement, "BienesTransp"));
+                    mercanciaMap.put("descripcion", getAttribute(mercanciaElement, "Descripcion"));
+                    mercanciaMap.put("cantidad", getAttribute(mercanciaElement, "Cantidad"));
+                    mercanciaMap.put("claveUnidad", getAttribute(mercanciaElement, "ClaveUnidad"));
+                    mercanciaMap.put("unidad", getAttribute(mercanciaElement, "Unidad"));
+                    mercanciaMap.put("pesoEnKg", getAttribute(mercanciaElement, "PesoEnKg"));
+                    mercanciaMap.put("valorMercancia", getAttribute(mercanciaElement, "ValorMercancia"));
+                    mercanciaMap.put("materialPeligroso", getAttribute(mercanciaElement, "MaterialPeligroso"));
+                    mercanciaMap.put("cveMaterialPeligroso", getAttribute(mercanciaElement, "CveMaterialPeligroso"));
+                    mercanciasList.add(mercanciaMap);
+                }
+            }
+            datosCartaPorte.put("mercancias", mercanciasList);
+            
+            // Extraer FiguraTransporte
+            List<Map<String, Object>> figurasList = new ArrayList<>();
+            Element figuraTransporteElement = null;
+            if (cartaPorteNamespace != null) {
+                figuraTransporteElement = obtenerPrimerElementoNS(cartaPorteElement, cartaPorteNamespace, "FiguraTransporte");
+            }
+            if (figuraTransporteElement == null) {
+                figuraTransporteElement = obtenerPrimerElemento(cartaPorteElement, "FiguraTransporte");
+            }
+            if (figuraTransporteElement != null) {
+                Element tiposFiguraElement = null;
+                if (cartaPorteNamespace != null) {
+                    tiposFiguraElement = obtenerPrimerElementoNS(figuraTransporteElement, cartaPorteNamespace, "TiposFigura");
+                }
+                if (tiposFiguraElement == null) {
+                    tiposFiguraElement = obtenerPrimerElemento(figuraTransporteElement, "TiposFigura");
+                }
+                if (tiposFiguraElement != null) {
+                    NodeList tipoFiguraNodeList = tiposFiguraElement.getElementsByTagNameNS(cartaPorteNamespace != null ? cartaPorteNamespace : "*", "TipoFigura");
+                    if (tipoFiguraNodeList.getLength() == 0 && cartaPorteNamespace != null) {
+                        tipoFiguraNodeList = tiposFiguraElement.getElementsByTagName("TipoFigura");
+                    }
+                    for (int i = 0; i < tipoFiguraNodeList.getLength(); i++) {
+                        Element tipoFiguraElement = (Element) tipoFiguraNodeList.item(i);
+                        Map<String, Object> figuraMap = new HashMap<>();
+                        figuraMap.put("tipoFigura", getAttribute(tipoFiguraElement, "TipoFigura"));
+                        figuraMap.put("rfcFigura", getAttribute(tipoFiguraElement, "RFCFigura"));
+                        figuraMap.put("nombreFigura", getAttribute(tipoFiguraElement, "NombreFigura"));
+                        figuraMap.put("numLicencia", getAttribute(tipoFiguraElement, "NumLicencia"));
+                        figuraMap.put("numRegIdTribFigura", getAttribute(tipoFiguraElement, "NumRegIdTribFigura"));
+                        figuraMap.put("residenciaFiscalFigura", getAttribute(tipoFiguraElement, "ResidenciaFiscalFigura"));
+                        figurasList.add(figuraMap);
+                        
+                        // Si es transportista (tipoFigura="02"), guardar en campos principales
+                        if ("02".equals(getAttribute(tipoFiguraElement, "TipoFigura"))) {
+                            datosCartaPorte.put("nombreTransportista", getAttribute(tipoFiguraElement, "NombreFigura"));
+                            datosCartaPorte.put("rfcTransportista", getAttribute(tipoFiguraElement, "RFCFigura"));
+                        }
+                    }
+                }
+            }
+            datosCartaPorte.put("figurasTransporte", figurasList);
+            
+            // Extraer origen y destino desde ubicaciones
+            if (!ubicacionesList.isEmpty()) {
+                for (Map<String, Object> ubicacion : ubicacionesList) {
+                    String tipoUbicacion = (String) ubicacion.get("tipoUbicacion");
+                    if ("01".equals(tipoUbicacion)) {
+                        // Origen
+                        datosCartaPorte.put("origen", ubicacion.get("nombreRemitenteDestinatario"));
+                        Map<String, Object> domicilio = (Map<String, Object>) ubicacion.get("domicilio");
+                        if (domicilio != null) {
+                            datosCartaPorte.put("origenDomicilio", construirDireccionDesdeMap(domicilio));
+                        }
+                        String fechaHora = (String) ubicacion.get("fechaHoraSalidaLlegada");
+                        if (fechaHora != null && fechaHora.length() >= 10) {
+                            datosCartaPorte.put("fechaSalida", fechaHora.substring(0, 10));
+                        }
+                    } else if ("02".equals(tipoUbicacion)) {
+                        // Destino
+                        datosCartaPorte.put("destino", ubicacion.get("nombreRemitenteDestinatario"));
+                        Map<String, Object> domicilio = (Map<String, Object>) ubicacion.get("domicilio");
+                        if (domicilio != null) {
+                            datosCartaPorte.put("destinoDomicilio", construirDireccionDesdeMap(domicilio));
+                        }
+                        String fechaHora = (String) ubicacion.get("fechaHoraSalidaLlegada");
+                        if (fechaHora != null && fechaHora.length() >= 10) {
+                            datosCartaPorte.put("fechaLlegada", fechaHora.substring(0, 10));
+                        }
+                    }
+                }
+            }
+            
+            logger.info("Datos de Carta Porte extraídos del XML: {} campos (ubicaciones: {}, mercancias: {}, figuras: {})", 
+                datosCartaPorte.size(),
+                ubicacionesList.size(),
+                mercanciasList.size(),
+                figurasList.size());
+            return datosCartaPorte;
+            
+        } catch (Exception e) {
+            logger.error("Error al extraer datos de Carta Porte del XML: {}", e.getMessage(), e);
+            return new HashMap<>(); // Retornar mapa vacío en lugar de null para que el diseño funcione
+        }
+    }
+    
+    /**
+     * Extrae la descripción del concepto desde el XML
+     */
+    private String extraerDescripcionConceptoDesdeXml(String xmlContent) {
+        try {
+            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+            factory.setNamespaceAware(true);
+            DocumentBuilder builder = factory.newDocumentBuilder();
+            Document document = builder.parse(new ByteArrayInputStream(xmlContent.getBytes(StandardCharsets.UTF_8)));
+            
+            NodeList conceptosNodeList = document.getElementsByTagNameNS("*", "Conceptos");
+            if (conceptosNodeList.getLength() > 0) {
+                Element conceptosElement = (Element) conceptosNodeList.item(0);
+                NodeList conceptoNodeList = conceptosElement.getElementsByTagNameNS("*", "Concepto");
+                if (conceptoNodeList.getLength() > 0) {
+                    Element conceptoElement = (Element) conceptoNodeList.item(0);
+                    return getAttribute(conceptoElement, "Descripcion");
+                }
+            }
+            return null;
+        } catch (Exception e) {
+            logger.warn("Error al extraer descripción del concepto: {}", e.getMessage());
+            return null;
+        }
+    }
+    
+    /**
+     * Helper para obtener el primer elemento por namespace y localName
+     */
+    private Element obtenerPrimerElementoNS(Node parent, String namespaceURI, String localName) {
+        if (parent == null) return null;
+        NodeList nodeList;
+        if (parent instanceof Document) {
+            nodeList = ((Document) parent).getElementsByTagNameNS(namespaceURI, localName);
+        } else if (parent instanceof Element) {
+            nodeList = ((Element) parent).getElementsByTagNameNS(namespaceURI, localName);
+        } else {
+            return null;
+        }
+        return (nodeList != null && nodeList.getLength() > 0) ? (Element) nodeList.item(0) : null;
+    }
+    
+    /**
+     * Helper para obtener el primer elemento por localName (sin namespace)
+     */
+    private Element obtenerPrimerElemento(Node parent, String localName) {
+        if (parent == null) return null;
+        NodeList nodeList;
+        if (parent instanceof Document) {
+            nodeList = ((Document) parent).getElementsByTagName(localName);
+        } else if (parent instanceof Element) {
+            nodeList = ((Element) parent).getElementsByTagName(localName);
+        } else {
+            return null;
+        }
+        return (nodeList != null && nodeList.getLength() > 0) ? (Element) nodeList.item(0) : null;
+    }
+    
+    /**
+     * Helper para obtener atributos de un elemento
+     */
+    private String getAttribute(Element element, String attributeName) {
+        if (element == null) return null;
+        return element.hasAttribute(attributeName) ? element.getAttribute(attributeName) : null;
+    }
+    
+    /**
+     * Construye una dirección desde un mapa de domicilio
+     */
+    private String construirDireccionDesdeMap(Map<String, Object> domicilio) {
+        if (domicilio == null) return null;
+        StringBuilder sb = new StringBuilder();
+        appendSegment(sb, (String) domicilio.get("calle"));
+        appendSegment(sb, (String) domicilio.get("municipio"));
+        appendSegment(sb, (String) domicilio.get("estado"));
+        appendSegment(sb, (String) domicilio.get("codigoPostal"));
+        return sb.length() > 0 ? sb.toString() : null;
     }
 }

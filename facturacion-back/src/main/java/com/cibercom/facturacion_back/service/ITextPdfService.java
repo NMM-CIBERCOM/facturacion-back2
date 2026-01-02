@@ -60,6 +60,11 @@ public class ITextPdfService {
             
             boolean esComplementoPago = esComplementoPago(facturaData);
             boolean esNomina = tieneNomina(facturaData);
+            boolean esRetencion = esRetencion(facturaData);
+            boolean esCartaPorte = esCartaPorte(facturaData);
+            
+            logger.info("Detección de tipo de documento - ComplementoPago: {}, Nomina: {}, Retencion: {}, CartaPorte: {}, tipoComprobante: {}", 
+                esComplementoPago, esNomina, esRetencion, esCartaPorte, getString(facturaData, "tipoComprobante", "N/A"));
 
             // Agregar encabezado moderno
             agregarEncabezadoModerno(document, facturaData, logoConfig);
@@ -71,21 +76,29 @@ public class ITextPdfService {
                 agregarSeccionComplementoPago(document, facturaData, logoConfig);
             } else if (esNomina) {
                 agregarSeccionNomina(document, facturaData, logoConfig);
+            } else if (esRetencion) {
+                agregarSeccionRetencion(document, facturaData, logoConfig);
+            } else if (esCartaPorte) {
+                logger.info("Usando diseño específico de Carta Porte (agregarSeccionCartaPorte)");
+                agregarSeccionCartaPorte(document, facturaData, logoConfig);
             } else {
+                logger.info("Usando diseño genérico de conceptos (agregarConceptosModerno)");
                 // Agregar conceptos con diseño moderno
                 agregarConceptosModerno(document, facturaData, logoConfig);
             }
             
-            // Agregar complemento Carta Porte solo si no es complemento de pago
-            if (!esComplementoPago) {
+            // Agregar complemento Carta Porte solo si no es complemento de pago y no es el comprobante principal de Carta Porte
+            if (!esComplementoPago && !esCartaPorte) {
                 agregarComplementoCartaPorte(document, facturaData, logoConfig);
             }
             
-            // Totales: nómina o factura clásica
+            // Totales: nómina, retención, carta porte, complemento de pago o factura clásica
             if (esNomina) {
                 agregarTotalesNomina(document, facturaData, logoConfig);
             } else if (esComplementoPago) {
                 agregarTotalesComplementoPago(document, facturaData, logoConfig);
+            } else if (esRetencion) {
+                agregarTotalesRetencion(document, facturaData, logoConfig);
             } else {
                 agregarTotalesModerno(document, facturaData, logoConfig);
             }
@@ -341,14 +354,14 @@ public class ITextPdfService {
                     }
                 }
                 
-                // Si no hay Base64, intentar cargar desde URL
+                // Si no hay Base64, intentar cargar desde URL o classpath
                 if (logoBytes == null && logoConfig.containsKey("logoUrl")) {
                     String logoUrl = (String) logoConfig.get("logoUrl");
                     try {
                         if (logoUrl != null && (logoUrl.startsWith("http://") || logoUrl.startsWith("https://"))) {
                             try (java.io.InputStream in = new java.net.URL(logoUrl).openStream()) {
                                 logoBytes = in.readAllBytes();
-                                logger.info("Logo cargado desde URL: {}", logoUrl);
+                                logger.info("Logo cargado desde URL: {} ({} bytes)", logoUrl, logoBytes.length);
                             }
                         } else {
                             java.nio.file.Path logoPath = java.nio.file.Paths.get("src/main/resources/static" + logoUrl);
@@ -361,6 +374,34 @@ public class ITextPdfService {
                         }
                     } catch (Exception e) {
                         logger.warn("No se pudo cargar el logo desde '{}': {}", logoUrl, e.getMessage());
+                    }
+                }
+                
+                // Fallback: Intentar cargar desde classpath si aún no se cargó
+                if (logoBytes == null) {
+                    try {
+                        java.io.InputStream logoStream = getClass().getClassLoader()
+                                .getResourceAsStream("static/images/Logo Cibercom.png");
+                        if (logoStream != null) {
+                            logoBytes = logoStream.readAllBytes();
+                            logoStream.close();
+                            logger.info("Logo PNG cargado desde classpath (fallback): {} bytes", logoBytes.length);
+                        } else {
+                            // Intentar SVG como último recurso
+                            logoStream = getClass().getClassLoader()
+                                    .getResourceAsStream("static/images/cibercom-logo.svg");
+                            if (logoStream != null) {
+                                byte[] svgBytes = logoStream.readAllBytes();
+                                logoStream.close();
+                                if (isSvg(svgBytes)) {
+                                    logger.info("Logo SVG encontrado en classpath, convirtiendo a PNG...");
+                                    logoBytes = convertSvgToPng(svgBytes);
+                                    logger.info("SVG convertido a PNG exitosamente: {} bytes", logoBytes.length);
+                                }
+                            }
+                        }
+                    } catch (Exception e) {
+                        logger.warn("No se pudo cargar logo desde classpath (fallback): {}", e.getMessage());
                     }
                 }
                 
@@ -563,18 +604,19 @@ public class ITextPdfService {
                 .setCharacterSpacing(0.3f);
             document.add(conceptosTitulo);
             
-            // Crear tabla de conceptos más compacta
-            Table conceptosTable = new Table(new float[]{0.8f, 3.5f, 1, 1, 0.7f});
+            // Crear tabla de conceptos con columnas adicionales para campos del catálogo
+            // Columnas: Cant, Unidad, Descripción, ClaveProdServ, P.Unit, Importe, IVA, TasaIVA
+            Table conceptosTable = new Table(new float[]{0.6f, 0.7f, 2.5f, 1.2f, 0.9f, 0.9f, 0.7f, 0.6f});
             conceptosTable.setWidth(UnitValue.createPercentValue(100));
             
-            // Encabezados de la tabla más compactos
-            String[] headers = {"Cant", "Descripción", "P.Unit", "Importe", "IVA"};
+            // Encabezados de la tabla con campos del catálogo
+            String[] headers = {"Cant", "Unidad", "Descripción", "ClaveProdServ", "P.Unit", "Importe", "IVA", "Tasa"};
             for (String header : headers) {
                 Cell headerCell = new Cell()
-                    .add(new Paragraph(header).setBold().setFontSize(8))
+                    .add(new Paragraph(header).setBold().setFontSize(7))
                     .setBackgroundColor(primaryColor)
                     .setFontColor(ColorConstants.WHITE)
-                    .setPadding(6)
+                    .setPadding(5)
                     .setTextAlignment(TextAlignment.CENTER);
                 conceptosTable.addHeaderCell(headerCell);
             }
@@ -598,36 +640,233 @@ public class ITextPdfService {
                 conceptos.add(conceptoUnico);
             }
             
-            // Agregar filas de conceptos
+            // Agregar filas de conceptos con campos del catálogo
             for (java.util.Map<String, Object> concepto : conceptos) {
-                // Cantidad
+                // Cantidad - manejar BigDecimal
+                String cantidadStr = "";
+                Object cantidadObj = concepto.get("cantidad");
+                if (cantidadObj != null) {
+                    if (cantidadObj instanceof BigDecimal) {
+                        cantidadStr = ((BigDecimal) cantidadObj).toPlainString();
+                    } else {
+                        cantidadStr = cantidadObj.toString();
+                    }
+                }
+                if (cantidadStr.isEmpty()) {
+                    cantidadStr = "1";
+                }
                 conceptosTable.addCell(new Cell()
-                    .add(new Paragraph(getString(concepto, "cantidad", "1")).setFontSize(8))
-                    .setPadding(6)
+                    .add(new Paragraph(cantidadStr).setFontSize(7))
+                    .setPadding(5)
                     .setTextAlignment(TextAlignment.CENTER));
                 
-                // Descripción
-                conceptosTable.addCell(new Cell()
-                    .add(new Paragraph(getString(concepto, "descripcion", "Producto/Servicio")).setFontSize(8))
-                    .setPadding(6));
+                // Unidad (del catálogo) - Priorizar claveUnidad sobre unidad descriptiva
+                String claveUnidad = getString(concepto, "claveUnidad", "");
+                String unidad = getString(concepto, "unidad", "");
                 
-                // Precio unitario
+                // Si claveUnidad está disponible, usarla (es código SAT válido)
+                // Si no, y unidad es un texto descriptivo como "Opcional", usar claveUnidad vacía o "-"
+                String unidadAMostrar = "";
+                if (!claveUnidad.isEmpty()) {
+                    unidadAMostrar = claveUnidad;
+                } else {
+                    // Si unidad es un texto descriptivo común, no mostrarlo
+                    String unidadUpper = unidad.toUpperCase().trim();
+                    String[] textosDescriptivos = {"OPCIONAL", "SERVICIO", "PIEZA", "UNIDAD", "N/A", "NA", "-"};
+                    boolean esDescriptivo = false;
+                    for (String texto : textosDescriptivos) {
+                        if (unidadUpper.equals(texto)) {
+                            esDescriptivo = true;
+                            break;
+                        }
+                    }
+                    if (!esDescriptivo && !unidad.isEmpty()) {
+                        unidadAMostrar = unidad;
+                    }
+                }
+                
                 conceptosTable.addCell(new Cell()
-                    .add(new Paragraph("$" + getString(concepto, "valorUnitario", "0.00")).setFontSize(8))
-                    .setPadding(6)
+                    .add(new Paragraph(unidadAMostrar.isEmpty() ? "-" : unidadAMostrar).setFontSize(7))
+                    .setPadding(5)
+                    .setTextAlignment(TextAlignment.CENTER));
+                
+                // Descripción - diseño especial para retenciones
+                String tipoComprobante = getString(facturaData, "tipoComprobante", "");
+                String descripcion = getString(concepto, "descripcion", "Producto/Servicio");
+                Cell descripcionCell = new Cell().setPadding(5);
+                
+                if ("R".equals(tipoComprobante) && descripcion.contains("\n")) {
+                    // Diseño especial estructurado para retenciones
+                    Div descripcionDiv = new Div();
+                    String[] lineas = descripcion.split("\n");
+                    boolean primeraLinea = true;
+                    
+                    for (String linea : lineas) {
+                        String lineaTrim = linea.trim();
+                        if (lineaTrim.isEmpty()) continue;
+                        
+                        if (primeraLinea) {
+                            // Primera línea: Tipo de retención (título principal)
+                            Paragraph p = new Paragraph(lineaTrim)
+                                .setFontSize(7.5f)
+                                .setBold()
+                                .setFontColor(primaryColor)
+                                .setMarginBottom(4);
+                            descripcionDiv.add(p);
+                            primeraLinea = false;
+                        } else if (lineaTrim.startsWith("Concepto:")) {
+                            // Línea de concepto
+                            Paragraph p = new Paragraph(lineaTrim.replace("Concepto: ", ""))
+                                .setFontSize(6.5f)
+                                .setMarginBottom(3)
+                                .setMarginLeft(5);
+                            descripcionDiv.add(p);
+                        } else if (lineaTrim.startsWith("Monto Base:") || lineaTrim.contains("| Gravado:") || lineaTrim.contains("| Exento:")) {
+                            // Líneas de montos
+                            Paragraph p = new Paragraph(lineaTrim)
+                                .setFontSize(6)
+                                .setMarginBottom(2)
+                                .setFontColor(new DeviceRgb(50, 50, 50));
+                            descripcionDiv.add(p);
+                        } else if (lineaTrim.startsWith("Período:") || lineaTrim.startsWith("Fecha de Pago:")) {
+                            // Líneas de fechas
+                            Paragraph p = new Paragraph(lineaTrim)
+                                .setFontSize(6)
+                                .setMarginBottom(2)
+                                .setFontColor(new DeviceRgb(50, 50, 50));
+                            descripcionDiv.add(p);
+                        } else if (lineaTrim.startsWith("Impuestos Retenidos:")) {
+                            // Encabezado de impuestos retenidos
+                            Paragraph p = new Paragraph(lineaTrim.replace("Impuestos Retenidos:", "Imp. Retenidos:"))
+                                .setFontSize(6.5f)
+                                .setBold()
+                                .setMarginTop(3)
+                                .setMarginBottom(2)
+                                .setFontColor(new DeviceRgb(80, 80, 80));
+                            descripcionDiv.add(p);
+                        } else if (lineaTrim.startsWith("Detalle de Retenciones:")) {
+                            // Encabezado de detalle
+                            Paragraph p = new Paragraph("Detalle:")
+                                .setFontSize(6.5f)
+                                .setBold()
+                                .setMarginTop(3)
+                                .setMarginBottom(2)
+                                .setFontColor(new DeviceRgb(80, 80, 80));
+                            descripcionDiv.add(p);
+                        } else if (lineaTrim.startsWith("  - ")) {
+                            // Líneas de detalle (con indentación)
+                            Paragraph p = new Paragraph("• " + lineaTrim.substring(4).trim())
+                                .setFontSize(6)
+                                .setMarginLeft(8)
+                                .setMarginBottom(1)
+                                .setFontColor(new DeviceRgb(60, 60, 60));
+                            descripcionDiv.add(p);
+                        } else if (lineaTrim.contains("| Total Retenido:")) {
+                            // Línea de total retenido
+                            Paragraph p = new Paragraph(lineaTrim)
+                                .setFontSize(6)
+                                .setMarginBottom(2)
+                                .setBold()
+                                .setFontColor(new DeviceRgb(40, 40, 40));
+                            descripcionDiv.add(p);
+                        } else {
+                            // Otras líneas
+                            Paragraph p = new Paragraph(lineaTrim)
+                                .setFontSize(6)
+                                .setMarginBottom(2);
+                            descripcionDiv.add(p);
+                        }
+                    }
+                    
+                    descripcionCell.add(descripcionDiv);
+                } else {
+                    // Descripción normal para otros tipos de comprobantes
+                    descripcionCell.add(new Paragraph(descripcion).setFontSize(7));
+                }
+                
+                conceptosTable.addCell(descripcionCell);
+                
+                // ClaveProdServ (del catálogo)
+                String claveProdServ = getString(concepto, "claveProdServ", "");
+                conceptosTable.addCell(new Cell()
+                    .add(new Paragraph(claveProdServ.isEmpty() ? "-" : claveProdServ).setFontSize(7))
+                    .setPadding(5)
+                    .setTextAlignment(TextAlignment.CENTER));
+                
+                // Precio unitario - manejar BigDecimal
+                BigDecimal valorUnitarioBD = getBigDecimal(concepto, "valorUnitario", BigDecimal.ZERO);
+                String valorUnitarioStr = String.format("%.2f", valorUnitarioBD);
+                conceptosTable.addCell(new Cell()
+                    .add(new Paragraph("$" + valorUnitarioStr).setFontSize(7))
+                    .setPadding(5)
                     .setTextAlignment(TextAlignment.RIGHT));
                 
-                // Importe
+                // Importe - manejar BigDecimal
+                BigDecimal importeBD = getBigDecimal(concepto, "importe", BigDecimal.ZERO);
+                String importeStr = String.format("%.2f", importeBD);
                 conceptosTable.addCell(new Cell()
-                    .add(new Paragraph("$" + getString(concepto, "importe", "0.00")).setFontSize(8))
-                    .setPadding(6)
+                    .add(new Paragraph("$" + importeStr).setFontSize(7))
+                    .setPadding(5)
                     .setTextAlignment(TextAlignment.RIGHT));
                 
-                // IVA
+                // IVA - manejar BigDecimal
+                BigDecimal ivaBD = getBigDecimal(concepto, "iva", BigDecimal.ZERO);
+                String ivaStr = String.format("%.2f", ivaBD);
                 conceptosTable.addCell(new Cell()
-                    .add(new Paragraph("$" + getString(concepto, "iva", "0.00")).setFontSize(8))
-                    .setPadding(6)
+                    .add(new Paragraph("$" + ivaStr).setFontSize(7))
+                    .setPadding(5)
                     .setTextAlignment(TextAlignment.RIGHT));
+                
+                // Tasa IVA (del catálogo)
+                String tasaIva = "";
+                Object tasaIvaObj = concepto.get("tasaIva");
+                if (tasaIvaObj != null) {
+                    if (tasaIvaObj instanceof BigDecimal) {
+                        // Si viene como BigDecimal (0.16), convertir a porcentaje
+                        BigDecimal tasaBD = (BigDecimal) tasaIvaObj;
+                        tasaIva = String.format("%.2f%%", tasaBD.multiply(new BigDecimal("100")).doubleValue());
+                    } else if (tasaIvaObj instanceof Number) {
+                        // Si viene como Number, convertir a porcentaje
+                        double tasa = ((Number) tasaIvaObj).doubleValue();
+                        tasaIva = String.format("%.2f%%", tasa * 100);
+                    } else {
+                        // Si viene como String, intentar parsearlo
+                        String tasaIvaStr = tasaIvaObj.toString();
+                        if (!tasaIvaStr.isEmpty()) {
+                            try {
+                                double tasa = Double.parseDouble(tasaIvaStr);
+                                // Si es menor que 1, asumir que es decimal (0.16), sino ya es porcentaje
+                                if (tasa < 1) {
+                                    tasaIva = String.format("%.2f%%", tasa * 100);
+                                } else {
+                                    tasaIva = String.format("%.2f%%", tasa);
+                                }
+                            } catch (Exception e) {
+                                // Si ya viene como porcentaje con %, usar tal cual
+                                tasaIva = tasaIvaStr;
+                            }
+                        }
+                    }
+                }
+                
+                // Si aún está vacío, intentar calcular desde IVA e Importe
+                if (tasaIva.isEmpty()) {
+                    try {
+                        BigDecimal ivaBDCalc = getBigDecimal(concepto, "iva", BigDecimal.ZERO);
+                        BigDecimal importeBDCalc = getBigDecimal(concepto, "importe", BigDecimal.ZERO);
+                        if (importeBDCalc.compareTo(BigDecimal.ZERO) > 0) {
+                            BigDecimal tasa = ivaBDCalc.divide(importeBDCalc, 4, java.math.RoundingMode.HALF_UP);
+                            tasaIva = String.format("%.2f%%", tasa.multiply(new BigDecimal("100")).doubleValue());
+                        }
+                    } catch (Exception e) {
+                        // Ignorar errores de conversión
+                    }
+                }
+                
+                conceptosTable.addCell(new Cell()
+                    .add(new Paragraph(tasaIva.isEmpty() ? "-" : tasaIva).setFontSize(7))
+                    .setPadding(5)
+                    .setTextAlignment(TextAlignment.CENTER));
             }
             
             document.add(conceptosTable);
@@ -952,61 +1191,98 @@ public class ITextPdfService {
             Map<String, Object> nomina = (Map<String, Object>) facturaData.get("nomina");
             if (nomina == null) nomina = java.util.Collections.emptyMap();
 
-            Table container = new Table(1);
-            container.setWidth(UnitValue.createPercentValue(100));
-            container.setMarginTop(8);
-
-            Cell cell = new Cell()
-                .setBorder(new SolidBorder(new DeviceRgb(226, 232, 240), 1))
-                .setBackgroundColor(new DeviceRgb(248, 250, 252))
-                .setPadding(8);
-
-            Paragraph titulo = new Paragraph("NÓMINA")
+            // Título principal
+            Paragraph tituloPrincipal = new Paragraph("INFORMACIÓN DE NÓMINA")
                 .setBold()
-                .setFontSize(9)
+                .setFontSize(11)
                 .setFontColor(primaryColor)
-                .setMarginBottom(4);
-            cell.add(titulo);
+                .setMarginBottom(8)
+                .setMarginTop(8);
+            document.add(tituloPrincipal);
 
-            Table inner = new Table(2);
-            inner.setWidth(UnitValue.createPercentValue(100));
+            // Sección 1: DATOS DEL EMPLEADO
+            Paragraph tituloEmpleado = new Paragraph("DATOS DEL EMPLEADO")
+                .setBold()
+                .setFontSize(10)
+                .setFontColor(primaryColor)
+                .setMarginBottom(6)
+                .setMarginTop(12);
+            document.add(tituloEmpleado);
 
-            // Lado izquierdo: datos del empleado
-            Cell left = new Cell().setBorder(null);
-            left.add(new Paragraph("Empleado: " + getNominaString(facturaData, "nombre", getString(facturaData, "nombreReceptor", "")))
-                .setFontSize(8));
-            String curp = getNominaString(facturaData, "curp", "");
-            if (!curp.isEmpty()) {
-                left.add(new Paragraph("CURP: " + curp).setFontSize(8));
-            }
-            String rfcRec = getNominaString(facturaData, "rfcReceptor", getString(facturaData, "rfcReceptor", ""));
-            if (!rfcRec.isEmpty()) {
-                left.add(new Paragraph("RFC Receptor: " + rfcRec).setFontSize(8));
-            }
-            inner.addCell(left);
+            Table tablaEmpleado = new Table(2);
+            tablaEmpleado.setWidth(UnitValue.createPercentValue(100));
+            tablaEmpleado.setMarginBottom(10);
 
-            // Lado derecho: periodo y fechas
-            Cell right = new Cell().setBorder(null);
-            String periodo = getNominaString(facturaData, "periodoPago", "");
-            if (!periodo.isEmpty()) {
-                right.add(new Paragraph("Periodo: " + periodo).setFontSize(8));
-            }
-            String fPago = getNominaString(facturaData, "fechaPago", "");
-            if (!fPago.isEmpty()) {
-                right.add(new Paragraph("Fecha de Pago: " + fPago).setFontSize(8));
-            }
-            String fNom = getNominaString(facturaData, "fechaNomina", "");
-            if (!fNom.isEmpty()) {
-                right.add(new Paragraph("Fecha Nómina: " + fNom).setFontSize(8));
-            }
-            inner.addCell(right);
+            agregarFilaTabla(tablaEmpleado, "Nombre:", getNominaString(facturaData, "nombre", getString(facturaData, "nombreReceptor", "")), primaryColor);
+            agregarFilaTabla(tablaEmpleado, "RFC Receptor:", getNominaString(facturaData, "rfcReceptor", getString(facturaData, "rfcReceptor", "")), primaryColor);
+            agregarFilaTabla(tablaEmpleado, "CURP:", getNominaString(facturaData, "curp", ""), primaryColor);
+            agregarFilaTabla(tablaEmpleado, "Número de Seguridad Social:", getNominaString(facturaData, "numSeguridadSocial", ""), primaryColor);
+            agregarFilaTabla(tablaEmpleado, "ID Empleado:", getNominaString(facturaData, "idEmpleado", ""), primaryColor);
+            agregarFilaTabla(tablaEmpleado, "Correo Electrónico:", getNominaString(facturaData, "correoElectronico", ""), primaryColor);
+            agregarFilaTabla(tablaEmpleado, "Domicilio Fiscal:", getNominaString(facturaData, "domicilioFiscalReceptor", ""), primaryColor);
 
-            cell.add(inner);
-            container.addCell(cell);
-            document.add(container);
+            document.add(tablaEmpleado);
+
+            // Sección 2: DATOS LABORALES
+            Paragraph tituloLaboral = new Paragraph("DATOS LABORALES")
+                .setBold()
+                .setFontSize(10)
+                .setFontColor(primaryColor)
+                .setMarginBottom(6)
+                .setMarginTop(12);
+            document.add(tituloLaboral);
+
+            Table tablaLaboral = new Table(2);
+            tablaLaboral.setWidth(UnitValue.createPercentValue(100));
+            tablaLaboral.setMarginBottom(10);
+
+            agregarFilaTabla(tablaLaboral, "Fecha de Inicio Relación Laboral:", getNominaString(facturaData, "fechaInicioRelLaboral", ""), primaryColor);
+            agregarFilaTabla(tablaLaboral, "Antigüedad:", getNominaString(facturaData, "antiguedad", ""), primaryColor);
+            agregarFilaTabla(tablaLaboral, "Riesgo del Puesto:", getNominaString(facturaData, "riesgoPuesto", ""), primaryColor);
+            agregarFilaTabla(tablaLaboral, "Salario Diario Integrado:", getNominaString(facturaData, "salarioDiarioIntegrado", ""), primaryColor);
+
+            document.add(tablaLaboral);
+
+            // Sección 3: PERÍODO Y FECHAS
+            Paragraph tituloPeriodo = new Paragraph("PERÍODO Y FECHAS")
+                .setBold()
+                .setFontSize(10)
+                .setFontColor(primaryColor)
+                .setMarginBottom(6)
+                .setMarginTop(12);
+            document.add(tituloPeriodo);
+
+            Table tablaPeriodo = new Table(2);
+            tablaPeriodo.setWidth(UnitValue.createPercentValue(100));
+            tablaPeriodo.setMarginBottom(10);
+
+            agregarFilaTabla(tablaPeriodo, "Tipo de Nómina:", getNominaString(facturaData, "tipoNomina", ""), primaryColor);
+            agregarFilaTabla(tablaPeriodo, "Período de Pago:", getNominaString(facturaData, "periodoPago", ""), primaryColor);
+            agregarFilaTabla(tablaPeriodo, "Fecha de Pago:", getNominaString(facturaData, "fechaPago", ""), primaryColor);
+            agregarFilaTabla(tablaPeriodo, "Fecha de Nómina:", getNominaString(facturaData, "fechaNomina", ""), primaryColor);
+            agregarFilaTabla(tablaPeriodo, "Uso CFDI:", getNominaString(facturaData, "usoCfdi", ""), primaryColor);
+
+            document.add(tablaPeriodo);
+
         } catch (Exception e) {
             logger.error("Error agregando sección de nómina: ", e);
         }
+    }
+
+    private void agregarFilaTabla(Table tabla, String label, String value, DeviceRgb primaryColor) {
+        Cell labelCell = new Cell()
+            .add(new Paragraph(label).setBold().setFontSize(8))
+            .setBorder(new SolidBorder(ColorConstants.GRAY, 0.5f))
+            .setPadding(6)
+            .setBackgroundColor(new DeviceRgb(248, 250, 252));
+        tabla.addCell(labelCell);
+
+        Cell valueCell = new Cell()
+            .add(new Paragraph(value.isEmpty() ? "-" : value).setFontSize(8))
+            .setBorder(new SolidBorder(ColorConstants.GRAY, 0.5f))
+            .setPadding(6)
+            .setBackgroundColor(new DeviceRgb(255, 255, 255));
+        tabla.addCell(valueCell);
     }
 
     /**
@@ -1074,6 +1350,733 @@ public class ITextPdfService {
             return false;
         }
     }
+    
+    private boolean esRetencion(Map<String, Object> facturaData) {
+        String tipo = getString(facturaData, "tipoComprobante", "");
+        if ("R".equalsIgnoreCase(tipo)) {
+            return true;
+        }
+        Object datosRetencion = facturaData != null ? facturaData.get("datosRetencion") : null;
+        return datosRetencion instanceof Map && !((Map<?,?>) datosRetencion).isEmpty();
+    }
+    
+    private boolean esCartaPorte(Map<String, Object> facturaData) {
+        if (facturaData == null) {
+            logger.debug("esCartaPorte: facturaData es null, retornando false");
+            return false;
+        }
+        // Primero verificar por tipoComprobante (más confiable)
+        String tipo = getString(facturaData, "tipoComprobante", "");
+        logger.debug("esCartaPorte: tipoComprobante='{}'", tipo);
+        if ("T".equalsIgnoreCase(tipo)) {
+            logger.info("✓ Carta Porte detectada por tipoComprobante=T");
+            return true;
+        }
+        // Fallback: verificar si existe datosCartaPorte (incluso si está vacío, si tiene las listas ya es válido)
+        Object datosCartaPorte = facturaData.get("datosCartaPorte");
+        logger.debug("esCartaPorte: datosCartaPorte es null? {}, es Map? {}", datosCartaPorte == null, datosCartaPorte instanceof Map);
+        if (datosCartaPorte instanceof Map) {
+            Map<?, ?> datosMap = (Map<?, ?>) datosCartaPorte;
+            // Si tiene al menos descripcion o alguna de las listas, es Carta Porte
+            boolean tieneDatos = !datosMap.isEmpty() && (
+                datosMap.containsKey("descripcion") || 
+                datosMap.containsKey("ubicaciones") || 
+                datosMap.containsKey("mercancias") || 
+                datosMap.containsKey("figurasTransporte")
+            );
+            if (tieneDatos) {
+                logger.info("✓ Carta Porte detectada por presencia de datosCartaPorte con datos");
+            } else {
+                logger.debug("esCartaPorte: datosCartaPorte existe pero está vacío o sin campos clave");
+            }
+            return tieneDatos;
+        }
+        logger.debug("esCartaPorte: no es Carta Porte (tipo='{}', datosCartaPorte no es Map válido)", tipo);
+        return false;
+    }
+    
+    /**
+     * Sección específica para Retención de Pagos con diseño estructurado
+     */
+    private void agregarSeccionRetencion(Document document, Map<String, Object> facturaData, Map<String, Object> logoConfig) {
+        try {
+            DeviceRgb primaryColor = extraerColorPrimario(logoConfig);
+            Object datosRetencionObj = facturaData.get("datosRetencion");
+            if (!(datosRetencionObj instanceof Map)) {
+                return;
+            }
+            Map<String, Object> datosRetencion = (Map<String, Object>) datosRetencionObj;
+            
+            // Título de la sección
+            Paragraph tituloRetencion = new Paragraph("INFORMACIÓN DE LA RETENCIÓN")
+                .setBold()
+                .setFontSize(11)
+                .setFontColor(primaryColor)
+                .setMarginBottom(8)
+                .setMarginTop(8);
+            document.add(tituloRetencion);
+            
+            // Contenedor principal con borde
+            Table container = new Table(1);
+            container.setWidth(UnitValue.createPercentValue(100));
+            container.setBorder(new SolidBorder(primaryColor, 1));
+            container.setBackgroundColor(new DeviceRgb(248, 250, 252));
+            container.setPadding(10);
+            container.setMarginBottom(12);
+            
+            // Información principal: Tipo de retención y concepto
+            Paragraph tipoLabel = new Paragraph("Tipo de Retención:")
+                .setBold()
+                .setFontSize(9)
+                .setFontColor(primaryColor)
+                .setMarginBottom(2);
+            container.addCell(new Cell().add(tipoLabel).setBorder(null).setPadding(5));
+            
+            String descripcionTipo = getString(datosRetencion, "descripcionTipo", "");
+            String cveRetenc = getString(datosRetencion, "cveRetenc", "");
+            String tipoRetencionText = descripcionTipo;
+            if (!cveRetenc.isEmpty()) {
+                tipoRetencionText += " (Clave: " + cveRetenc + ")";
+            }
+            Paragraph tipoValue = new Paragraph(tipoRetencionText.isEmpty() ? "Retención de Pagos" : tipoRetencionText)
+                .setFontSize(9)
+                .setMarginBottom(8);
+            container.addCell(new Cell().add(tipoValue).setBorder(null).setPadding(5));
+            
+            // Concepto
+            String concepto = getString(datosRetencion, "concepto", "");
+            if (!concepto.isEmpty()) {
+                Paragraph conceptoLabel = new Paragraph("Concepto:")
+                    .setBold()
+                    .setFontSize(9)
+                    .setFontColor(primaryColor)
+                    .setMarginBottom(2);
+                container.addCell(new Cell().add(conceptoLabel).setBorder(null).setPadding(5));
+                
+                Paragraph conceptoValue = new Paragraph(concepto)
+                    .setFontSize(9)
+                    .setMarginBottom(8);
+                container.addCell(new Cell().add(conceptoValue).setBorder(null).setPadding(5));
+            }
+            
+            // Tabla de montos en dos columnas
+            Table montosTable = new Table(2);
+            montosTable.setWidth(UnitValue.createPercentValue(100));
+            montosTable.setMarginBottom(8);
+            
+            BigDecimal montoBase = getBigDecimal(datosRetencion, "montoBase", BigDecimal.ZERO);
+            BigDecimal montoTotGravado = getBigDecimal(datosRetencion, "montoTotGravado", BigDecimal.ZERO);
+            BigDecimal montoTotExento = getBigDecimal(datosRetencion, "montoTotExento", BigDecimal.ZERO);
+            
+            // Monto Base
+            Cell montoBaseLabel = new Cell()
+                .add(new Paragraph("Monto Base:").setBold().setFontSize(8))
+                .setBorder(new SolidBorder(ColorConstants.GRAY, 0.5f))
+                .setPadding(6)
+                .setBackgroundColor(new DeviceRgb(255, 255, 255));
+            montosTable.addCell(montoBaseLabel);
+            Cell montoBaseValue = new Cell()
+                .add(new Paragraph("$" + String.format("%.2f", montoBase)).setFontSize(8))
+                .setBorder(new SolidBorder(ColorConstants.GRAY, 0.5f))
+                .setPadding(6)
+                .setTextAlignment(TextAlignment.RIGHT)
+                .setBackgroundColor(new DeviceRgb(255, 255, 255));
+            montosTable.addCell(montoBaseValue);
+            
+            // Monto Gravado
+            Cell montoGravLabel = new Cell()
+                .add(new Paragraph("Monto Gravado:").setBold().setFontSize(8))
+                .setBorder(new SolidBorder(ColorConstants.GRAY, 0.5f))
+                .setPadding(6)
+                .setBackgroundColor(new DeviceRgb(255, 255, 255));
+            montosTable.addCell(montoGravLabel);
+            Cell montoGravValue = new Cell()
+                .add(new Paragraph("$" + String.format("%.2f", montoTotGravado)).setFontSize(8))
+                .setBorder(new SolidBorder(ColorConstants.GRAY, 0.5f))
+                .setPadding(6)
+                .setTextAlignment(TextAlignment.RIGHT)
+                .setBackgroundColor(new DeviceRgb(255, 255, 255));
+            montosTable.addCell(montoGravValue);
+            
+            // Monto Exento
+            Cell montoExentLabel = new Cell()
+                .add(new Paragraph("Monto Exento:").setBold().setFontSize(8))
+                .setBorder(new SolidBorder(ColorConstants.GRAY, 0.5f))
+                .setPadding(6)
+                .setBackgroundColor(new DeviceRgb(255, 255, 255));
+            montosTable.addCell(montoExentLabel);
+            Cell montoExentValue = new Cell()
+                .add(new Paragraph("$" + String.format("%.2f", montoTotExento)).setFontSize(8))
+                .setBorder(new SolidBorder(ColorConstants.GRAY, 0.5f))
+                .setPadding(6)
+                .setTextAlignment(TextAlignment.RIGHT)
+                .setBackgroundColor(new DeviceRgb(255, 255, 255));
+            montosTable.addCell(montoExentValue);
+            
+            Cell montosCell = new Cell().add(montosTable).setBorder(null).setPadding(5);
+            container.addCell(montosCell);
+            
+            // Período y Fecha de Pago
+            String periodoMes = getString(datosRetencion, "periodoMes", "");
+            String periodoAnio = getString(datosRetencion, "periodoAnio", "");
+            String fechaPago = getString(datosRetencion, "fechaPago", "");
+            
+            if (!periodoMes.isEmpty() || !fechaPago.isEmpty()) {
+                Paragraph periodoLabel = new Paragraph("Período y Fecha:")
+                    .setBold()
+                    .setFontSize(9)
+                    .setFontColor(primaryColor)
+                    .setMarginBottom(2);
+                container.addCell(new Cell().add(periodoLabel).setBorder(null).setPadding(5));
+                
+                StringBuilder periodoText = new StringBuilder();
+                if (!periodoMes.isEmpty() && !periodoAnio.isEmpty()) {
+                    String mesNombre = obtenerNombreMes(periodoMes);
+                    periodoText.append("Período: ").append(mesNombre).append(" ").append(periodoAnio);
+                }
+                if (!fechaPago.isEmpty()) {
+                    if (periodoText.length() > 0) {
+                        periodoText.append(" | ");
+                    }
+                    try {
+                        java.time.LocalDate fecha = java.time.LocalDate.parse(fechaPago);
+                        periodoText.append("Fecha de Pago: ").append(fecha.format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy")));
+                    } catch (Exception e) {
+                        periodoText.append("Fecha de Pago: ").append(fechaPago);
+                    }
+                }
+                
+                Paragraph periodoValue = new Paragraph(periodoText.toString())
+                    .setFontSize(9)
+                    .setMarginBottom(8);
+                container.addCell(new Cell().add(periodoValue).setBorder(null).setPadding(5));
+            }
+            
+            // Impuestos Retenidos
+            BigDecimal isrRetenido = getBigDecimal(datosRetencion, "isrRetenido", BigDecimal.ZERO);
+            BigDecimal ivaRetenido = getBigDecimal(datosRetencion, "ivaRetenido", BigDecimal.ZERO);
+            BigDecimal montoRetenido = getBigDecimal(datosRetencion, "montoRetenido", BigDecimal.ZERO);
+            
+            if (montoRetenido.compareTo(BigDecimal.ZERO) > 0) {
+                Paragraph impuestosLabel = new Paragraph("Impuestos Retenidos:")
+                    .setBold()
+                    .setFontSize(9)
+                    .setFontColor(primaryColor)
+                    .setMarginBottom(2);
+                container.addCell(new Cell().add(impuestosLabel).setBorder(null).setPadding(5));
+                
+                Table impuestosTable = new Table(2);
+                impuestosTable.setWidth(UnitValue.createPercentValue(100));
+                impuestosTable.setMarginBottom(8);
+                
+                if (isrRetenido.compareTo(BigDecimal.ZERO) > 0) {
+                    Cell isrLabel = new Cell()
+                        .add(new Paragraph("ISR:").setBold().setFontSize(8))
+                        .setBorder(new SolidBorder(ColorConstants.GRAY, 0.5f))
+                        .setPadding(6)
+                        .setBackgroundColor(new DeviceRgb(255, 255, 255));
+                    impuestosTable.addCell(isrLabel);
+                    Cell isrValue = new Cell()
+                        .add(new Paragraph("$" + String.format("%.2f", isrRetenido)).setFontSize(8))
+                        .setBorder(new SolidBorder(ColorConstants.GRAY, 0.5f))
+                        .setPadding(6)
+                        .setTextAlignment(TextAlignment.RIGHT)
+                        .setBackgroundColor(new DeviceRgb(255, 255, 255));
+                    impuestosTable.addCell(isrValue);
+                }
+                
+                if (ivaRetenido.compareTo(BigDecimal.ZERO) > 0) {
+                    Cell ivaLabel = new Cell()
+                        .add(new Paragraph("IVA:").setBold().setFontSize(8))
+                        .setBorder(new SolidBorder(ColorConstants.GRAY, 0.5f))
+                        .setPadding(6)
+                        .setBackgroundColor(new DeviceRgb(255, 255, 255));
+                    impuestosTable.addCell(ivaLabel);
+                    Cell ivaValue = new Cell()
+                        .add(new Paragraph("$" + String.format("%.2f", ivaRetenido)).setFontSize(8))
+                        .setBorder(new SolidBorder(ColorConstants.GRAY, 0.5f))
+                        .setPadding(6)
+                        .setTextAlignment(TextAlignment.RIGHT)
+                        .setBackgroundColor(new DeviceRgb(255, 255, 255));
+                    impuestosTable.addCell(ivaValue);
+                }
+                
+                Cell totalRetLabel = new Cell()
+                    .add(new Paragraph("Total Retenido:").setBold().setFontSize(9).setFontColor(primaryColor))
+                    .setBorder(new SolidBorder(ColorConstants.GRAY, 0.5f))
+                    .setPadding(6)
+                    .setBackgroundColor(new DeviceRgb(240, 248, 255));
+                impuestosTable.addCell(totalRetLabel);
+                Cell totalRetValue = new Cell()
+                    .add(new Paragraph("$" + String.format("%.2f", montoRetenido)).setBold().setFontSize(9).setFontColor(primaryColor))
+                    .setBorder(new SolidBorder(ColorConstants.GRAY, 0.5f))
+                    .setPadding(6)
+                    .setTextAlignment(TextAlignment.RIGHT)
+                    .setBackgroundColor(new DeviceRgb(240, 248, 255));
+                impuestosTable.addCell(totalRetValue);
+                
+                Cell impuestosCell = new Cell().add(impuestosTable).setBorder(null).setPadding(5);
+                container.addCell(impuestosCell);
+            }
+            
+            document.add(container);
+            
+        } catch (Exception e) {
+            logger.error("Error agregando sección de retención: ", e);
+        }
+    }
+    
+    /**
+     * Totales específicos para retención (Monto Base y Monto Retenido)
+     */
+    private void agregarTotalesRetencion(Document document, Map<String, Object> facturaData, Map<String, Object> logoConfig) {
+        try {
+            DeviceRgb primaryColor = extraerColorPrimario(logoConfig);
+            
+            Table resumenContainer = new Table(2);
+            resumenContainer.setWidth(UnitValue.createPercentValue(100));
+            resumenContainer.setMarginTop(8);
+            
+            // Espacio para alinear a la derecha
+            Cell espacioCell = new Cell()
+                .setBorder(null)
+                .setWidth(UnitValue.createPercentValue(65));
+            resumenContainer.addCell(espacioCell);
+            
+            // Totales
+            Cell totalesCell = new Cell()
+                .setBorder(new SolidBorder(primaryColor, 1))
+                .setBackgroundColor(new DeviceRgb(248, 250, 252))
+                .setPadding(8)
+                .setWidth(UnitValue.createPercentValue(35));
+            
+            BigDecimal subtotal = getBigDecimal(facturaData, "subtotal", BigDecimal.ZERO);
+            BigDecimal total = getBigDecimal(facturaData, "total", BigDecimal.ZERO);
+            
+            Paragraph subtotalP = new Paragraph("Monto Base: $" + subtotal.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString())
+                .setFontSize(9)
+                .setMarginBottom(3)
+                .setTextAlignment(TextAlignment.RIGHT);
+            totalesCell.add(subtotalP);
+            
+            Paragraph totalP = new Paragraph("TOTAL RETENIDO: $" + total.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString())
+                .setBold()
+                .setFontSize(11)
+                .setFontColor(primaryColor)
+                .setTextAlignment(TextAlignment.RIGHT)
+                .setMarginTop(3);
+            totalesCell.add(totalP);
+            
+            resumenContainer.addCell(totalesCell);
+            document.add(resumenContainer);
+        } catch (Exception e) {
+            logger.error("Error agregando totales de retención: ", e);
+        }
+    }
+    
+    /**
+     * Helper para obtener nombre del mes
+     */
+    private String obtenerNombreMes(String mes) {
+        if (mes == null || mes.trim().isEmpty()) {
+            return mes;
+        }
+        try {
+            int mesInt = Integer.parseInt(mes.trim());
+            String[] meses = {
+                "", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+                "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+            };
+            if (mesInt >= 1 && mesInt <= 12) {
+                return meses[mesInt];
+            }
+        } catch (NumberFormatException e) {
+            // Si no es un número válido, devolver el valor original
+        }
+        return mes;
+    }
+    
+    /**
+     * Sección específica para Carta Porte con diseño estructurado
+     */
+    private void agregarSeccionCartaPorte(Document document, Map<String, Object> facturaData, Map<String, Object> logoConfig) {
+        try {
+            logger.info("agregarSeccionCartaPorte: Iniciando agregado de sección de Carta Porte");
+            DeviceRgb primaryColor = extraerColorPrimario(logoConfig);
+            Object datosCartaPorteObj = facturaData.get("datosCartaPorte");
+            if (!(datosCartaPorteObj instanceof Map)) {
+                logger.error("agregarSeccionCartaPorte: datosCartaPorte no es un Map, tipo: {}", datosCartaPorteObj != null ? datosCartaPorteObj.getClass().getName() : "null");
+                return;
+            }
+            Map<String, Object> datosCartaPorte = (Map<String, Object>) datosCartaPorteObj;
+            logger.info("agregarSeccionCartaPorte: datosCartaPorte tiene {} campos", datosCartaPorte.size());
+            
+            // Título de la sección
+            Paragraph tituloCartaPorte = new Paragraph("INFORMACIÓN DEL SERVICIO DE TRANSPORTE")
+                .setBold()
+                .setFontSize(11)
+                .setFontColor(primaryColor)
+                .setMarginBottom(8)
+                .setMarginTop(8);
+            document.add(tituloCartaPorte);
+            
+            // Contenedor principal con borde
+            Table container = new Table(1);
+            container.setWidth(UnitValue.createPercentValue(100));
+            container.setBorder(new SolidBorder(primaryColor, 1));
+            container.setBackgroundColor(new DeviceRgb(248, 250, 252));
+            container.setPadding(10);
+            container.setMarginBottom(12);
+            
+            // Descripción del servicio - siempre mostrar
+            String descripcion = getString(datosCartaPorte, "descripcion", "");
+            Paragraph descripcionLabel = new Paragraph("Descripción del Servicio:")
+                .setBold()
+                .setFontSize(9)
+                .setFontColor(primaryColor)
+                .setMarginBottom(2);
+            container.addCell(new Cell().add(descripcionLabel).setBorder(null).setPadding(5));
+            
+            Paragraph descripcionValue = new Paragraph(descripcion.isEmpty() ? "-" : descripcion)
+                .setFontSize(9)
+                .setMarginBottom(8);
+            container.addCell(new Cell().add(descripcionValue).setBorder(null).setPadding(5));
+            
+            // Información del transporte en dos columnas - siempre mostrar campos principales
+            Table transporteTable = new Table(2);
+            transporteTable.setWidth(UnitValue.createPercentValue(100));
+            transporteTable.setMarginBottom(8);
+            
+            // Tipo de Transporte - siempre mostrar
+            String tipoTransporte = getString(datosCartaPorte, "tipoTransporte", "");
+            Cell tipoLabel = new Cell()
+                .add(new Paragraph("Tipo de Transporte:").setBold().setFontSize(8))
+                .setBorder(new SolidBorder(ColorConstants.GRAY, 0.5f))
+                .setPadding(6)
+                .setBackgroundColor(new DeviceRgb(255, 255, 255));
+            transporteTable.addCell(tipoLabel);
+            Cell tipoValue = new Cell()
+                .add(new Paragraph(tipoTransporte.isEmpty() ? "-" : tipoTransporte).setFontSize(8))
+                .setBorder(new SolidBorder(ColorConstants.GRAY, 0.5f))
+                .setPadding(6)
+                .setBackgroundColor(new DeviceRgb(255, 255, 255));
+            transporteTable.addCell(tipoValue);
+            
+            // Permiso SCT - siempre mostrar
+            String permisoSCT = getString(datosCartaPorte, "permisoSCT", "");
+            String numeroPermisoSCT = getString(datosCartaPorte, "numeroPermisoSCT", "");
+            Cell permisoLabel = new Cell()
+                .add(new Paragraph("Permiso SCT:").setBold().setFontSize(8))
+                .setBorder(new SolidBorder(ColorConstants.GRAY, 0.5f))
+                .setPadding(6)
+                .setBackgroundColor(new DeviceRgb(255, 255, 255));
+            transporteTable.addCell(permisoLabel);
+            String permisoValue = permisoSCT;
+            if (!numeroPermisoSCT.isEmpty()) {
+                permisoValue += (!permisoValue.isEmpty() ? " - " : "") + numeroPermisoSCT;
+            }
+            Cell permisoCell = new Cell()
+                .add(new Paragraph(permisoValue.isEmpty() ? "-" : permisoValue).setFontSize(8))
+                .setBorder(new SolidBorder(ColorConstants.GRAY, 0.5f))
+                .setPadding(6)
+                .setBackgroundColor(new DeviceRgb(255, 255, 255));
+            transporteTable.addCell(permisoCell);
+            
+            // Placas del Vehículo - siempre mostrar
+            String placasVehiculo = getString(datosCartaPorte, "placasVehiculo", "");
+            Cell placasLabel = new Cell()
+                .add(new Paragraph("Placas del Vehículo:").setBold().setFontSize(8))
+                .setBorder(new SolidBorder(ColorConstants.GRAY, 0.5f))
+                .setPadding(6)
+                .setBackgroundColor(new DeviceRgb(255, 255, 255));
+            transporteTable.addCell(placasLabel);
+            Cell placasValue = new Cell()
+                .add(new Paragraph(placasVehiculo.isEmpty() ? "-" : placasVehiculo).setFontSize(8))
+                .setBorder(new SolidBorder(ColorConstants.GRAY, 0.5f))
+                .setPadding(6)
+                .setBackgroundColor(new DeviceRgb(255, 255, 255));
+            transporteTable.addCell(placasValue);
+            
+            // Configuración Vehicular - siempre mostrar
+            String configVehicular = getString(datosCartaPorte, "configVehicular", "");
+            Cell configLabel = new Cell()
+                .add(new Paragraph("Configuración Vehicular:").setBold().setFontSize(8))
+                .setBorder(new SolidBorder(ColorConstants.GRAY, 0.5f))
+                .setPadding(6)
+                .setBackgroundColor(new DeviceRgb(255, 255, 255));
+            transporteTable.addCell(configLabel);
+            Cell configValue = new Cell()
+                .add(new Paragraph(configVehicular.isEmpty() ? "-" : configVehicular).setFontSize(8))
+                .setBorder(new SolidBorder(ColorConstants.GRAY, 0.5f))
+                .setPadding(6)
+                .setBackgroundColor(new DeviceRgb(255, 255, 255));
+            transporteTable.addCell(configValue);
+            
+            // Nombre del Transportista - siempre mostrar
+            String nombreTransportista = getString(datosCartaPorte, "nombreTransportista", "");
+            String rfcTransportista = getString(datosCartaPorte, "rfcTransportista", "");
+            Cell transportistaLabel = new Cell()
+                .add(new Paragraph("Transportista:").setBold().setFontSize(8))
+                .setBorder(new SolidBorder(ColorConstants.GRAY, 0.5f))
+                .setPadding(6)
+                .setBackgroundColor(new DeviceRgb(255, 255, 255));
+            transporteTable.addCell(transportistaLabel);
+            String transportistaValue = nombreTransportista;
+            if (!rfcTransportista.isEmpty()) {
+                transportistaValue += (!transportistaValue.isEmpty() ? " (" : "") + rfcTransportista + (!transportistaValue.isEmpty() ? ")" : "");
+            }
+            Cell transportistaCell = new Cell()
+                .add(new Paragraph(transportistaValue.isEmpty() ? "-" : transportistaValue).setFontSize(8))
+                .setBorder(new SolidBorder(ColorConstants.GRAY, 0.5f))
+                .setPadding(6)
+                .setBackgroundColor(new DeviceRgb(255, 255, 255));
+            transporteTable.addCell(transportistaCell);
+            
+            // Bienes Transportados - siempre mostrar
+            String bienesTransportados = getString(datosCartaPorte, "bienesTransportados", "");
+            Cell bienesLabel = new Cell()
+                .add(new Paragraph("Bienes Transportados:").setBold().setFontSize(8))
+                .setBorder(new SolidBorder(ColorConstants.GRAY, 0.5f))
+                .setPadding(6)
+                .setBackgroundColor(new DeviceRgb(255, 255, 255));
+            transporteTable.addCell(bienesLabel);
+            Cell bienesValue = new Cell()
+                .add(new Paragraph(bienesTransportados.isEmpty() ? "-" : bienesTransportados).setFontSize(8))
+                .setBorder(new SolidBorder(ColorConstants.GRAY, 0.5f))
+                .setPadding(6)
+                .setBackgroundColor(new DeviceRgb(255, 255, 255));
+            transporteTable.addCell(bienesValue);
+            
+            Cell transporteCell = new Cell().add(transporteTable).setBorder(null).setPadding(5);
+            container.addCell(transporteCell);
+            document.add(container);
+            
+            // Sección UBICACIONES
+            agregarSeccionUbicaciones(document, datosCartaPorte, primaryColor);
+            
+            // Sección MERCANCIAS
+            agregarSeccionMercancias(document, datosCartaPorte, primaryColor);
+            
+            // Sección FIGURAS DE TRANSPORTE
+            agregarSeccionFigurasTransporte(document, datosCartaPorte, primaryColor);
+            
+        } catch (Exception e) {
+            logger.error("Error agregando sección de carta porte: ", e);
+        }
+    }
+    
+    /**
+     * Sección UBICACIONES
+     */
+    private void agregarSeccionUbicaciones(Document document, Map<String, Object> datosCartaPorte, DeviceRgb primaryColor) {
+        try {
+            Object ubicacionesObj = datosCartaPorte.get("ubicaciones");
+            if (!(ubicacionesObj instanceof java.util.List)) {
+                return;
+            }
+            java.util.List<Map<String, Object>> ubicaciones = (java.util.List<Map<String, Object>>) ubicacionesObj;
+            if (ubicaciones == null || ubicaciones.isEmpty()) {
+                return;
+            }
+            
+            Paragraph titulo = new Paragraph("UBICACIONES")
+                .setBold()
+                .setFontSize(11)
+                .setFontColor(primaryColor)
+                .setMarginBottom(6)
+                .setMarginTop(12);
+            document.add(titulo);
+            
+            Table table = new Table(UnitValue.createPercentArray(new float[]{1, 2, 1.5f, 1.5f}));
+            table.setWidth(UnitValue.createPercentValue(100));
+            table.setMarginBottom(10);
+            
+            // Encabezados
+            table.addHeaderCell(new Cell().add(new Paragraph("Tipo").setBold().setFontSize(8)).setBackgroundColor(primaryColor).setFontColor(ColorConstants.WHITE).setPadding(6));
+            table.addHeaderCell(new Cell().add(new Paragraph("Nombre/RFC").setBold().setFontSize(8)).setBackgroundColor(primaryColor).setFontColor(ColorConstants.WHITE).setPadding(6));
+            table.addHeaderCell(new Cell().add(new Paragraph("Fecha/Hora").setBold().setFontSize(8)).setBackgroundColor(primaryColor).setFontColor(ColorConstants.WHITE).setPadding(6));
+            table.addHeaderCell(new Cell().add(new Paragraph("Domicilio").setBold().setFontSize(8)).setBackgroundColor(primaryColor).setFontColor(ColorConstants.WHITE).setPadding(6));
+            
+            for (Map<String, Object> ubicacion : ubicaciones) {
+                String tipoUbicacion = getString(ubicacion, "tipoUbicacion", "");
+                String tipoTexto = "01".equals(tipoUbicacion) ? "Origen" : "02".equals(tipoUbicacion) ? "Destino" : tipoUbicacion;
+                
+                String nombre = getString(ubicacion, "nombreRemitenteDestinatario", "");
+                String rfc = getString(ubicacion, "rfcRemitenteDestinatario", "");
+                String nombreRfc = nombre;
+                if (!rfc.isEmpty()) {
+                    nombreRfc += (!nombreRfc.isEmpty() ? "\n" : "") + rfc;
+                }
+                
+                String fechaHora = getString(ubicacion, "fechaHoraSalidaLlegada", "");
+                
+                String domicilioStr = "";
+                Object domicilioObj = ubicacion.get("domicilio");
+                if (domicilioObj instanceof Map) {
+                    Map<String, Object> domicilio = (Map<String, Object>) domicilioObj;
+                    StringBuilder sb = new StringBuilder();
+                    appendIfNotEmpty(sb, getString(domicilio, "calle", ""));
+                    appendIfNotEmpty(sb, getString(domicilio, "numeroExterior", ""));
+                    appendIfNotEmpty(sb, getString(domicilio, "municipio", ""));
+                    appendIfNotEmpty(sb, getString(domicilio, "estado", ""));
+                    appendIfNotEmpty(sb, getString(domicilio, "codigoPostal", ""));
+                    domicilioStr = sb.toString();
+                }
+                
+                table.addCell(new Cell().add(new Paragraph(tipoTexto).setFontSize(7)).setPadding(5));
+                table.addCell(new Cell().add(new Paragraph(nombreRfc.isEmpty() ? "-" : nombreRfc).setFontSize(7)).setPadding(5));
+                table.addCell(new Cell().add(new Paragraph(fechaHora.isEmpty() ? "-" : fechaHora).setFontSize(7)).setPadding(5));
+                table.addCell(new Cell().add(new Paragraph(domicilioStr.isEmpty() ? "-" : domicilioStr).setFontSize(7)).setPadding(5));
+            }
+            
+            document.add(table);
+        } catch (Exception e) {
+            logger.error("Error agregando sección de ubicaciones: ", e);
+        }
+    }
+    
+    /**
+     * Sección MERCANCIAS
+     */
+    private void agregarSeccionMercancias(Document document, Map<String, Object> datosCartaPorte, DeviceRgb primaryColor) {
+        try {
+            Object mercanciasObj = datosCartaPorte.get("mercancias");
+            if (!(mercanciasObj instanceof java.util.List)) {
+                return;
+            }
+            java.util.List<Map<String, Object>> mercancias = (java.util.List<Map<String, Object>>) mercanciasObj;
+            if (mercancias == null || mercancias.isEmpty()) {
+                return;
+            }
+            
+            Paragraph titulo = new Paragraph("MERCANCIAS")
+                .setBold()
+                .setFontSize(11)
+                .setFontColor(primaryColor)
+                .setMarginBottom(6)
+                .setMarginTop(12);
+            document.add(titulo);
+            
+            Table table = new Table(UnitValue.createPercentArray(new float[]{1.5f, 2, 1, 1, 1}));
+            table.setWidth(UnitValue.createPercentValue(100));
+            table.setMarginBottom(10);
+            
+            // Encabezados
+            table.addHeaderCell(new Cell().add(new Paragraph("Descripción").setBold().setFontSize(8)).setBackgroundColor(primaryColor).setFontColor(ColorConstants.WHITE).setPadding(6));
+            table.addHeaderCell(new Cell().add(new Paragraph("Clave Bienes").setBold().setFontSize(8)).setBackgroundColor(primaryColor).setFontColor(ColorConstants.WHITE).setPadding(6));
+            table.addHeaderCell(new Cell().add(new Paragraph("Cantidad").setBold().setFontSize(8)).setBackgroundColor(primaryColor).setFontColor(ColorConstants.WHITE).setPadding(6));
+            table.addHeaderCell(new Cell().add(new Paragraph("Peso (kg)").setBold().setFontSize(8)).setBackgroundColor(primaryColor).setFontColor(ColorConstants.WHITE).setPadding(6));
+            table.addHeaderCell(new Cell().add(new Paragraph("Valor").setBold().setFontSize(8)).setBackgroundColor(primaryColor).setFontColor(ColorConstants.WHITE).setPadding(6));
+            
+            for (Map<String, Object> mercancia : mercancias) {
+                String descripcion = getString(mercancia, "descripcion", "");
+                String bienesTransp = getString(mercancia, "bienesTransp", "");
+                String cantidad = getString(mercancia, "cantidad", "");
+                String peso = getString(mercancia, "pesoEnKg", "");
+                String valor = getString(mercancia, "valorMercancia", "");
+                
+                table.addCell(new Cell().add(new Paragraph(descripcion.isEmpty() ? "-" : descripcion).setFontSize(7)).setPadding(5));
+                table.addCell(new Cell().add(new Paragraph(bienesTransp.isEmpty() ? "-" : bienesTransp).setFontSize(7)).setPadding(5));
+                table.addCell(new Cell().add(new Paragraph(cantidad.isEmpty() ? "-" : cantidad).setFontSize(7)).setPadding(5));
+                table.addCell(new Cell().add(new Paragraph(peso.isEmpty() ? "-" : peso).setFontSize(7)).setPadding(5));
+                table.addCell(new Cell().add(new Paragraph(valor.isEmpty() ? "-" : valor).setFontSize(7)).setPadding(5));
+            }
+            
+            document.add(table);
+        } catch (Exception e) {
+            logger.error("Error agregando sección de mercancías: ", e);
+        }
+    }
+    
+    /**
+     * Sección FIGURAS DE TRANSPORTE
+     */
+    private void agregarSeccionFigurasTransporte(Document document, Map<String, Object> datosCartaPorte, DeviceRgb primaryColor) {
+        try {
+            Object figurasObj = datosCartaPorte.get("figurasTransporte");
+            if (!(figurasObj instanceof java.util.List)) {
+                return;
+            }
+            java.util.List<Map<String, Object>> figuras = (java.util.List<Map<String, Object>>) figurasObj;
+            if (figuras == null || figuras.isEmpty()) {
+                return;
+            }
+            
+            Paragraph titulo = new Paragraph("FIGURAS DE TRANSPORTE")
+                .setBold()
+                .setFontSize(11)
+                .setFontColor(primaryColor)
+                .setMarginBottom(6)
+                .setMarginTop(12);
+            document.add(titulo);
+            
+            Table table = new Table(UnitValue.createPercentArray(new float[]{1, 1.5f, 1.5f, 1}));
+            table.setWidth(UnitValue.createPercentValue(100));
+            table.setMarginBottom(10);
+            
+            // Encabezados
+            table.addHeaderCell(new Cell().add(new Paragraph("Tipo").setBold().setFontSize(8)).setBackgroundColor(primaryColor).setFontColor(ColorConstants.WHITE).setPadding(6));
+            table.addHeaderCell(new Cell().add(new Paragraph("Nombre").setBold().setFontSize(8)).setBackgroundColor(primaryColor).setFontColor(ColorConstants.WHITE).setPadding(6));
+            table.addHeaderCell(new Cell().add(new Paragraph("RFC").setBold().setFontSize(8)).setBackgroundColor(primaryColor).setFontColor(ColorConstants.WHITE).setPadding(6));
+            table.addHeaderCell(new Cell().add(new Paragraph("Núm. Licencia").setBold().setFontSize(8)).setBackgroundColor(primaryColor).setFontColor(ColorConstants.WHITE).setPadding(6));
+            
+            for (Map<String, Object> figura : figuras) {
+                String tipoFigura = getString(figura, "tipoFigura", "");
+                String tipoTexto = obtenerNombreTipoFigura(tipoFigura);
+                String nombre = getString(figura, "nombreFigura", "");
+                String rfc = getString(figura, "rfcFigura", "");
+                String numLicencia = getString(figura, "numLicencia", "");
+                
+                table.addCell(new Cell().add(new Paragraph(tipoTexto.isEmpty() ? tipoFigura : tipoTexto).setFontSize(7)).setPadding(5));
+                table.addCell(new Cell().add(new Paragraph(nombre.isEmpty() ? "-" : nombre).setFontSize(7)).setPadding(5));
+                table.addCell(new Cell().add(new Paragraph(rfc.isEmpty() ? "-" : rfc).setFontSize(7)).setPadding(5));
+                table.addCell(new Cell().add(new Paragraph(numLicencia.isEmpty() ? "-" : numLicencia).setFontSize(7)).setPadding(5));
+            }
+            
+            document.add(table);
+        } catch (Exception e) {
+            logger.error("Error agregando sección de figuras de transporte: ", e);
+        }
+    }
+    
+    private void appendIfNotEmpty(StringBuilder sb, String value) {
+        if (value != null && !value.trim().isEmpty()) {
+            if (sb.length() > 0) {
+                sb.append(", ");
+            }
+            sb.append(value.trim());
+        }
+    }
+    
+    private String obtenerNombreTipoFigura(String tipoFigura) {
+        if (tipoFigura == null || tipoFigura.isEmpty()) {
+            return "";
+        }
+        switch (tipoFigura) {
+            case "01": return "Propietario";
+            case "02": return "Transportista";
+            case "03": return "Operador";
+            case "04": return "Arrendatario";
+            case "05": return "Notificado";
+            default: return tipoFigura;
+        }
+    }
+    
+    /**
+     * Helper para formatear fechas
+     */
+    private String formatearFecha(String fecha) {
+        if (fecha == null || fecha.trim().isEmpty()) {
+            return fecha;
+        }
+        try {
+            java.time.LocalDate fechaDate = java.time.LocalDate.parse(fecha);
+            return fechaDate.format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy"));
+        } catch (Exception e) {
+            // Si no se puede parsear, devolver el valor original
+            return fecha;
+        }
+    }
 
     private String getNominaString(Map<String, Object> facturaData, String key, String defaultValue) {
         try {
@@ -1109,6 +2112,32 @@ public class ITextPdfService {
     private void agregarTotalesModerno(Document document, Map<String, Object> facturaData, Map<String, Object> logoConfig) {
         try {
             DeviceRgb primaryColor = extraerColorPrimario(logoConfig);
+            
+            // Calcular totales desde los conceptos si están disponibles
+            BigDecimal subtotalCalculado = BigDecimal.ZERO;
+            BigDecimal ivaCalculado = BigDecimal.ZERO;
+            
+            java.util.List<java.util.Map<String, Object>> conceptos = getListValue(facturaData, "conceptos");
+            if (conceptos != null && !conceptos.isEmpty()) {
+                for (java.util.Map<String, Object> concepto : conceptos) {
+                    BigDecimal importeBD = getBigDecimal(concepto, "importe", BigDecimal.ZERO);
+                    BigDecimal ivaBD = getBigDecimal(concepto, "iva", BigDecimal.ZERO);
+                    subtotalCalculado = subtotalCalculado.add(importeBD);
+                    ivaCalculado = ivaCalculado.add(ivaBD);
+                }
+            } else {
+                // Si no hay conceptos, usar valores de facturaData
+                subtotalCalculado = getBigDecimal(facturaData, "subtotal", BigDecimal.ZERO);
+                ivaCalculado = getBigDecimal(facturaData, "iva", BigDecimal.ZERO);
+            }
+            
+            BigDecimal totalCalculado = subtotalCalculado.add(ivaCalculado);
+            
+            // Formatear valores para mostrar
+            String subtotalStr = String.format("%.2f", subtotalCalculado);
+            String ivaStr = String.format("%.2f", ivaCalculado);
+            String totalStr = String.format("%.2f", totalCalculado);
+            
             // Contenedor del resumen más compacto
             Table resumenContainer = new Table(2);
             resumenContainer.setWidth(UnitValue.createPercentValue(100));
@@ -1128,21 +2157,21 @@ public class ITextPdfService {
                 .setWidth(UnitValue.createPercentValue(35));
             
             // Subtotal
-            Paragraph subtotal = new Paragraph("Subtotal: $" + getString(facturaData, "subtotal", "100.00"))
+            Paragraph subtotal = new Paragraph("Subtotal: $" + subtotalStr)
                 .setFontSize(9)
                 .setMarginBottom(3)
                 .setTextAlignment(TextAlignment.RIGHT);
             totalesCell.add(subtotal);
             
             // IVA
-            Paragraph iva = new Paragraph("IVA: $" + getString(facturaData, "iva", "16.00"))
+            Paragraph iva = new Paragraph("IVA: $" + ivaStr)
                 .setFontSize(9)
                 .setMarginBottom(3)
                 .setTextAlignment(TextAlignment.RIGHT);
             totalesCell.add(iva);
             
             // Total
-            Paragraph total = new Paragraph("TOTAL: $" + getString(facturaData, "total", "116.00"))
+            Paragraph total = new Paragraph("TOTAL: $" + totalStr)
                 .setBold()
                 .setFontSize(11)
                 .setFontColor(primaryColor)

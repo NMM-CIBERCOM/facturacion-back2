@@ -22,6 +22,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.core.env.Environment;
+import jakarta.annotation.PostConstruct;
 
 import com.cibercom.facturacion_back.model.Factura;
 import com.cibercom.facturacion_back.model.ConfiguracionMensaje;
@@ -59,6 +60,9 @@ public class CorreoService {
     @Value("${spring.mail.properties.mail.smtp.from:noreply@cibercom.com}")
     private String fromEmail;
     
+    @Value("${server.base-url:http://localhost:8080}")
+    private String serverBaseUrl;
+    
     @Autowired
     private FacturaService facturaService;
     
@@ -76,6 +80,35 @@ public class CorreoService {
 
     @Autowired(required = false)
     private UuidFacturaOracleDAO uuidFacturaOracleDAO;
+    
+    @PostConstruct
+    public void init() {
+        logger.info("=== INICIALIZACIÓN CORREO SERVICE ===");
+        logger.info("SMTP Host: {}", smtpHost);
+        logger.info("SMTP Port: {}", smtpPort);
+        logger.info("SMTP Username: {}", smtpUsername);
+        logger.info("SMTP Password: {}", smtpPassword != null && !smtpPassword.isEmpty() ? "***CONFIGURADO***" : "NO CONFIGURADO");
+        logger.info("From Email: {}", fromEmail);
+        logger.info("Server Base URL: {}", serverBaseUrl);
+        
+        // Verificar que los valores críticos estén configurados
+        if (smtpHost == null || smtpHost.trim().isEmpty()) {
+            logger.error("⚠️ SMTP Host NO está configurado!");
+        }
+        if (smtpPort == null || smtpPort.trim().isEmpty()) {
+            logger.error("⚠️ SMTP Port NO está configurado!");
+        }
+        if (smtpUsername == null || smtpUsername.trim().isEmpty()) {
+            logger.error("⚠️ SMTP Username NO está configurado!");
+        }
+        if (smtpPassword == null || smtpPassword.trim().isEmpty()) {
+            logger.error("⚠️ SMTP Password NO está configurado!");
+        }
+        if (fromEmail == null || fromEmail.trim().isEmpty()) {
+            logger.error("⚠️ From Email NO está configurado!");
+        }
+        logger.info("=== FIN INICIALIZACIÓN CORREO SERVICE ===");
+    }
     
     /**
      * Envía correo de notificación de factura al receptor
@@ -198,11 +231,34 @@ public class CorreoService {
     private Map<String, String> obtenerConfiguracionCorreo() {
         Map<String, String> config = new HashMap<>();
         
-        config.put("FROM", fromEmail);
-        config.put("SMTPHOST", smtpHost);
-        config.put("PORT", smtpPort);
-        config.put("USERNAME", smtpUsername);
-        config.put("PASSWORD", smtpPassword);
+        logger.debug("Obteniendo configuración de correo - Valores desde @Value:");
+        logger.debug("  smtpHost (raw): {}", smtpHost);
+        logger.debug("  smtpPort (raw): {}", smtpPort);
+        logger.debug("  smtpUsername (raw): {}", smtpUsername != null && !smtpUsername.isEmpty() ? "***" : "vacío/null");
+        logger.debug("  smtpPassword (raw): {}", smtpPassword != null && !smtpPassword.isEmpty() ? "***" : "vacío/null");
+        logger.debug("  fromEmail (raw): {}", fromEmail);
+        
+        // Validar y usar valores por defecto si son null o vacíos
+        String finalHost = smtpHost != null && !smtpHost.trim().isEmpty() ? smtpHost : "smtp.gmail.com";
+        String finalPort = smtpPort != null && !smtpPort.trim().isEmpty() ? smtpPort : "587";
+        String finalUsername = smtpUsername != null ? smtpUsername : "";
+        String finalPassword = smtpPassword != null ? smtpPassword : "";
+        String finalFrom = fromEmail != null && !fromEmail.trim().isEmpty() ? fromEmail : "noreply@cibercom.com";
+        
+        config.put("FROM", finalFrom);
+        config.put("SMTPHOST", finalHost);
+        config.put("PORT", finalPort);
+        config.put("USERNAME", finalUsername);
+        config.put("PASSWORD", finalPassword);
+        
+        logger.info("Configuración SMTP final - Host: {}, Port: {}, Username: {}, From: {}", 
+                   finalHost, finalPort, 
+                   finalUsername != null && !finalUsername.isEmpty() ? "***CONFIGURADO***" : "VACÍO",
+                   finalFrom);
+        
+        if (finalUsername.isEmpty() || finalPassword.isEmpty()) {
+            logger.error("⚠️ CRÍTICO: Username o Password están vacíos. El correo NO se podrá enviar.");
+        }
         
         return config;
     }
@@ -317,8 +373,7 @@ public class CorreoService {
                 logoConfig.put("logoBase64", base64);
                 logger.info("Incluyendo logoBase64 en configuración de PDF ({} chars)", base64.length());
             } else {
-                String port = (environment != null) ? environment.getProperty("local.server.port", environment.getProperty("server.port", "8085")) : "8085";
-                String logoEndpoint = "http://localhost:" + port + "/api/logos/cibercom-png";
+                String logoEndpoint = serverBaseUrl + "/api/logos/cibercom-png";
                 logoConfig.put("logoUrl", logoEndpoint);
                 logger.info("Incluyendo logoUrl en configuración de PDF: {}", logoEndpoint);
             }
@@ -519,14 +574,29 @@ public class CorreoService {
             correoDto.setSubject(asunto != null ? asunto : "Documento PDF");
             correoDto.setMensaje(mensajeConFormato);
             correoDto.setAdjuntos(adjuntos);
-            correoDto.setSmtpHost(configCorreo.get("SMTPHOST"));
-            correoDto.setPort(configCorreo.get("PORT"));
-            correoDto.setUsername(configCorreo.get("USERNAME"));
-            correoDto.setPassword(configCorreo.get("PASSWORD"));
+            // Validar configuración antes de enviar
+            String smtpHostValue = configCorreo.get("SMTPHOST");
+            String smtpPortValue = configCorreo.get("PORT");
+            
+            if (smtpHostValue == null || smtpHostValue.trim().isEmpty()) {
+                throw new IllegalStateException("SMTP Host no configurado. Verifique la configuración de correo.");
+            }
+            
+            if (smtpPortValue == null || smtpPortValue.trim().isEmpty()) {
+                throw new IllegalStateException("SMTP Port no configurado. Verifique la configuración de correo.");
+            }
+            
+            correoDto.setSmtpHost(smtpHostValue);
+            correoDto.setPort(smtpPortValue);
+            correoDto.setUsername(configCorreo.get("USERNAME") != null ? configCorreo.get("USERNAME") : "");
+            correoDto.setPassword(configCorreo.get("PASSWORD") != null ? configCorreo.get("PASSWORD") : "");
 
             // Enviar
             CorreoUtil.enviaCorreo(correoDto);
             logger.info("=== CORREO CON PDF DIRECTO ENVIADO EXITOSAMENTE ===");
+        } catch (IllegalStateException e) {
+            logger.error("Error de configuración al enviar correo con PDF directo: {}", e.getMessage(), e);
+            throw e;
         } catch (Exception e) {
             logger.error("Error enviando correo con PDF directo: {}", e.getMessage(), e);
             throw new RuntimeException("Error enviando correo con PDF directo: " + e.getMessage(), e);
@@ -572,23 +642,70 @@ public class CorreoService {
             variables.putIfAbsent("rfcReceptor", "");
 
             // Aplicar formato al mensaje usando plantilla y variables
-            String mensajeConFormato = aplicarFormatoAlMensaje("", variables);
+            String mensajeConFormato;
+            try {
+                mensajeConFormato = aplicarFormatoAlMensaje("", variables);
+            } catch (Exception e) {
+                logger.warn("Error al aplicar formato al mensaje, usando mensaje simple: {}", e.getMessage());
+                // Fallback: mensaje HTML simple
+                mensajeConFormato = "<html><body>" +
+                    "<p>" + variables.getOrDefault("saludo", "Estimado(a) cliente,") + "</p>" +
+                    "<p>" + variables.getOrDefault("mensajePrincipal", "Se ha generado su documento electrónico.") + "</p>" +
+                    "<p>" + variables.getOrDefault("agradecimiento", "Gracias por su preferencia.") + "</p>" +
+                    "<p>" + variables.getOrDefault("despedida", "Atentamente,") + "</p>" +
+                    "<p>" + variables.getOrDefault("firma", "Equipo de Facturación Cibercom") + "</p>" +
+                    "</body></html>";
+            }
 
             // Construir DTO correo
             CorreoDto correoDto = new CorreoDto();
-            correoDto.setFrom(fromEmail);
+            String fromEmailValue = fromEmail != null && !fromEmail.trim().isEmpty() 
+                ? fromEmail 
+                : (configCorreo.get("FROM") != null ? configCorreo.get("FROM") : "noreply@cibercom.com");
+            correoDto.setFrom(fromEmailValue);
             correoDto.setTo(correoReceptor);
             correoDto.setSubject(asunto != null ? asunto : "Documento PDF");
-            correoDto.setMensaje(mensajeConFormato);
-            correoDto.setAdjuntos(adjuntos);
-            correoDto.setSmtpHost(configCorreo.get("SMTPHOST"));
-            correoDto.setPort(configCorreo.get("PORT"));
-            correoDto.setUsername(configCorreo.get("USERNAME"));
-            correoDto.setPassword(configCorreo.get("PASSWORD"));
+            correoDto.setMensaje(mensajeConFormato != null ? mensajeConFormato : "");
+            correoDto.setAdjuntos(adjuntos != null ? adjuntos : new ArrayList<>());
+            
+            // Validar configuración antes de enviar
+            String smtpHostValue = configCorreo.get("SMTPHOST");
+            String smtpPortValue = configCorreo.get("PORT");
+            String smtpUsernameValue = configCorreo.get("USERNAME");
+            String smtpPasswordValue = configCorreo.get("PASSWORD");
+            
+            logger.info("Validando configuración SMTP - Host: {}, Port: {}, Username: {}, Password: {}", 
+                       smtpHostValue, smtpPortValue, 
+                       smtpUsernameValue != null && !smtpUsernameValue.isEmpty() ? "***" : "VACÍO",
+                       smtpPasswordValue != null && !smtpPasswordValue.isEmpty() ? "***" : "VACÍO");
+            
+            if (smtpHostValue == null || smtpHostValue.trim().isEmpty()) {
+                throw new IllegalStateException("SMTP Host no configurado. Verifique la configuración de correo en application.yml.");
+            }
+            
+            if (smtpPortValue == null || smtpPortValue.trim().isEmpty()) {
+                throw new IllegalStateException("SMTP Port no configurado. Verifique la configuración de correo en application.yml.");
+            }
+            
+            if (smtpUsernameValue == null || smtpUsernameValue.trim().isEmpty()) {
+                throw new IllegalStateException("SMTP Username no configurado. Verifique la configuración de correo en application.yml.");
+            }
+            
+            if (smtpPasswordValue == null || smtpPasswordValue.trim().isEmpty()) {
+                throw new IllegalStateException("SMTP Password no configurado. Verifique la configuración de correo en application.yml.");
+            }
+            
+            correoDto.setSmtpHost(smtpHostValue);
+            correoDto.setPort(smtpPortValue);
+            correoDto.setUsername(smtpUsernameValue);
+            correoDto.setPassword(smtpPasswordValue);
 
             // Enviar
             CorreoUtil.enviaCorreo(correoDto);
             logger.info("=== CORREO CON PDF DIRECTO ENVIADO EXITOSAMENTE (TEMPLATE VARS) ===");
+        } catch (IllegalStateException e) {
+            logger.error("Error de configuración al enviar correo con PDF directo (template vars): {}", e.getMessage(), e);
+            throw e;
         } catch (Exception e) {
             logger.error("Error enviando correo con PDF directo (template vars): {}", e.getMessage(), e);
             throw new RuntimeException("Error enviando correo con PDF directo: " + e.getMessage(), e);
@@ -633,36 +750,122 @@ public class CorreoService {
 
             // Variables para plantilla
             Map<String, String> variables = new HashMap<>();
-            variables.put("saludo", "Estimado(a) cliente,");
-            variables.put("mensajePrincipal", mensaje != null ? mensaje : "Se ha generado su documento electrónico.");
-            variables.put("agradecimiento", "Gracias por su preferencia.");
-            variables.put("mensajePersonalizado", "");
-            variables.put("despedida", "Atentamente,");
-            variables.put("firma", "Equipo de Facturación Cibercom");
+            
+            // CRÍTICO: Agregar templateVars PRIMERO para tener todas las variables disponibles
             if (templateVars != null) {
+                logger.info("TemplateVars recibidos: {}", templateVars);
                 variables.putAll(templateVars);
             }
+            
+            // Asegurar claves comunes solo si no existen (no sobrescribir valores de templateVars)
+            String serieFactura = variables.getOrDefault("serie", "");
+            String folioFactura = variables.getOrDefault("folio", "");
+            String uuidFactura = variables.getOrDefault("uuid", "");
+            String rfcEmisor = variables.getOrDefault("rfcEmisor", "");
+            String rfcReceptor = variables.getOrDefault("rfcReceptor", "");
+            
             variables.putIfAbsent("serie", "");
             variables.putIfAbsent("folio", "");
             variables.putIfAbsent("uuid", "");
             variables.putIfAbsent("rfcEmisor", "");
             variables.putIfAbsent("rfcReceptor", "");
+            // Agregar también las versiones en mayúsculas para compatibilidad
+            variables.putIfAbsent("SERIE", variables.get("serie"));
+            variables.putIfAbsent("FOLIO", variables.get("folio"));
+            variables.putIfAbsent("UUID", variables.get("uuid"));
+            variables.putIfAbsent("RFC_EMISOR", variables.get("rfcEmisor"));
+            variables.putIfAbsent("RFC_RECEPTOR", variables.get("rfcReceptor"));
+            
+            // Obtener configuración personalizada para asunto y mensaje personalizado
+            String asuntoFinal = asunto;
+            Map<String, String> configuracionPersonalizada = aplicarConfiguracionPersonalizada(
+                asunto, mensaje != null ? mensaje : "", 
+                serieFactura, 
+                folioFactura, 
+                uuidFactura, 
+                rfcEmisor
+            );
+            
+            asuntoFinal = configuracionPersonalizada.get("asunto");
+            String mensajePersonalizadoFinal = configuracionPersonalizada.getOrDefault("mensaje", "");
+            
+            // Procesar variables en el mensaje antes de asignarlo
+            String mensajeProcesado = mensaje != null ? mensaje : "Se ha generado su documento electrónico.";
+            mensajeProcesado = procesarVariables(mensajeProcesado, variables);
+            
+            variables.put("saludo", "Estimado(a) cliente,");
+            variables.put("mensajePrincipal", mensajeProcesado);
+            variables.put("agradecimiento", "Gracias por su preferencia.");
+            variables.put("mensajePersonalizado", mensajePersonalizadoFinal);
+            variables.put("despedida", "Atentamente,");
+            variables.put("firma", "Equipo de Facturación Cibercom");
+            
+            logger.info("Variables finales para plantilla - serie: '{}', folio: '{}', uuid: '{}', rfcEmisor: '{}', rfcReceptor: '{}'", 
+                       variables.get("serie"), variables.get("folio"), variables.get("uuid"), 
+                       variables.get("rfcEmisor"), variables.get("rfcReceptor"));
 
-            String mensajeConFormato = aplicarFormatoAlMensaje("", variables);
+            // Aplicar formato al mensaje usando plantilla y variables
+            String mensajeConFormato;
+            try {
+                mensajeConFormato = aplicarFormatoAlMensaje("", variables);
+            } catch (Exception e) {
+                logger.warn("Error al aplicar formato al mensaje, usando mensaje simple: {}", e.getMessage());
+                // Fallback: mensaje HTML simple
+                mensajeConFormato = "<html><body>" +
+                    "<p>" + variables.getOrDefault("saludo", "Estimado(a) cliente,") + "</p>" +
+                    "<p>" + variables.getOrDefault("mensajePrincipal", "Se ha generado su documento electrónico.") + "</p>" +
+                    "<p>" + variables.getOrDefault("agradecimiento", "Gracias por su preferencia.") + "</p>" +
+                    "<p>" + variables.getOrDefault("despedida", "Atentamente,") + "</p>" +
+                    "<p>" + variables.getOrDefault("firma", "Equipo de Facturación Cibercom") + "</p>" +
+                    "</body></html>";
+            }
 
+            // Validar configuración antes de enviar
+            String smtpHostValue = configCorreo.get("SMTPHOST");
+            String smtpPortValue = configCorreo.get("PORT");
+            String smtpUsernameValue = configCorreo.get("USERNAME");
+            String smtpPasswordValue = configCorreo.get("PASSWORD");
+            
+            logger.info("Validando configuración SMTP - Host: {}, Port: {}, Username: {}, Password: {}", 
+                       smtpHostValue, smtpPortValue, 
+                       smtpUsernameValue != null && !smtpUsernameValue.isEmpty() ? "***" : "VACÍO",
+                       smtpPasswordValue != null && !smtpPasswordValue.isEmpty() ? "***" : "VACÍO");
+            
+            if (smtpHostValue == null || smtpHostValue.trim().isEmpty()) {
+                throw new IllegalStateException("SMTP Host no configurado. Verifique la configuración de correo en application.yml.");
+            }
+            
+            if (smtpPortValue == null || smtpPortValue.trim().isEmpty()) {
+                throw new IllegalStateException("SMTP Port no configurado. Verifique la configuración de correo en application.yml.");
+            }
+            
+            if (smtpUsernameValue == null || smtpUsernameValue.trim().isEmpty()) {
+                throw new IllegalStateException("SMTP Username no configurado. Verifique la configuración de correo en application.yml.");
+            }
+            
+            if (smtpPasswordValue == null || smtpPasswordValue.trim().isEmpty()) {
+                throw new IllegalStateException("SMTP Password no configurado. Verifique la configuración de correo en application.yml.");
+            }
+            
             CorreoDto correoDto = new CorreoDto();
-            correoDto.setFrom(fromEmail);
+            String fromEmailValue = fromEmail != null && !fromEmail.trim().isEmpty() 
+                ? fromEmail 
+                : (configCorreo.get("FROM") != null ? configCorreo.get("FROM") : "noreply@cibercom.com");
+            correoDto.setFrom(fromEmailValue);
             correoDto.setTo(correoReceptor);
-            correoDto.setSubject(asunto != null ? asunto : "Documentos electrónicos");
-            correoDto.setMensaje(mensajeConFormato);
-            correoDto.setAdjuntos(adjuntos);
-            correoDto.setSmtpHost(configCorreo.get("SMTPHOST"));
-            correoDto.setPort(configCorreo.get("PORT"));
-            correoDto.setUsername(configCorreo.get("USERNAME"));
-            correoDto.setPassword(configCorreo.get("PASSWORD"));
+            correoDto.setSubject(asuntoFinal != null ? asuntoFinal : (asunto != null ? asunto : "Documentos electrónicos"));
+            correoDto.setMensaje(mensajeConFormato != null ? mensajeConFormato : "");
+            correoDto.setAdjuntos(adjuntos != null ? adjuntos : new ArrayList<>());
+            correoDto.setSmtpHost(smtpHostValue);
+            correoDto.setPort(smtpPortValue);
+            correoDto.setUsername(smtpUsernameValue);
+            correoDto.setPassword(smtpPasswordValue);
 
             CorreoUtil.enviaCorreo(correoDto);
             logger.info("=== CORREO CON ADJUNTOS DIRECTO ENVIADO ===");
+        } catch (IllegalStateException e) {
+            logger.error("Error de configuración al enviar correo con adjuntos directo: {}", e.getMessage(), e);
+            throw e;
         } catch (Exception e) {
             logger.error("Error enviando correo con adjuntos directo: {}", e.getMessage(), e);
             throw new RuntimeException("Error enviando correo con adjuntos directo: " + e.getMessage(), e);
@@ -1247,15 +1450,20 @@ public class CorreoService {
     public String aplicarFormatoAlMensaje(String mensaje, Map<String, String> variables) {
         try {
             // Obtener configuración de formato desde la configuración de mensajes
-            ConfiguracionCorreoResponseDto configResponse = obtenerConfiguracionMensajes();
-            FormatoCorreoDto configuracionFormato;
-            
-            if (configResponse != null && configResponse.isExitoso() && configResponse.getFormatoCorreo() != null) {
-                configuracionFormato = configResponse.getFormatoCorreo();
-                logger.info("Usando configuración de formato desde configuración de mensajes: {}", configuracionFormato);
-            } else {
-                configuracionFormato = formatoCorreoService.obtenerConfiguracionActiva();
-                logger.info("Usando configuración de formato desde servicio de formato: {}", configuracionFormato);
+            FormatoCorreoDto configuracionFormato = null;
+            try {
+                ConfiguracionCorreoResponseDto configResponse = obtenerConfiguracionMensajes();
+                
+                if (configResponse != null && configResponse.isExitoso() && configResponse.getFormatoCorreo() != null) {
+                    configuracionFormato = configResponse.getFormatoCorreo();
+                    logger.info("Usando configuración de formato desde configuración de mensajes: {}", configuracionFormato);
+                } else {
+                    configuracionFormato = formatoCorreoService.obtenerConfiguracionActiva();
+                    logger.info("Usando configuración de formato desde servicio de formato: {}", configuracionFormato);
+                }
+            } catch (Exception e) {
+                logger.warn("Error al obtener configuración de formato, usando valores por defecto: {}", e.getMessage());
+                configuracionFormato = null; // Usar valores por defecto
             }
             
             Map<String, String> templateVars = new HashMap<>();
@@ -1265,14 +1473,27 @@ public class CorreoService {
             
             // Definir valores por defecto para asegurar estructura del mensaje
             templateVars.putIfAbsent("saludo", "Estimado(a) cliente,");
-            templateVars.putIfAbsent("mensajePrincipal", mensaje);
+            templateVars.putIfAbsent("mensajePrincipal", mensaje != null ? mensaje : "");
             templateVars.putIfAbsent("agradecimiento", "Gracias por su preferencia.");
             templateVars.putIfAbsent("mensajePersonalizado", "");
             templateVars.putIfAbsent("despedida", "Atentamente,");
             templateVars.putIfAbsent("firma", "Equipo de Facturación Cibercom");
             
             // Procesar plantilla HTML con variables
-            String contenidoHTML = formatoCorreoService.cargarYProcesarPlantillaHTML(templateVars, configuracionFormato);
+            String contenidoHTML;
+            try {
+                contenidoHTML = formatoCorreoService.cargarYProcesarPlantillaHTML(templateVars, configuracionFormato);
+            } catch (Exception e) {
+                logger.warn("Error al procesar plantilla HTML, usando mensaje simple: {}", e.getMessage());
+                // Fallback: mensaje HTML simple
+                contenidoHTML = "<html><body>" +
+                    "<p>" + templateVars.get("saludo") + "</p>" +
+                    "<p>" + templateVars.get("mensajePrincipal") + "</p>" +
+                    "<p>" + templateVars.get("agradecimiento") + "</p>" +
+                    "<p>" + templateVars.get("despedida") + "</p>" +
+                    "<p>" + templateVars.get("firma") + "</p>" +
+                    "</body></html>";
+            }
             
             return contenidoHTML;
             

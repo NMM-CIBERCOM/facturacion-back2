@@ -256,4 +256,30 @@ public class CartaPorteDAO {
             throw new DataAccessException("Error al actualizar ID_FACTURA: " + e.getMessage(), e) {};
         }
     }
+    
+    /**
+     * Busca una carta porte por ID_FACTURA
+     * @param idFactura ID de la factura relacionada
+     * @return ID_DATO_FISCAL de la carta porte si existe, Optional.empty() si no existe
+     */
+    public java.util.Optional<Long> buscarPorIdFactura(Long idFactura) {
+        if (idFactura == null) {
+            return java.util.Optional.empty();
+        }
+        
+        String sql = "SELECT ID_DATO_FISCAL FROM CARTA_PORTE WHERE ID_FACTURA = ?";
+        try {
+            java.util.List<Long> resultados = jdbcTemplate.query(sql, 
+                (rs, rowNum) -> rs.getLong("ID_DATO_FISCAL"), 
+                idFactura);
+            
+            if (resultados != null && !resultados.isEmpty()) {
+                return java.util.Optional.of(resultados.get(0));
+            }
+            return java.util.Optional.empty();
+        } catch (Exception e) {
+            logger.warn("Error al buscar carta porte por ID_FACTURA {}: {}", idFactura, e.getMessage());
+            return java.util.Optional.empty();
+        }
+    }
 }

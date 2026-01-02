@@ -113,7 +113,9 @@ public class CreditNoteController {
 
     /** Guardar Nota de Crédito en Oracle: FACTURAS y NOTAS_CREDITO */
     @PostMapping("/guardar")
-    public ResponseEntity<?> guardar(@RequestBody CreditNoteSaveRequest request) {
+    public ResponseEntity<?> guardar(
+            @RequestBody CreditNoteSaveRequest request,
+            @RequestHeader(value = "X-Usuario", required = false, defaultValue = "0") String usuarioStr) {
         ensureXmlContent(request);
         CreditNoteOracleSaveService svc = oracleSaveProvider.getIfAvailable();
         if (svc == null) {
@@ -123,7 +125,8 @@ public class CreditNoteController {
             return ResponseEntity.status(501).body(m);
         }
         logger.info("NC Controller Guardar: uuidNc={} rfcEmisor={} rfcReceptor={} total={}", request.getUuidNc(), request.getRfcEmisor(), request.getRfcReceptor(), request.getTotal());
-        CreditNoteOracleSaveService.SaveResult res = svc.guardar(request);
+        Long usuarioId = parseUsuario(usuarioStr);
+        CreditNoteOracleSaveService.SaveResult res = svc.guardar(request, usuarioId);
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("ok", res.ok);
         m.put("uuidNc", res.uuidNc);
@@ -134,7 +137,10 @@ public class CreditNoteController {
 
     /** Timbrar Nota de Crédito vía PAC (EGRESO) */
     @PostMapping("/timbrar")
-    public ResponseEntity<?> timbrar(@RequestBody CreditNoteSaveRequest request) {
+    public ResponseEntity<?> timbrar(
+            @RequestBody CreditNoteSaveRequest request,
+            @RequestHeader(value = "X-Usuario", required = false, defaultValue = "0") String usuarioStr) {
+        Long usuarioId = parseUsuario(usuarioStr);
         try {
             String xmlGenerado = ensureXmlContent(request);
             logger.info("NC Controller Timbrar: solicitud uuidNc={} rfcEmisor={} rfcReceptor={} total={} serie={} folio={} uuidFacturaOrig={}",
@@ -178,6 +184,40 @@ public class CreditNoteController {
                         "uuid", uuid
                 ));
             }
+            
+            // Si el timbrado fue exitoso, guardar la nota de crédito en FACTURAS y NOTAS_CREDITO con el UUID de Finkok
+            if (resp.getOk() != null && resp.getOk() && resp.getUuid() != null && !resp.getUuid().isBlank()) {
+                String uuidFinkok = resp.getUuid();
+                String xmlTimbrado = resp.getXmlTimbrado();
+                String serieFinkok = resp.getSerie() != null ? resp.getSerie() : serie;
+                String folioFinkok = resp.getFolio() != null ? resp.getFolio() : folio;
+                
+                // Actualizar el request con el UUID de Finkok y XML timbrado
+                request.setUuidNc(uuidFinkok);
+                request.setXmlContent(xmlTimbrado);
+                request.setSerieNc(serieFinkok);
+                request.setFolioNc(folioFinkok);
+                
+                // Guardar en Oracle (FACTURAS y NOTAS_CREDITO) con el UUID de Finkok
+                CreditNoteOracleSaveService oracleSave = oracleSaveProvider.getIfAvailable();
+                if (oracleSave != null) {
+                    try {
+                        CreditNoteOracleSaveService.SaveResult saveResult = oracleSave.guardar(request, usuarioId);
+                        if (!saveResult.ok) {
+                            logger.error("NC Controller Timbrar: Error al guardar nota de crédito después del timbrado: {}", saveResult.errors);
+                            // Continuar aunque falle el guardado, pero registrar el error
+                        } else {
+                            logger.info("NC Controller Timbrar: Nota de crédito guardada exitosamente con UUID de Finkok: {}", uuidFinkok);
+                        }
+                    } catch (Exception e) {
+                        logger.error("NC Controller Timbrar: Excepción al guardar nota de crédito después del timbrado: {}", e.getMessage(), e);
+                        // Continuar aunque falle el guardado
+                    }
+                } else {
+                    logger.warn("NC Controller Timbrar: CreditNoteOracleSaveService no disponible, no se guardará en BD");
+                }
+            }
+            
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("ok", resp.getOk());
             m.put("status", resp.getStatus());
@@ -206,6 +246,7 @@ public class CreditNoteController {
         request.setXmlContent(xml);
         return xml;
     }
+    
 
     private LocalDate parsePeriodo(String periodo) {
         // admite formatos yyyy-MM y yyyy-MM-dd (se toma inicio del mes)
@@ -259,5 +300,17 @@ public class CreditNoteController {
         m.put("iva_tasa", it.getIvaTasa());
         m.put("iva_importe", it.getIvaImporte());
         return m;
+    }
+
+    private Long parseUsuario(String usuarioStr) {
+        if (usuarioStr == null || usuarioStr.trim().isEmpty() || "0".equals(usuarioStr.trim())) {
+            return null;
+        }
+        try {
+            return Long.parseLong(usuarioStr.trim());
+        } catch (NumberFormatException e) {
+            logger.warn("Valor de usuario no numérico recibido: '{}', se usará null", usuarioStr);
+            return null;
+        }
     }
 }

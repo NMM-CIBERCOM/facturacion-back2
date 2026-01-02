@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -57,9 +58,12 @@ public class PagoController {
     }
 
     @PostMapping("/complemento")
-    public ResponseEntity<PagoComplementoResponse> registrarComplemento(@RequestBody PagoComplementoRequest request) {
+    public ResponseEntity<PagoComplementoResponse> registrarComplemento(
+            @RequestBody PagoComplementoRequest request,
+            @RequestHeader(value = "X-Usuario", required = false, defaultValue = "0") String usuarioStr) {
         logger.info("Registrando complemento de pagos para UUID: {}", request != null ? request.getFacturaUuid() : "null");
-        PagoComplementoResponse resultado = pagoService.registrarComplemento(request);
+        Long usuarioId = parseUsuario(usuarioStr);
+        PagoComplementoResponse resultado = pagoService.registrarComplemento(request, usuarioId);
         if (resultado.isSuccess()) {
             return ResponseEntity.ok(resultado);
         }
@@ -67,6 +71,18 @@ public class PagoController {
             return ResponseEntity.status(HttpStatus.PARTIAL_CONTENT).body(resultado);
         }
         return ResponseEntity.badRequest().body(resultado);
+    }
+
+    private Long parseUsuario(String usuarioStr) {
+        if (usuarioStr == null || usuarioStr.trim().isEmpty() || "0".equals(usuarioStr.trim())) {
+            return null;
+        }
+        try {
+            return Long.parseLong(usuarioStr.trim());
+        } catch (NumberFormatException e) {
+            logger.warn("Valor de usuario no numérico recibido: '{}', se usará null", usuarioStr);
+            return null;
+        }
     }
 
     @PostMapping("/complemento/enviar-correo")
@@ -77,6 +93,31 @@ public class PagoController {
             return ResponseEntity.ok(resultado);
         }
         return ResponseEntity.badRequest().body(resultado);
+    }
+
+    @PostMapping("/complemento/preview-pdf")
+    public ResponseEntity<byte[]> previewPDFComplemento(
+            @RequestBody PagoComplementoRequest request,
+            @RequestHeader(value = "X-Usuario", required = false, defaultValue = "0") String usuarioStr) {
+        logger.info("Recibida solicitud de vista previa PDF de complemento: {}", request != null ? request.getFacturaUuid() : "null");
+
+        try {
+            // El logoConfig se obtiene dentro de generarPdfPreviewComplemento usando obtenerLogoConfig()
+            byte[] pdfBytes = pagoService.generarPdfPreviewComplemento(request, null);
+
+            org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+            headers.setContentType(org.springframework.http.MediaType.APPLICATION_PDF);
+            headers.setContentDispositionFormData("inline", "preview-complemento-pago.pdf");
+
+            logger.info("PDF de vista previa de complemento generado exitosamente. Tamaño: {} bytes", pdfBytes.length);
+            return ResponseEntity.ok()
+                    .headers(headers)
+                    .body(pdfBytes);
+
+        } catch (Exception e) {
+            logger.error("Error generando PDF de vista previa de complemento", e);
+            return ResponseEntity.internalServerError().build();
+        }
     }
 }
 

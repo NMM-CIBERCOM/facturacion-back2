@@ -24,9 +24,12 @@ public class CartaPorteController {
     private CartaPorteService cartaPorteService;
 
     @PostMapping("/guardar")
-    public ResponseEntity<?> guardar(@RequestBody CartaPorteSaveRequest request) {
+    public ResponseEntity<?> guardar(
+            @RequestBody CartaPorteSaveRequest request,
+            @RequestHeader(value = "X-Usuario", required = false, defaultValue = "0") String usuarioStr) {
         try {
             logger.info("Guardando carta porte con RFC: {}", request.getRfcCompleto());
+            Long usuarioId = parseUsuario(usuarioStr);
             
             // DEBUG: Verificar remolques en el request
             if (request.getComplemento() != null && 
@@ -46,7 +49,7 @@ public class CartaPorteController {
                 }
             }
             
-            CartaPorteService.SaveResult result = cartaPorteService.guardar(request);
+            CartaPorteService.SaveResult result = cartaPorteService.guardar(request, usuarioId);
             
             Map<String, Object> response = new LinkedHashMap<>();
             response.put("ok", true);
@@ -71,6 +74,18 @@ public class CartaPorteController {
         }
     }
 
+    private Long parseUsuario(String usuarioStr) {
+        if (usuarioStr == null || usuarioStr.trim().isEmpty() || "0".equals(usuarioStr.trim())) {
+            return null;
+        }
+        try {
+            return Long.parseLong(usuarioStr.trim());
+        } catch (NumberFormatException e) {
+            logger.warn("Valor de usuario no numérico recibido: '{}', se usará null", usuarioStr);
+            return null;
+        }
+    }
+
     @PostMapping("/preview-xml")
     public ResponseEntity<?> preview(@RequestBody CartaPorteSaveRequest request) {
         try {
@@ -85,6 +100,31 @@ public class CartaPorteController {
             response.put("ok", false);
             response.put("error", e.getMessage());
             return ResponseEntity.status(500).body(response);
+        }
+    }
+
+    @PostMapping("/preview-pdf")
+    public ResponseEntity<byte[]> previewPDF(
+            @RequestBody CartaPorteSaveRequest request,
+            @RequestHeader(value = "X-Usuario", required = false, defaultValue = "0") String usuarioStr) {
+        logger.info("Recibida solicitud de vista previa PDF de carta porte");
+
+        try {
+            // El logoConfig se obtiene dentro de generarPdfPreview usando obtenerLogoConfig()
+            byte[] pdfBytes = cartaPorteService.generarPdfPreview(request, null);
+
+            org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+            headers.setContentType(org.springframework.http.MediaType.APPLICATION_PDF);
+            headers.setContentDispositionFormData("inline", "preview-carta-porte.pdf");
+
+            logger.info("PDF de vista previa de carta porte generado exitosamente. Tamaño: {} bytes", pdfBytes.length);
+            return ResponseEntity.ok()
+                    .headers(headers)
+                    .body(pdfBytes);
+
+        } catch (Exception e) {
+            logger.error("Error generando PDF de vista previa de carta porte", e);
+            return ResponseEntity.internalServerError().build();
         }
     }
 

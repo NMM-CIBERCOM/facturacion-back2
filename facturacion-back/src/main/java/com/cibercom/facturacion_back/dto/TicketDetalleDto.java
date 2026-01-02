@@ -23,6 +23,13 @@ public class TicketDetalleDto {
     private BigDecimal iepsPorcentaje;
     private BigDecimal iepsImporte;
     private BigDecimal total;
+    
+    // Campos del catálogo CATALOGOS_PRODUCTOS_SERVICIOS
+    private String claveProdServ;
+    private String objetoImpuesto;
+    private BigDecimal tasaIva;
+    private String unidadCatalogo;
+    private String claveUnidad;
 
     public Long getIdDetalle() { return idDetalle; }
     public void setIdDetalle(Long idDetalle) { this.idDetalle = idDetalle; }
@@ -65,4 +72,19 @@ public class TicketDetalleDto {
 
     public BigDecimal getTotal() { return total; }
     public void setTotal(BigDecimal total) { this.total = total; }
+    
+    public String getClaveProdServ() { return claveProdServ; }
+    public void setClaveProdServ(String claveProdServ) { this.claveProdServ = claveProdServ; }
+    
+    public String getObjetoImpuesto() { return objetoImpuesto; }
+    public void setObjetoImpuesto(String objetoImpuesto) { this.objetoImpuesto = objetoImpuesto; }
+    
+    public BigDecimal getTasaIva() { return tasaIva; }
+    public void setTasaIva(BigDecimal tasaIva) { this.tasaIva = tasaIva; }
+    
+    public String getUnidadCatalogo() { return unidadCatalogo; }
+    public void setUnidadCatalogo(String unidadCatalogo) { this.unidadCatalogo = unidadCatalogo; }
+    
+    public String getClaveUnidad() { return claveUnidad; }
+    public void setClaveUnidad(String claveUnidad) { this.claveUnidad = claveUnidad; }
 }
