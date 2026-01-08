@@ -6,6 +6,10 @@
 spring:
   profiles:
     active: prod,oracle
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
   jackson:
     serialization:
       write-dates-as-timestamps: false
@@ -22,6 +26,45 @@ spring:
           starttls:
             enable: true
           from: nm9282672@gmail.com
+  main:
+    headless: false
+
+# Configuración de logs para preview y escritura
+app:
+  logs:
+    # Base directory that contains readable log files for previewing.
+    # You can override with environment variable LOGS_BASE_DIR.
+    # Example (Linux): /var/log/myapp
+    # Example (Windows): C:/cibercom/logs
+    base-dir: "${LOGS_BASE_DIR:C:/cibercom/logs}"
+    # Allow clients to pass ?baseDir=... in requests (dev convenience)
+    allow-request-base: ${ALLOW_REQUEST_BASE:true}
+
+# Escribir logs del backend en la misma carpeta para que aparezcan en la UI
+logging:
+  file:
+    name: ${LOG_FILE:${app.logs.base-dir}/server.log}
+  logback:
+    rollingpolicy:
+      # Rota por fecha y tamaño: server.log.2025-10-23.0, .1, ...
+      file-name-pattern: ${app.logs.base-dir}/server.log.%d{yyyy-MM-dd}.%i
+      max-file-size: 10MB
+      max-history: 7
+      total-size-cap: 200MB
+
+
+# Configuración JWT
+jwt:
+  secret: cibercom-facturacion-secret-key-2024-super-secure
+  expiration: 900000 # 15 minutos en milisegundos
+
+# Configuración de seguridad
+security:
+  cors:
+    allowed-origins: http://localhost:5173
+    allowed-methods: GET,POST,PUT,DELETE,OPTIONS
+    allowed-headers: "*"
+    allow-credentials: true
 
 # Configuración del Emisor (valores por defecto para CFDI)
 facturacion:
