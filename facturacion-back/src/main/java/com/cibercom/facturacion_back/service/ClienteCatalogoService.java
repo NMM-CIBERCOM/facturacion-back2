@@ -198,4 +198,159 @@ public class ClienteCatalogoService {
             return List.of();
         }
     }
+
+    /**
+     * Obtiene todos los clientes
+     */
+    public List<ClienteCatalogo> obtenerTodos() {
+        try {
+            return clienteCatalogoRepository.findAll();
+        } catch (Exception e) {
+            log.error("Error al obtener todos los clientes", e);
+            return List.of();
+        }
+    }
+
+    /**
+     * Obtiene clientes paginados ordenados por fecha de alta descendente (más nuevos primero)
+     * @param page Número de página (0-indexed)
+     * @param size Tamaño de página
+     * @return Lista de clientes para la página solicitada
+     */
+    public List<ClienteCatalogo> obtenerTodosPaginados(int page, int size) {
+        try {
+            int offset = page * size;
+            // Oracle paginación usando subconsulta con ROWNUM
+            // Especificamos las columnas explícitamente para evitar problemas
+            String sql = "SELECT ID_CLIENTE, RFC, RAZON_SOCIAL, NOMBRE, PATERNO, MATERNO, " +
+                        "CORREO_ELECTRONICO, DOMICILIO_FISCAL, REGIMEN_FISCAL, PAIS, " +
+                        "REGISTRO_TRIBUTARIO, USO_CFDI, FECHA_ALTA FROM (" +
+                        "  SELECT a.*, ROWNUM rnum FROM (" +
+                        "    SELECT ID_CLIENTE, RFC, RAZON_SOCIAL, NOMBRE, PATERNO, MATERNO, " +
+                        "           CORREO_ELECTRONICO, DOMICILIO_FISCAL, REGIMEN_FISCAL, PAIS, " +
+                        "           REGISTRO_TRIBUTARIO, USO_CFDI, FECHA_ALTA " +
+                        "    FROM CLIENTES " +
+                        "    ORDER BY FECHA_ALTA DESC NULLS LAST, ID_CLIENTE DESC" +
+                        "  ) a WHERE ROWNUM <= ?" +
+                        ") WHERE rnum > ?";
+            
+            return jdbcTemplate.query(
+                    sql,
+                    ps -> {
+                        ps.setInt(1, offset + size);
+                        ps.setInt(2, offset);
+                    },
+                    (rs, rowNum) -> {
+                        ClienteCatalogo c = new ClienteCatalogo();
+                        c.setIdCliente(rs.getLong("ID_CLIENTE"));
+                        c.setRfc(rs.getString("RFC"));
+                        c.setRazonSocial(rs.getString("RAZON_SOCIAL"));
+                        c.setNombre(rs.getString("NOMBRE"));
+                        c.setPaterno(rs.getString("PATERNO"));
+                        c.setMaterno(rs.getString("MATERNO"));
+                        c.setCorreoElectronico(rs.getString("CORREO_ELECTRONICO"));
+                        c.setDomicilioFiscal(rs.getString("DOMICILIO_FISCAL"));
+                        c.setRegimenFiscal(rs.getString("REGIMEN_FISCAL"));
+                        c.setPais(rs.getString("PAIS"));
+                        c.setRegistroTributario(rs.getString("REGISTRO_TRIBUTARIO"));
+                        c.setUsoCfdi(rs.getString("USO_CFDI"));
+                        java.sql.Timestamp fechaAlta = rs.getTimestamp("FECHA_ALTA");
+                        if (fechaAlta != null) {
+                            c.setFechaAlta(fechaAlta.toLocalDateTime());
+                        }
+                        return c;
+                    }
+            );
+        } catch (Exception e) {
+            log.error("Error al obtener clientes paginados", e);
+            return List.of();
+        }
+    }
+
+    /**
+     * Cuenta el total de clientes
+     */
+    public long contarTotal() {
+        try {
+            return clienteCatalogoRepository.count();
+        } catch (Exception e) {
+            log.error("Error al contar clientes", e);
+            return 0;
+        }
+    }
+
+    /**
+     * Obtiene un cliente por ID
+     */
+    public Optional<ClienteCatalogo> obtenerPorId(Long id) {
+        if (id == null) {
+            return Optional.empty();
+        }
+        try {
+            return clienteCatalogoRepository.findById(id);
+        } catch (Exception e) {
+            log.error("Error al obtener cliente por ID: {}", id, e);
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * Actualiza un cliente existente
+     */
+    public ClienteCatalogo actualizar(ClienteCatalogo cliente) {
+        if (cliente == null || cliente.getIdCliente() == null) {
+            throw new IllegalArgumentException("Cliente o ID de cliente no puede ser nulo");
+        }
+        log.info("Actualizando cliente ID: {}, RFC: {}", cliente.getIdCliente(), cliente.getRfc());
+        
+        // Verificar que el cliente existe y obtener el existente
+        Optional<ClienteCatalogo> existenteOpt = clienteCatalogoRepository.findById(cliente.getIdCliente());
+        if (existenteOpt.isEmpty()) {
+            throw new IllegalArgumentException("Cliente con ID " + cliente.getIdCliente() + " no encontrado");
+        }
+        
+        ClienteCatalogo existente = existenteOpt.get();
+        
+        // Preservar la fecha de alta del registro original
+        if (existente.getFechaAlta() != null) {
+            cliente.setFechaAlta(existente.getFechaAlta());
+        } else {
+            // Si no tenía fecha de alta, establecer la actual
+            cliente.setFechaAlta(java.time.LocalDateTime.now());
+        }
+        
+        // Validar campos obligatorios
+        if (cliente.getRfc() == null || cliente.getRfc().trim().isEmpty()) {
+            throw new IllegalArgumentException("RFC es obligatorio");
+        }
+        if (cliente.getRazonSocial() == null || cliente.getRazonSocial().trim().isEmpty()) {
+            throw new IllegalArgumentException("Razón Social es obligatoria");
+        }
+        
+        try {
+            return clienteCatalogoRepository.save(cliente);
+        } catch (Exception e) {
+            log.error("Error al guardar cliente actualizado", e);
+            throw new RuntimeException("Error al actualizar cliente: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Elimina un cliente por ID
+     */
+    public void eliminar(Long id) {
+        if (id == null) {
+            throw new IllegalArgumentException("ID de cliente no puede ser nulo");
+        }
+        log.info("Eliminando cliente ID: {}", id);
+        
+        // Verificar que el cliente existe
+        Optional<ClienteCatalogo> existente = clienteCatalogoRepository.findById(id);
+        if (existente.isEmpty()) {
+            throw new IllegalArgumentException("Cliente con ID " + id + " no encontrado");
+        }
+        
+        clienteCatalogoRepository.deleteById(id);
+        log.info("Cliente ID {} eliminado exitosamente", id);
+    }
 }

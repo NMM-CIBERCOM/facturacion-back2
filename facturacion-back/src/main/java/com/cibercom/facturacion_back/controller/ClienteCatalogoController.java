@@ -105,6 +105,16 @@ public class ClienteCatalogoController {
                 return ResponseEntity.badRequest().body(out);
             }
             
+            // Verificar si el cliente ya existe
+            java.util.Optional<ClienteCatalogo> clienteExistente = clienteCatalogoService.buscarPorRfc(rfc);
+            if (clienteExistente.isPresent()) {
+                log.warn("Intento de crear cliente con RFC existente: {}", rfc);
+                out.put("error", "Ya existe un cliente con el RFC: " + rfc);
+                out.put("clienteExistente", true);
+                out.put("idCliente", clienteExistente.get().getIdCliente());
+                return ResponseEntity.status(409).body(out); // 409 Conflict
+            }
+            
             String razon = body != null && body.get("razon_social") != null ? body.get("razon_social").toString() : null;
             if (razon == null || razon.trim().isEmpty()) {
                 out.put("error", "Razón Social es obligatoria");
@@ -166,10 +176,235 @@ public class ClienteCatalogoController {
             out.put("razonSocial", saved.getRazonSocial());
             out.put("mensaje", "Cliente guardado exitosamente");
             return ResponseEntity.ok(out);
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            log.error("Error de integridad al crear cliente (probablemente RFC duplicado)", e);
+            String mensajeError = e.getMessage();
+            if (mensajeError != null && (mensajeError.contains("ORA-00001") || mensajeError.contains("restricción única"))) {
+                out.put("error", "Ya existe un cliente con este RFC. Por favor, verifique el RFC o actualice el cliente existente.");
+                out.put("clienteExistente", true);
+            } else {
+                out.put("error", "Error de integridad de datos: " + (mensajeError != null ? mensajeError : e.getClass().getSimpleName()));
+            }
+            return ResponseEntity.status(409).body(out); // 409 Conflict
         } catch (Exception e) {
             log.error("Error al crear cliente", e);
+            out.put("error", "Error al crear cliente: " + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName()));
+            return ResponseEntity.badRequest().body(out);
+        }
+    }
+
+    @GetMapping
+    public ResponseEntity<Map<String, Object>> obtenerTodos(
+            @RequestParam(value = "page", defaultValue = "0") int page,
+            @RequestParam(value = "size", defaultValue = "5") int size) {
+        log.info("Obteniendo clientes paginados - página: {}, tamaño: {}", page, size);
+        Map<String, Object> response = new HashMap<>();
+        try {
+            // Validar parámetros
+            if (page < 0) page = 0;
+            if (size < 1) size = 5;
+            if (size > 100) size = 100; // Límite máximo
+            
+            List<ClienteCatalogo> clientes = clienteCatalogoService.obtenerTodosPaginados(page, size);
+            long total = clienteCatalogoService.contarTotal();
+            int totalPages = (int) Math.ceil((double) total / size);
+            
+            List<Map<String, Object>> clientesDto = clientes.stream().map(c -> {
+                Map<String, Object> dto = new HashMap<>();
+                dto.put("idCliente", c.getIdCliente());
+                dto.put("rfc", c.getRfc());
+                dto.put("razonSocial", c.getRazonSocial());
+                dto.put("nombre", c.getNombre());
+                dto.put("paterno", c.getPaterno());
+                dto.put("materno", c.getMaterno());
+                dto.put("correoElectronico", c.getCorreoElectronico());
+                dto.put("domicilioFiscal", c.getDomicilioFiscal());
+                dto.put("regimenFiscal", c.getRegimenFiscal());
+                dto.put("pais", c.getPais());
+                dto.put("registroTributario", c.getRegistroTributario());
+                dto.put("usoCfdi", c.getUsoCfdi());
+                dto.put("fechaAlta", c.getFechaAlta());
+                return dto;
+            }).toList();
+            
+            response.put("clientes", clientesDto);
+            response.put("total", total);
+            response.put("page", page);
+            response.put("size", size);
+            response.put("totalPages", totalPages);
+            response.put("hasNext", page < totalPages - 1);
+            response.put("hasPrevious", page > 0);
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error al obtener clientes paginados", e);
+            response.put("error", e.getMessage());
+            response.put("clientes", List.of());
+            response.put("total", 0);
+            response.put("page", page);
+            response.put("size", size);
+            response.put("totalPages", 0);
+            response.put("hasNext", false);
+            response.put("hasPrevious", false);
+            return ResponseEntity.status(500).body(response);
+        }
+    }
+
+    @GetMapping("/id/{id}")
+    public ResponseEntity<Map<String, Object>> obtenerPorId(@PathVariable("id") Long id) {
+        log.info("Obteniendo cliente por ID: {}", id);
+        Map<String, Object> response = new HashMap<>();
+        try {
+            return clienteCatalogoService.obtenerPorId(id)
+                    .map(c -> {
+                        Map<String, Object> dto = new HashMap<>();
+                        dto.put("idCliente", c.getIdCliente());
+                        dto.put("rfc", c.getRfc());
+                        dto.put("razonSocial", c.getRazonSocial());
+                        dto.put("nombre", c.getNombre());
+                        dto.put("paterno", c.getPaterno());
+                        dto.put("materno", c.getMaterno());
+                        dto.put("correoElectronico", c.getCorreoElectronico());
+                        dto.put("domicilioFiscal", c.getDomicilioFiscal());
+                        dto.put("regimenFiscal", c.getRegimenFiscal());
+                        dto.put("pais", c.getPais());
+                        dto.put("registroTributario", c.getRegistroTributario());
+                        dto.put("usoCfdi", c.getUsoCfdi());
+                        dto.put("fechaAlta", c.getFechaAlta());
+                        response.put("cliente", dto);
+                        return ResponseEntity.ok(response);
+                    })
+                    .orElseGet(() -> {
+                        response.put("error", "Cliente no encontrado");
+                        return ResponseEntity.status(404).body(response);
+                    });
+        } catch (Exception e) {
+            log.error("Error al obtener cliente por ID: {}", id, e);
+            response.put("error", e.getMessage());
+            return ResponseEntity.status(500).body(response);
+        }
+    }
+
+    @PutMapping("/{id}")
+    public ResponseEntity<Map<String, Object>> actualizarCliente(
+            @PathVariable("id") Long id,
+            @RequestBody Map<String, Object> body) {
+        log.info("Actualizando cliente ID: {}", id);
+        Map<String, Object> out = new HashMap<>();
+        try {
+            // Obtener cliente existente
+            java.util.Optional<ClienteCatalogo> existenteOpt = clienteCatalogoService.obtenerPorId(id);
+            if (existenteOpt.isEmpty()) {
+                out.put("error", "Cliente no encontrado");
+                return ResponseEntity.status(404).body(out);
+            }
+
+            ClienteCatalogo c = existenteOpt.get();
+            
+            // Actualizar campos
+            if (body.get("rfc") != null) {
+                c.setRfc(body.get("rfc").toString().trim().toUpperCase());
+            }
+            if (body.get("razon_social") != null) {
+                c.setRazonSocial(body.get("razon_social").toString());
+            }
+            if (body.get("nombre") != null) {
+                c.setNombre(body.get("nombre").toString());
+            }
+            if (body.get("paterno") != null) {
+                c.setPaterno(body.get("paterno").toString());
+            }
+            if (body.get("materno") != null) {
+                c.setMaterno(body.get("materno").toString());
+            }
+            if (body.get("correo_electronico") != null) {
+                c.setCorreoElectronico(body.get("correo_electronico").toString());
+            }
+            if (body.get("regimen_fiscal") != null) {
+                c.setRegimenFiscal(body.get("regimen_fiscal").toString());
+            }
+            if (body.get("pais") != null) {
+                c.setPais(body.get("pais").toString());
+            }
+            if (body.get("registro_tributario") != null) {
+                c.setRegistroTributario(body.get("registro_tributario").toString());
+            }
+            if (body.get("uso_cfdi") != null) {
+                c.setUsoCfdi(body.get("uso_cfdi").toString());
+            }
+            
+            // Construir domicilio fiscal si se proporcionan campos individuales
+            if (body.get("calle") != null || body.get("numero_exterior") != null || 
+                body.get("colonia") != null || body.get("municipio") != null || 
+                body.get("estado") != null || body.get("codigo_postal") != null) {
+                StringBuilder domicilioBuilder = new StringBuilder();
+                if (body.get("calle") != null) domicilioBuilder.append(body.get("calle").toString().trim());
+                if (body.get("numero_exterior") != null) {
+                    if (domicilioBuilder.length() > 0) domicilioBuilder.append(" ");
+                    domicilioBuilder.append(body.get("numero_exterior").toString().trim());
+                }
+                if (body.get("numero_interior") != null) {
+                    if (domicilioBuilder.length() > 0) domicilioBuilder.append(" ");
+                    domicilioBuilder.append("Int. ").append(body.get("numero_interior").toString().trim());
+                }
+                if (body.get("colonia") != null) {
+                    if (domicilioBuilder.length() > 0) domicilioBuilder.append(", ");
+                    domicilioBuilder.append(body.get("colonia").toString().trim());
+                }
+                if (body.get("municipio") != null) {
+                    if (domicilioBuilder.length() > 0) domicilioBuilder.append(", ");
+                    domicilioBuilder.append(body.get("municipio").toString().trim());
+                }
+                if (body.get("estado") != null) {
+                    if (domicilioBuilder.length() > 0) domicilioBuilder.append(", ");
+                    domicilioBuilder.append(body.get("estado").toString().trim());
+                }
+                if (body.get("codigo_postal") != null) {
+                    if (domicilioBuilder.length() > 0) domicilioBuilder.append(", C.P. ");
+                    domicilioBuilder.append(body.get("codigo_postal").toString().trim());
+                }
+                if (body.get("pais") != null) {
+                    if (domicilioBuilder.length() > 0) domicilioBuilder.append(", ");
+                    domicilioBuilder.append(body.get("pais").toString().trim());
+                }
+                c.setDomicilioFiscal(domicilioBuilder.toString());
+            } else if (body.get("domicilio_fiscal") != null) {
+                c.setDomicilioFiscal(body.get("domicilio_fiscal").toString());
+            }
+            
+            ClienteCatalogo actualizado = clienteCatalogoService.actualizar(c);
+            out.put("idCliente", actualizado.getIdCliente());
+            out.put("rfc", actualizado.getRfc());
+            out.put("razonSocial", actualizado.getRazonSocial());
+            out.put("mensaje", "Cliente actualizado exitosamente");
+            return ResponseEntity.ok(out);
+        } catch (IllegalArgumentException e) {
+            log.error("Error de validación al actualizar cliente", e);
             out.put("error", e.getMessage());
             return ResponseEntity.badRequest().body(out);
+        } catch (Exception e) {
+            log.error("Error al actualizar cliente", e);
+            out.put("error", e.getMessage());
+            return ResponseEntity.status(500).body(out);
+        }
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Map<String, Object>> eliminarCliente(@PathVariable("id") Long id) {
+        log.info("Eliminando cliente ID: {}", id);
+        Map<String, Object> out = new HashMap<>();
+        try {
+            clienteCatalogoService.eliminar(id);
+            out.put("mensaje", "Cliente eliminado exitosamente");
+            return ResponseEntity.ok(out);
+        } catch (IllegalArgumentException e) {
+            log.error("Error de validación al eliminar cliente", e);
+            out.put("error", e.getMessage());
+            return ResponseEntity.status(404).body(out);
+        } catch (Exception e) {
+            log.error("Error al eliminar cliente", e);
+            out.put("error", e.getMessage());
+            return ResponseEntity.status(500).body(out);
         }
     }
 

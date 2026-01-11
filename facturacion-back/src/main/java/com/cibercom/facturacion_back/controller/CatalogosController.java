@@ -4,6 +4,7 @@ import com.cibercom.facturacion_back.dto.CatalogoProductoServicioRequest;
 import com.cibercom.facturacion_back.model.CatalogoProductoServicio;
 import com.cibercom.facturacion_back.service.CatalogoProdServService;
 import com.cibercom.facturacion_back.service.CatalogoProductoServicioService;
+import com.cibercom.facturacion_back.service.CodigoPostalService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -28,6 +29,9 @@ public class CatalogosController {
 
     @Autowired(required = false)
     private CatalogoProductoServicioService catalogoProductoServicioService;
+
+    @Autowired
+    private CodigoPostalService codigoPostalService;
 
     @GetMapping("/regimenes-fiscales")
     public ResponseEntity<List<String>> obtenerRegimenesFiscales() {
@@ -66,71 +70,32 @@ public class CatalogosController {
             return ResponseEntity.badRequest().body(response);
         }
 
-        if (jdbcTemplate == null) {
-            // Si no hay acceso a BD, retornar datos simulados
-            response.put("codigoPostal", codigoPostal);
-            response.put("estado", "");
-            response.put("municipio", "");
-            response.put("colonias", List.of());
-            return ResponseEntity.ok(response);
-        }
-
         try {
-            // Buscar datos del código postal en la base de datos
-            // Asumiendo que existe una tabla SEPOMEX o similar
-            // Si no existe, se puede usar una API externa o retornar vacío
-            String query = "SELECT DISTINCT d_estado, D_mnpio, d_asenta " +
-                          "FROM sepomex WHERE d_codigo = ? AND ROWNUM <= 50";
+            java.util.Optional<CodigoPostalService.CodigoPostalResult> resultado = codigoPostalService.buscarPorCodigo(codigoPostal);
             
-            List<Map<String, Object>> resultados = jdbcTemplate.query(
-                query,
-                ps -> ps.setString(1, codigoPostal),
-                (rs, rowNum) -> {
-                    Map<String, Object> row = new HashMap<>();
-                    row.put("estado", rs.getString("d_estado"));
-                    row.put("municipio", rs.getString("D_mnpio"));
-                    row.put("colonia", rs.getString("d_asenta"));
-                    return row;
-                }
-            );
-
-            if (resultados.isEmpty()) {
-                // Si no hay resultados en BD, retornar estructura vacía
+            if (resultado.isPresent()) {
+                CodigoPostalService.CodigoPostalResult data = resultado.get();
+                response.put("codigoPostal", data.getCodigoPostal());
+                response.put("estado", data.getEstado() != null ? data.getEstado() : "");
+                response.put("municipio", data.getMunicipio() != null ? data.getMunicipio() : "");
+                response.put("colonias", data.getColonias() != null ? data.getColonias() : List.of());
+                return ResponseEntity.ok(response);
+            } else {
+                // No se encontró el código postal
                 response.put("codigoPostal", codigoPostal);
                 response.put("estado", "");
                 response.put("municipio", "");
                 response.put("colonias", List.of());
                 return ResponseEntity.ok(response);
             }
-
-            // Extraer estado y municipio (deben ser iguales en todos los registros)
-            String estado = resultados.get(0).get("estado") != null ? 
-                           resultados.get(0).get("estado").toString() : "";
-            String municipio = resultados.get(0).get("municipio") != null ? 
-                              resultados.get(0).get("municipio").toString() : "";
-            
-            // Extraer colonias únicas
-            List<String> colonias = resultados.stream()
-                .map(r -> r.get("colonia"))
-                .filter(c -> c != null)
-                .map(Object::toString)
-                .distinct()
-                .sorted()
-                .toList();
-
-            response.put("codigoPostal", codigoPostal);
-            response.put("estado", estado);
-            response.put("municipio", municipio);
-            response.put("colonias", colonias);
-            
-            return ResponseEntity.ok(response);
         } catch (Exception e) {
-            // Si hay error o la tabla no existe, retornar estructura vacía
+            org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(CatalogosController.class);
+            logger.error("Error al buscar código postal: {}", e.getMessage(), e);
             response.put("codigoPostal", codigoPostal);
             response.put("estado", "");
             response.put("municipio", "");
             response.put("colonias", List.of());
-            response.put("mensaje", "No se pudo consultar la base de datos de códigos postales");
+            response.put("error", "Error al consultar código postal: " + e.getMessage());
             return ResponseEntity.ok(response);
         }
     }
