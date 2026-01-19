@@ -110,15 +110,19 @@ spring:
     driver-class-name: oracle.jdbc.OracleDriver
     # Configuración del pool de conexiones (HikariCP)
     hikari:
-      connection-timeout: 5000
-      maximum-pool-size: 5
-      minimum-idle: 0
-      validation-timeout: 3000
+      connection-timeout: 30000
+      maximum-pool-size: 10
+      minimum-idle: 2
+      max-lifetime: 1800000  # 30 minutos (Oracle recomienda menos que el timeout de la BD)
+      idle-timeout: 600000   # 10 minutos
+      validation-timeout: 5000
       leak-detection-threshold: 60000
       # No validar la conexión al inicio (permite que la app inicie aunque Oracle no esté disponible)
       initialization-fail-timeout: -1
       # Intentar conexión solo cuando se necesite, no al inicio
       connection-test-query: SELECT 1 FROM DUAL
+      # Configuración específica para Oracle
+      keepalive-time: 300000  # 5 minutos - mantiene conexiones vivas
   jpa:
     properties:
       hibernate.dialect: org.hibernate.dialect.OracleDialect
@@ -165,6 +169,18 @@ spring:
     username: nick
     password: N1C0LASm
     driver-class-name: oracle.jdbc.OracleDriver
+    # Configuración del pool de conexiones (HikariCP)
+    hikari:
+      connection-timeout: 30000
+      maximum-pool-size: 10
+      minimum-idle: 2
+      max-lifetime: 1800000  # 30 minutos (Oracle recomienda menos que el timeout de la BD)
+      idle-timeout: 600000   # 10 minutos
+      validation-timeout: 5000
+      leak-detection-threshold: 60000
+      connection-test-query: SELECT 1 FROM DUAL
+      # Configuración específica para Oracle
+      keepalive-time: 300000  # 5 minutos - mantiene conexiones vivas
   jpa:
     properties:
       hibernate.dialect: org.hibernate.dialect.OracleDialect
