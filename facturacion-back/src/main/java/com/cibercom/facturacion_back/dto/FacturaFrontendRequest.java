@@ -49,9 +49,12 @@ public class FacturaFrontendRequest {
 
     private Boolean guardarEnMongo;
 
-    // Campos para relaciones de CFDI (sustitución)
+    // Campos para relaciones de CFDI (sustitución / refactura)
     private String uuidCfdiRelacionado;
     private String tipoRelacion;
+
+    /** Tipo de documento para el PDF: "Refactura" muestra título y UUID relacionado en el PDF. */
+    private String tipoDocumento;
 
     // Conceptos de la factura (para modo manual)
     private java.util.List<Concepto> conceptos;

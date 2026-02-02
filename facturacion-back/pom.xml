@@ -179,6 +179,13 @@
             <artifactId>bcpkix-jdk18on</artifactId>
             <version>1.78.1</version>
         </dependency>
+        
+        <!-- Apache HttpClient para mejor manejo de conexiones HTTP -->
+        <dependency>
+            <groupId>org.apache.httpcomponents.client5</groupId>
+            <artifactId>httpclient5</artifactId>
+            <version>5.2.1</version>
+        </dependency>
     </dependencies>
 
     <build>

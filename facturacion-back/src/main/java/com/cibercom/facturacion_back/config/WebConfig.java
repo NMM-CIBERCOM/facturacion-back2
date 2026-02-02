@@ -13,7 +13,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 import java.util.Arrays;
 import java.util.List;
 
-@Configuration
+// @Configuration  // Temporalmente deshabilitado - CORS se maneja en SecurityConfig
 public class WebConfig {
 
     @Value("${cors.allowed-origins:http://localhost:5173,http://localhost:5174}")
@@ -33,7 +33,11 @@ public class WebConfig {
                 
                 registry.addMapping("/**")
                         .allowedOrigins(originsArray)
-                        .allowedMethods("*");
+                        .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
+                        .allowedHeaders("*")
+                        .allowCredentials(true)
+                        .exposedHeaders("Authorization", "Content-Type")
+                        .maxAge(3600);
             }
         };
     }

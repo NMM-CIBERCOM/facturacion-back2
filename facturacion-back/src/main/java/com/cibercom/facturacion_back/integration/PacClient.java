@@ -29,9 +29,26 @@ import javax.xml.parsers.DocumentBuilderFactory;
 import org.w3c.dom.Document;
 import org.w3c.dom.NodeList;
 import org.w3c.dom.Element;
-import java.io.InputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
+import org.apache.hc.client5.http.classic.methods.HttpPost;
+import org.apache.hc.client5.http.config.RequestConfig;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.client5.http.impl.routing.DefaultRoutePlanner;
+import org.apache.hc.client5.http.routing.HttpRoutePlanner;
+import org.apache.hc.client5.http.HttpRoute;
+import org.apache.hc.client5.http.socket.ConnectionSocketFactory;
+import org.apache.hc.client5.http.socket.PlainConnectionSocketFactory;
+import org.apache.hc.client5.http.ssl.SSLConnectionSocketFactory;
+import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
+import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
+import org.apache.hc.core5.http.io.entity.StringEntity;
+import org.apache.hc.core5.util.Timeout;
+import org.apache.hc.core5.http.HttpHost;
+import org.apache.hc.core5.http.protocol.HttpContext;
+import javax.net.SocketFactory;
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 
 /**
  * Cliente para timbrado con Finkok usando método stamp
@@ -40,6 +57,20 @@ import java.net.URL;
 @Component
 public class PacClient {
     private static final Logger logger = LoggerFactory.getLogger(PacClient.class);
+    
+    // Bloque estático para deshabilitar proxy ANTES de cualquier uso
+    static {
+        System.setProperty("java.net.useSystemProxies", "false");
+        System.setProperty("socksProxyHost", "");
+        System.setProperty("socksProxyPort", "");
+        System.setProperty("http.proxyHost", "");
+        System.setProperty("http.proxyPort", "");
+        System.setProperty("https.proxyHost", "");
+        System.setProperty("https.proxyPort", "");
+        System.setProperty("ftp.proxyHost", "");
+        System.setProperty("ftp.proxyPort", "");
+        logger.info("Propiedades de proxy deshabilitadas en bloque estático");
+    }
     
     @Value("${finkok.enabled:true}")
     private boolean finkokEnabled;
@@ -55,6 +86,21 @@ public class PacClient {
     
     @Value("${finkok.cancel.url:https://demo-facturacion.finkok.com/servicios/soap/cancel}")
     private String finkokCancelUrl;
+    
+    @Value("${finkok.connection.connect-timeout:30000}")
+    private int connectTimeout;
+    
+    @Value("${finkok.connection.read-timeout:120000}")
+    private int readTimeout;
+    
+    @Value("${finkok.connection.use-ipv4-only:false}")
+    private boolean useIpv4Only;
+    
+    @Value("${finkok.tunnel.enabled:false}")
+    private boolean tunnelEnabled;
+    
+    @Value("${finkok.tunnel.local-port:8443}")
+    private int tunnelLocalPort;
     
     @Value("${facturacion.csd.certificado.path:classpath:certificados/CSD.cer}")
     private String certificadoPath;
@@ -461,55 +507,133 @@ public class PacClient {
             endpointUrl = endpointUrl.replace(".wsdl", "");
         }
         
-        logger.info("Enviando request SOAP a: {}", endpointUrl);
-        
-        URL serviceUrl = new URL(endpointUrl);
-        HttpURLConnection connection = (HttpURLConnection) serviceUrl.openConnection();
-        connection.setRequestMethod("POST");
-        connection.setRequestProperty("Content-Type", "text/xml; charset=utf-8");
-        connection.setRequestProperty("SOAPAction", "http://facturacion.finkok.com/stamp/stamp");
-        connection.setDoOutput(true);
-        connection.setDoInput(true);
-        
-        // Enviar request
-        connection.getOutputStream().write(soapRequest.getBytes(StandardCharsets.UTF_8));
-        
-        // Leer respuesta
-        int responseCode = connection.getResponseCode();
-        String soapResponse;
-        
-        if (responseCode >= 400) {
-            InputStream errorStream = connection.getErrorStream();
-            if (errorStream != null) {
-                ByteArrayOutputStream errorBaos = new ByteArrayOutputStream();
-                byte[] buffer = new byte[1024];
-                int length;
-                while ((length = errorStream.read(buffer)) != -1) {
-                    errorBaos.write(buffer, 0, length);
-                }
-                soapResponse = errorBaos.toString(StandardCharsets.UTF_8);
-                logger.error("Error HTTP {}: {}", responseCode, soapResponse);
-            } else {
-                soapResponse = "Error HTTP " + responseCode;
+        // Si el túnel SSH está habilitado, usar localhost:8443 en lugar de la URL directa
+        if (tunnelEnabled) {
+            // Reemplazar la URL de Finkok con localhost:puerto del túnel
+            try {
+                java.net.URL originalUrl = new java.net.URL(endpointUrl);
+                endpointUrl = String.format("https://localhost:%d%s", tunnelLocalPort, originalUrl.getPath());
+                logger.info("Túnel SSH habilitado - Usando túnel local: {}", endpointUrl);
+            } catch (Exception e) {
+                logger.warn("Error al construir URL del túnel, usando URL original: {}", e.getMessage());
             }
-            throw new Exception("Error HTTP " + responseCode + ": " + soapResponse);
-        } else {
-            InputStream inputStream = connection.getInputStream();
-            ByteArrayOutputStream responseBaos = new ByteArrayOutputStream();
-            byte[] buffer = new byte[1024];
-            int length;
-            while ((length = inputStream.read(buffer)) != -1) {
-                responseBaos.write(buffer, 0, length);
-            }
-            soapResponse = responseBaos.toString(StandardCharsets.UTF_8);
         }
         
-        logger.info("=== SOAP RESPONSE ===");
-        logger.info("{}", soapResponse);
-        logger.info("=== FIN SOAP RESPONSE ===");
+        logger.info("Enviando request SOAP a: {}", endpointUrl);
         
-        connection.disconnect();
-        return soapResponse;
+        // Configurar IPv4 si está habilitado
+        if (useIpv4Only) {
+            System.setProperty("java.net.preferIPv4Stack", "true");
+            System.setProperty("java.net.preferIPv6Addresses", "false");
+            logger.info("Forzando uso de IPv4 solamente");
+        }
+        
+        // Deshabilitar TODA detección automática de proxy (HTTP, HTTPS, SOCKS)
+        // IMPORTANTE: Estas propiedades deben establecerse ANTES de crear el HttpClient
+        System.setProperty("java.net.useSystemProxies", "false");
+        System.setProperty("http.proxyHost", "");
+        System.setProperty("http.proxyPort", "");
+        System.setProperty("https.proxyHost", "");
+        System.setProperty("https.proxyPort", "");
+        System.setProperty("socksProxyHost", "");
+        System.setProperty("socksProxyPort", "");
+        System.setProperty("socksNonProxyHosts", "*");
+        // Forzar que NO use proxy SOCKS a nivel de JVM
+        System.setProperty("java.net.socks.username", "");
+        System.setProperty("java.net.socks.password", "");
+        
+        // Crear un RoutePlanner personalizado que NUNCA use proxy
+        // Esto evita que HttpClient detecte proxies automáticamente
+        HttpRoutePlanner noProxyRoutePlanner = new HttpRoutePlanner() {
+            @Override
+            public HttpRoute determineRoute(
+                    HttpHost target, HttpContext context) {
+                // Asegurar que el puerto esté correctamente establecido
+                int port = target.getPort();
+                if (port < 0) {
+                    // Si no hay puerto explícito, usar el puerto por defecto del esquema
+                    String schemeName = target.getSchemeName();
+                    if ("https".equalsIgnoreCase(schemeName)) {
+                        port = 443;
+                    } else if ("http".equalsIgnoreCase(schemeName)) {
+                        port = 80;
+                    } else {
+                        port = 443; // Por defecto HTTPS
+                    }
+                    // Crear un nuevo HttpHost con el puerto correcto
+                    HttpHost targetWithPort = new HttpHost(target.getSchemeName(), target.getHostName(), port);
+                    // Siempre retornar ruta directa sin proxy
+                    return new HttpRoute(targetWithPort);
+                }
+                // Si el puerto ya está establecido, usar el target original
+                return new HttpRoute(target);
+            }
+        };
+        
+        // Usar Apache HttpClient con configuración explícita SIN proxy
+        RequestConfig requestConfig = RequestConfig.custom()
+            .setConnectTimeout(Timeout.ofMilliseconds(connectTimeout))
+            .setResponseTimeout(Timeout.ofMilliseconds(readTimeout))
+            .setConnectionRequestTimeout(Timeout.ofMilliseconds(connectTimeout))
+            .build();
+        
+        // Configurar HttpClient sin proxy de ninguna clase
+        // El RoutePlanner personalizado asegura que nunca se use proxy
+        CloseableHttpClient httpClient = HttpClients.custom()
+            .setDefaultRequestConfig(requestConfig)
+            .setRoutePlanner(noProxyRoutePlanner)
+            .disableAutomaticRetries()
+            .build();
+        
+        try {
+            HttpPost httpPost = new HttpPost(endpointUrl);
+            httpPost.setHeader("Content-Type", "text/xml; charset=utf-8");
+            httpPost.setHeader("SOAPAction", "http://facturacion.finkok.com/stamp/stamp");
+            httpPost.setEntity(new StringEntity(soapRequest, StandardCharsets.UTF_8));
+            
+            logger.info("Conexión usando Apache HttpClient (sin proxy automático)");
+            
+            return httpClient.execute(httpPost, response -> {
+                try {
+                    int statusCode = response.getCode();
+                    String responseBody = new String(response.getEntity().getContent().readAllBytes(), StandardCharsets.UTF_8);
+                    
+                    if (statusCode >= 400) {
+                        logger.error("Error HTTP {} desde Finkok: {}", statusCode, responseBody);
+                        throw new RuntimeException("Error HTTP " + statusCode + " desde Finkok: " + responseBody);
+                    }
+                    
+                    logger.debug("Respuesta recibida de Finkok: {} caracteres", responseBody.length());
+                    return responseBody;
+                } catch (IOException e) {
+                    throw new RuntimeException("Error leyendo respuesta de Finkok", e);
+                }
+            });
+        } catch (IOException e) {
+            logger.error("═══════════════════════════════════════════════════════════════");
+            logger.error("✗✗✗ ERROR DE CONEXIÓN CON FINKOK ✗✗✗");
+            logger.error("═══════════════════════════════════════════════════════════════");
+            logger.error("No se pudo establecer conexión con: {}", endpointUrl);
+            logger.error("Error: {}", e.getMessage());
+            logger.error("");
+            logger.error("POSIBLES CAUSAS:");
+            logger.error("1. Firewall bloqueando conexiones HTTPS salientes desde el servidor");
+            logger.error("2. Problemas de conectividad de red desde el servidor");
+            logger.error("3. Finkok temporalmente no disponible");
+            logger.error("4. Verificar conectividad de red");
+            logger.error("");
+            logger.error("SOLUCIONES:");
+            logger.error("1. Verifica conectividad desde el servidor:");
+            logger.error("   curl -v https://demo-facturacion.finkok.com/servicios/soap/stamp");
+            logger.error("2. Verifica reglas de firewall para permitir HTTPS saliente (puerto 443)");
+            logger.error("3. Verificar firewall y reglas de red del servidor");
+            logger.error("4. Verifica que el servidor tenga acceso a Internet");
+            logger.error("═══════════════════════════════════════════════════════════════");
+            throw new Exception("Error de conexión con Finkok: " + e.getMessage() + 
+                ". Verifica conectividad de red y firewall desde el servidor.", e);
+        } finally {
+            httpClient.close();
+        }
     }
     
     /**
@@ -1164,53 +1288,114 @@ public class PacClient {
             endpointUrl = endpointUrl.replace(".wsdl", "");
         }
         
-        logger.info("Enviando request SOAP de cancelación a: {}", endpointUrl);
-        
-        URL serviceUrl = new URL(endpointUrl);
-        HttpURLConnection connection = (HttpURLConnection) serviceUrl.openConnection();
-        connection.setRequestMethod("POST");
-        connection.setRequestProperty("Content-Type", "text/xml; charset=utf-8");
-        connection.setRequestProperty("SOAPAction", "cancel");
-        connection.setDoOutput(true);
-        connection.setDoInput(true);
-        
-        connection.getOutputStream().write(soapRequest.getBytes(StandardCharsets.UTF_8));
-        
-        int responseCode = connection.getResponseCode();
-        String soapResponse;
-        
-        if (responseCode >= 400) {
-            InputStream errorStream = connection.getErrorStream();
-            if (errorStream != null) {
-                ByteArrayOutputStream errorBaos = new ByteArrayOutputStream();
-                byte[] buffer = new byte[1024];
-                int length;
-                while ((length = errorStream.read(buffer)) != -1) {
-                    errorBaos.write(buffer, 0, length);
-                }
-                soapResponse = errorBaos.toString(StandardCharsets.UTF_8);
-                logger.error("Error HTTP {}: {}", responseCode, soapResponse);
-            } else {
-                soapResponse = "Error HTTP " + responseCode;
+        // Si el túnel SSH está habilitado, usar localhost:8443 en lugar de la URL directa
+        if (tunnelEnabled) {
+            // Reemplazar la URL de Finkok con localhost:puerto del túnel
+            try {
+                java.net.URL originalUrl = new java.net.URL(endpointUrl);
+                endpointUrl = String.format("https://localhost:%d%s", tunnelLocalPort, originalUrl.getPath());
+                logger.info("Túnel SSH habilitado - Usando túnel local para cancelación: {}", endpointUrl);
+            } catch (Exception e) {
+                logger.warn("Error al construir URL del túnel, usando URL original: {}", e.getMessage());
             }
-            throw new Exception("Error HTTP " + responseCode + ": " + soapResponse);
-        } else {
-            InputStream inputStream = connection.getInputStream();
-            ByteArrayOutputStream responseBaos = new ByteArrayOutputStream();
-            byte[] buffer = new byte[1024];
-            int length;
-            while ((length = inputStream.read(buffer)) != -1) {
-                responseBaos.write(buffer, 0, length);
-            }
-            soapResponse = responseBaos.toString(StandardCharsets.UTF_8);
         }
         
-        logger.info("=== SOAP RESPONSE (cancel) ===");
-        logger.info("{}", soapResponse);
-        logger.info("=== FIN SOAP RESPONSE ===");
+        logger.info("Enviando request SOAP de cancelación a: {}", endpointUrl);
         
-        connection.disconnect();
-        return soapResponse;
+        // Configurar IPv4 si está habilitado
+        if (useIpv4Only) {
+            System.setProperty("java.net.preferIPv4Stack", "true");
+            System.setProperty("java.net.preferIPv6Addresses", "false");
+        }
+        
+        // Deshabilitar TODA detección automática de proxy (HTTP, HTTPS, SOCKS)
+        // IMPORTANTE: Estas propiedades deben establecerse ANTES de crear el HttpClient
+        System.setProperty("java.net.useSystemProxies", "false");
+        System.setProperty("http.proxyHost", "");
+        System.setProperty("http.proxyPort", "");
+        System.setProperty("https.proxyHost", "");
+        System.setProperty("https.proxyPort", "");
+        System.setProperty("socksProxyHost", "");
+        System.setProperty("socksProxyPort", "");
+        System.setProperty("socksNonProxyHosts", "*");
+        // Forzar que NO use proxy SOCKS a nivel de JVM
+        System.setProperty("java.net.socks.username", "");
+        System.setProperty("java.net.socks.password", "");
+        
+        // Crear un RoutePlanner personalizado que NUNCA use proxy
+        // Esto evita que HttpClient detecte proxies automáticamente
+        HttpRoutePlanner noProxyRoutePlanner = new HttpRoutePlanner() {
+            @Override
+            public HttpRoute determineRoute(
+                    HttpHost target, HttpContext context) {
+                // Asegurar que el puerto esté correctamente establecido
+                int port = target.getPort();
+                if (port < 0) {
+                    // Si no hay puerto explícito, usar el puerto por defecto del esquema
+                    String schemeName = target.getSchemeName();
+                    if ("https".equalsIgnoreCase(schemeName)) {
+                        port = 443;
+                    } else if ("http".equalsIgnoreCase(schemeName)) {
+                        port = 80;
+                    } else {
+                        port = 443; // Por defecto HTTPS
+                    }
+                    // Crear un nuevo HttpHost con el puerto correcto
+                    HttpHost targetWithPort = new HttpHost(target.getSchemeName(), target.getHostName(), port);
+                    // Siempre retornar ruta directa sin proxy
+                    return new HttpRoute(targetWithPort);
+                }
+                // Si el puerto ya está establecido, usar el target original
+                return new HttpRoute(target);
+            }
+        };
+        
+        // Usar Apache HttpClient con configuración explícita SIN proxy
+        RequestConfig requestConfig = RequestConfig.custom()
+            .setConnectTimeout(Timeout.ofMilliseconds(connectTimeout))
+            .setResponseTimeout(Timeout.ofMilliseconds(readTimeout))
+            .setConnectionRequestTimeout(Timeout.ofMilliseconds(connectTimeout))
+            .build();
+        
+        // Configurar HttpClient sin proxy de ninguna clase
+        // El RoutePlanner personalizado asegura que nunca se use proxy
+        CloseableHttpClient httpClient = HttpClients.custom()
+            .setDefaultRequestConfig(requestConfig)
+            .setRoutePlanner(noProxyRoutePlanner)
+            .disableAutomaticRetries()
+            .build();
+        
+        try {
+            HttpPost httpPost = new HttpPost(endpointUrl);
+            httpPost.setHeader("Content-Type", "text/xml; charset=utf-8");
+            httpPost.setHeader("SOAPAction", "cancel");
+            httpPost.setEntity(new StringEntity(soapRequest, StandardCharsets.UTF_8));
+            
+            logger.info("Conexión usando Apache HttpClient para cancelación (sin proxy automático)");
+            
+            return httpClient.execute(httpPost, response -> {
+                try {
+                    int statusCode = response.getCode();
+                    String responseBody = new String(response.getEntity().getContent().readAllBytes(), StandardCharsets.UTF_8);
+                    
+                    if (statusCode >= 400) {
+                        logger.error("Error HTTP {} desde Finkok (cancelación): {}", statusCode, responseBody);
+                        throw new RuntimeException("Error HTTP " + statusCode + " desde Finkok: " + responseBody);
+                    }
+                    
+                    logger.debug("Respuesta de cancelación recibida: {} caracteres", responseBody.length());
+                    return responseBody;
+                } catch (IOException e) {
+                    throw new RuntimeException("Error leyendo respuesta de cancelación de Finkok", e);
+                }
+            });
+        } catch (IOException e) {
+            logger.error("Error de conexión con Finkok (cancelación): {}", e.getMessage());
+            throw new Exception("Error de conexión con Finkok: " + e.getMessage() + 
+                ". Verifica conectividad de red y firewall desde el servidor.", e);
+        } finally {
+            httpClient.close();
+        }
     }
     
     /**

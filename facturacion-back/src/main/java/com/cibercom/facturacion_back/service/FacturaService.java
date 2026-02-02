@@ -2028,6 +2028,10 @@ public class FacturaService {
             datosFactura.put("subtotal", factura.getSubtotal());
             datosFactura.put("iva", factura.getIva());
             datosFactura.put("total", factura.getTotal());
+            if (factura.getUuidOrig() != null && !factura.getUuidOrig().trim().isEmpty()) {
+                datosFactura.put("tipoDocumento", "Refactura");
+                datosFactura.put("uuidCfdiRelacionado", factura.getUuidOrig().trim());
+            }
 
             // Intentar extraer conceptos del XML timbrado primero (contiene todos los datos del catálogo)
             List<Map<String, Object>> conceptos = null;
@@ -2185,6 +2189,10 @@ public class FacturaService {
             datosFactura.put("subtotal", factura.getSubtotal());
             datosFactura.put("iva", factura.getIva());
             datosFactura.put("total", factura.getTotal());
+            if (factura.getUuidOrig() != null && !factura.getUuidOrig().trim().isEmpty()) {
+                datosFactura.put("tipoDocumento", "Refactura");
+                datosFactura.put("uuidCfdiRelacionado", factura.getUuidOrig().trim());
+            }
 
             // Para Carta Porte, NO extraer conceptos (se usa el diseño específico agregarSeccionCartaPorte)
             if (!esCartaPorte) {
@@ -3339,6 +3347,12 @@ public class FacturaService {
             datosFactura.put("iva", iva);
             datosFactura.put("total", total);
             datosFactura.put("conceptos", conceptos);
+            if (request.getTipoDocumento() != null && !request.getTipoDocumento().trim().isEmpty()) {
+                datosFactura.put("tipoDocumento", request.getTipoDocumento().trim());
+            }
+            if (request.getUuidCfdiRelacionado() != null && !request.getUuidCfdiRelacionado().trim().isEmpty()) {
+                datosFactura.put("uuidCfdiRelacionado", request.getUuidCfdiRelacionado().trim());
+            }
 
             // Generar PDF
             byte[] pdfBytes = iTextPdfService.generarPdfConLogo(datosFactura, logoConfig != null ? logoConfig : new HashMap<>());

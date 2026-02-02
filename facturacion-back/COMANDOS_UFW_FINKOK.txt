@@ -1,0 +1,23 @@
+# Comandos para permitir conexiones HTTPS salientes a Finkok
+# Ejecutar en la terminal de WinSCP
+
+# 1. Verificar política de salida por defecto
+sudo ufw status verbose
+
+# 2. Permitir conexiones HTTPS salientes (puerto 443)
+sudo ufw allow out 443/tcp
+
+# 3. Verificar que se agregó la regla
+sudo ufw status numbered
+
+# 4. Probar conectividad
+curl -v --max-time 10 https://demo-facturacion.finkok.com/servicios/soap/stamp
+
+# 5. Si aún no funciona, verificar política de salida
+sudo ufw status | grep "Default:"
+
+# Si la política de salida es DENY, cambiarla a ALLOW:
+sudo ufw default allow outgoing
+
+# Luego verificar de nuevo
+curl -v --max-time 10 https://demo-facturacion.finkok.com/servicios/soap/stamp

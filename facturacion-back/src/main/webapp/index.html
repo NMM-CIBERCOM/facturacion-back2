@@ -1,0 +1,78 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="images/cibercom-logo.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cibercom Facturación</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              primary: 'var(--color-primary)',
+              'primary-dark': 'var(--color-primary-dark)',
+              secondary: 'var(--color-secondary)',
+              'secondary-dark': 'var(--color-secondary-dark)',
+              accent: 'var(--color-accent)',
+              'accent-dark': 'var(--color-accent-dark)',
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      :root {
+        --color-primary: #1d4ed8; /* blue-700 */
+        --color-primary-dark: #1e40af; /* blue-800 */
+        --color-secondary: #3b82f6; /* blue-500 */
+        --color-secondary-dark: #2563eb; /* blue-600 */
+        --color-accent: #06b6d4; /* cyan-500 */
+        --color-accent-dark: #0891b2; /* cyan-600 */
+      }
+      /* Basic scrollbar styling for better aesthetics */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #f1f1f1;
+      }
+      .dark ::-webkit-scrollbar-track {
+        background: #2d3748; /* gray-800 */
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #888;
+        border-radius: 4px;
+      }
+      .dark ::-webkit-scrollbar-thumb {
+        background: #555;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #555;
+      }
+      .dark ::-webkit-scrollbar-thumb:hover {
+        background: #777;
+      }
+    </style>
+    <!-- html2pdf bundle (incluye html2canvas y jsPDF) para descarga directa del PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@^19.1.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.1.0/",
+    "react/": "https://esm.sh/react@^19.1.0/"
+  }
+}
+</script>
+  <script type="module" crossorigin src="/facturacion-backend/assets/index-8WBuBtS6.js"></script>
+</head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

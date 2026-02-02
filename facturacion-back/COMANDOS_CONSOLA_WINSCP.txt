@@ -1,0 +1,77 @@
+# Comandos para la consola de WinSCP
+# ==================================
+# 1. Conectarte: abre WinSCP, sesión con tu servidor (SFTP/SCP).
+# 2. Abrir consola: menú Commands → Open Terminal (o atajo Ctrl+P).
+# 3. Copia y pega los comandos UNO POR UNO según lo que necesites.
+
+
+# --- ACTIVAR PERFIL PROD (Oracle) - Para corregir "Connection refused localhost 1521" ---
+# Crear o editar setenv.sh para que Tomcat use el perfil prod (Oracle en 174.136.25.157):
+
+sudo bash -c 'cat > /opt/tomcat/bin/setenv.sh << "EOF"
+#!/bin/sh
+# Perfil de Spring: prod usa Oracle en 174.136.25.157, no localhost
+export JAVA_OPTS="$JAVA_OPTS -Dspring.profiles.active=prod,oracle"
+
+# Deshabilitar proxy automático de Java (opcional, si daba problemas con Finkok)
+export JAVA_OPTS="$JAVA_OPTS -Djava.net.useSystemProxies=false"
+export JAVA_OPTS="$JAVA_OPTS -DsocksProxyHost="
+export JAVA_OPTS="$JAVA_OPTS -Dhttp.proxyHost="
+export JAVA_OPTS="$JAVA_OPTS -Dhttps.proxyHost="
+
+# Forzar IPv4
+export JAVA_OPTS="$JAVA_OPTS -Djava.net.preferIPv4Stack=true"
+EOF'
+
+sudo chmod +x /opt/tomcat/bin/setenv.sh
+cat /opt/tomcat/bin/setenv.sh
+
+
+# --- REINICIAR TOMCAT ---
+
+sudo systemctl restart tomcat
+
+# Si no usa systemctl:
+# sudo /etc/init.d/tomcat restart
+
+
+# --- VER ESTADO DE TOMCAT ---
+
+sudo systemctl status tomcat
+
+
+# --- VER ÚLTIMAS LÍNEAS DEL LOG (errores de login / Oracle) ---
+
+sudo tail -100 /opt/tomcat/logs/catalina.out
+
+# O solo las líneas con "Error" o "Oracle":
+# sudo tail -200 /opt/tomcat/logs/catalina.out | grep -i -E "error|oracle|connection|1521"
+
+
+# --- VER SI HAY setenv.sh Y QUÉ CONTIENE ---
+
+cat /opt/tomcat/bin/setenv.sh
+
+
+# --- DIAGNÓSTICO DE RED (Finkok, DNS, firewall) ---
+
+# Conectividad a Finkok
+curl -v --max-time 10 https://demo-facturacion.finkok.com/servicios/soap/stamp
+
+# DNS
+nslookup demo-facturacion.finkok.com
+
+# Puerto 443
+timeout 5 bash -c "</dev/tcp/demo-facturacion.finkok.com/443" && echo "Puerto 443 OK" || echo "Puerto 443 NO"
+
+# Firewall
+sudo iptables -L OUTPUT -n -v | grep -E "(443|REJECT|DROP)"
+
+# Internet
+ping -c 3 8.8.8.8
+
+
+# --- RUTA DE TOMCAT ---
+# Si Tomcat no está en /opt/tomcat, cambia las rutas. Para ver dónde está:
+# ps aux | grep tomcat
+# ls /opt/tomcat 2>/dev/null || ls /usr/share/tomcat* 2>/dev/null

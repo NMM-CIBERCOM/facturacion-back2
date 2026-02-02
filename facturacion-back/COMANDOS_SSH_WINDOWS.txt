@@ -1,0 +1,13 @@
+# Comandos SSH para Windows PowerShell/CMD
+
+# Opción 1: SSH con algoritmos compatibles (PowerShell)
+ssh -o KexAlgorithms=+diffie-hellman-group-exchange-sha1 -o HostKeyAlgorithms=+ssh-rsa root@72.62.128.98
+
+# Opción 2: SSH con más opciones de compatibilidad
+ssh -o KexAlgorithms=diffie-hellman-group-exchange-sha1,diffie-hellman-group14-sha1,diffie-hellman-group1-sha1 -o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedKeyTypes=+ssh-rsa root@72.62.128.98
+
+# Opción 3: Si tienes OpenSSH antiguo, usar PuTTY o WinSCP
+# WinSCP ya lo tienes instalado, úsalo para conectarte y ejecutar comandos
+
+# Opción 4: Usar WSL (Windows Subsystem for Linux) si lo tienes instalado
+wsl ssh root@72.62.128.98

@@ -1,0 +1,19 @@
+# Comandos para ejecutar en la terminal de WinSCP
+# 1. Conéctate por WinSCP al servidor
+# 2. Abre terminal: Commands → Open Terminal (o Ctrl+P)
+# 3. Ejecuta estos comandos:
+
+# Verificar conectividad básica
+curl -v --max-time 10 https://demo-facturacion.finkok.com/servicios/soap/stamp
+
+# Verificar DNS
+nslookup demo-facturacion.finkok.com
+
+# Verificar puerto 443
+timeout 5 bash -c "</dev/tcp/demo-facturacion.finkok.com/443" && echo "Puerto 443 accesible" || echo "Puerto 443 NO accesible"
+
+# Verificar firewall
+sudo iptables -L OUTPUT -n -v | grep -E "(443|REJECT|DROP)"
+
+# Verificar acceso a Internet
+ping -c 3 8.8.8.8

@@ -238,6 +238,7 @@ public class ITextPdfService {
             if (tieneNomina(factura)) {
                 tituloTexto = "RECIBO DE NÓMINA";
             } else {
+                String tipoDocumento = getString(factura, "tipoDocumento", "").trim();
                 String tipoComprobante = getString(factura, "tipoComprobante", "").toUpperCase();
                 switch (tipoComprobante) {
                     case "I" -> tituloTexto = "COMPROBANTE DE INGRESO";
@@ -246,6 +247,9 @@ public class ITextPdfService {
                     case "R" -> tituloTexto = "COMPROBANTE DE RETENCIÓN DE PAGOS";
                     case "P" -> tituloTexto = "COMPLEMENTO DE PAGO";
                     default -> tituloTexto = "FACTURA ELECTRÓNICA";
+                }
+                if ("Refactura".equalsIgnoreCase(tipoDocumento)) {
+                    tituloTexto = tituloTexto + " - REFACTURA";
                 }
             }
             Paragraph titulo = new Paragraph(tituloTexto)
@@ -603,6 +607,16 @@ public class ITextPdfService {
                 .setMarginTop(8)
                 .setCharacterSpacing(0.3f);
             document.add(conceptosTitulo);
+            
+            // Si es refactura, mostrar UUID CFDI relacionado
+            String uuidCfdiRelacionado = getString(facturaData, "uuidCfdiRelacionado", "").trim();
+            if (!uuidCfdiRelacionado.isEmpty()) {
+                Paragraph uuidRelacionadoP = new Paragraph("UUID CFDI relacionado: " + uuidCfdiRelacionado)
+                    .setFontSize(8)
+                    .setFontColor(new DeviceRgb(75, 85, 99))
+                    .setMarginBottom(6);
+                document.add(uuidRelacionadoP);
+            }
             
             // Crear tabla de conceptos con columnas adicionales para campos del catálogo
             // Columnas: Cant, Unidad, Descripción, ClaveProdServ, P.Unit, Importe, IVA, TasaIVA

@@ -1,0 +1,44 @@
+COMANDOS PARA EJECUTAR EN TERMINAL DE WINSCP
+=============================================
+
+Copia y pega estos comandos UNO POR UNO en la terminal de WinSCP:
+
+1. Crear el archivo setenv.sh:
+
+sudo bash -c 'cat > /opt/tomcat/bin/setenv.sh << "EOF"
+#!/bin/sh
+# Deshabilitar completamente proxy automático de Java
+export JAVA_OPTS="$JAVA_OPTS -Djava.net.useSystemProxies=false"
+export JAVA_OPTS="$JAVA_OPTS -DsocksProxyHost="
+export JAVA_OPTS="$JAVA_OPTS -DsocksProxyPort="
+export JAVA_OPTS="$JAVA_OPTS -Dhttp.proxyHost="
+export JAVA_OPTS="$JAVA_OPTS -Dhttp.proxyPort="
+export JAVA_OPTS="$JAVA_OPTS -Dhttps.proxyHost="
+export JAVA_OPTS="$JAVA_OPTS -Dhttps.proxyPort="
+export JAVA_OPTS="$JAVA_OPTS -Dftp.proxyHost="
+export JAVA_OPTS="$JAVA_OPTS -Dftp.proxyPort="
+
+# Forzar IPv4
+export JAVA_OPTS="$JAVA_OPTS -Djava.net.preferIPv4Stack=true"
+export JAVA_OPTS="$JAVA_OPTS -Djava.net.preferIPv6Addresses=false"
+EOF'
+
+2. Dar permisos de ejecución:
+
+sudo chmod +x /opt/tomcat/bin/setenv.sh
+
+3. Verificar que se creó correctamente:
+
+cat /opt/tomcat/bin/setenv.sh
+
+4. Reiniciar Tomcat:
+
+sudo systemctl restart tomcat
+
+O si systemctl no funciona:
+
+sudo /etc/init.d/tomcat restart
+
+5. Verificar que Tomcat está corriendo:
+
+sudo systemctl status tomcat

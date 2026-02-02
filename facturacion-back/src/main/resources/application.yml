@@ -1,11 +1,12 @@
 # ============================================================================
 # CONFIGURACIÓN BASE - Valores comunes para todos los perfiles
-# Perfil activo por defecto: prod,oracle (servidor de producción)
-# Para desarrollo local, usar: --spring.profiles.active=dev,oracle
+# Perfil activo por defecto: local,oracle (Oracle en tu PC).
+# Servidor (Oracle en Docker): --spring.profiles.active=dev,oracle
+# Producción (Oracle remoto): --spring.profiles.active=prod,oracle
 # ============================================================================
 spring:
   profiles:
-    active: prod,oracle
+    active: local,oracle
   servlet:
     multipart:
       max-file-size: 10MB
@@ -36,7 +37,8 @@ app:
     # You can override with environment variable LOGS_BASE_DIR.
     # Example (Linux): /var/log/myapp
     # Example (Windows): C:/cibercom/logs
-    base-dir: "${LOGS_BASE_DIR:C:/cibercom/logs}"
+    # Por defecto usa Linux, pero puede sobrescribirse con variable de entorno
+    base-dir: "${LOGS_BASE_DIR:/var/log/facturacion}"
     # Allow clients to pass ?baseDir=... in requests (dev convenience)
     allow-request-base: ${ALLOW_REQUEST_BASE:true}
 
@@ -93,20 +95,86 @@ finkok:
     url: https://demo-facturacion.finkok.com/servicios/soap/cancel
   retentions:
     url: https://demo-facturacion.finkok.com/servicios/soap/retentions
+  # Configuración de proxy (opcional - descomentar y configurar si necesitas proxy)
+  # proxy:
+  #   enabled: false
+  #   host: proxy.example.com
+  #   port: 8080
+  # Configuración avanzada de conexión
+  connection:
+    connect-timeout: 15000  # 15 segundos (reducido para fallar más rápido si hay problemas de red)
+    read-timeout: 30000     # 30 segundos (reducido para fallar más rápido)
+    use-ipv4-only: true     # Forzar IPv4 para evitar problemas con IPv6
+    follow-redirects: true  # Seguir redirecciones
+  # Configuración de túnel SSH (para evitar bloqueos de firewall)
+  tunnel:
+    enabled: false          # Habilitar si usas túnel SSH (ver SOLUCION_TUNEL_SSH.md)
+    local-port: 8443        # Puerto local del túnel SSH
+    # Cuando tunnel.enabled=true, las URLs se cambian automáticamente a localhost:8443
 
 # ============================================================================
-# PERFIL: DESARROLLO (dev) - Configuración para desarrollo local
+# PERFIL: LOCAL (local) - Al correr en tu PC, conecta al Oracle del servidor 72.
+# Si tuvieras Oracle en tu PC, cambia la url a localhost:1521/XEPDB1.
+# ============================================================================
+---
+spring:
+  config:
+    activate:
+      on-profile: local
+  datasource:
+    # Oracle en el servidor 72 (Docker). El puerto 1521 debe estar accesible desde tu red.
+    url: jdbc:oracle:thin:@//72.62.128.98:1521/XEPDB1
+    username: nick
+    password: password123
+    driver-class-name: oracle.jdbc.OracleDriver
+    hikari:
+      connection-timeout: 30000
+      maximum-pool-size: 10
+      minimum-idle: 2
+      max-lifetime: 1800000
+      idle-timeout: 600000
+      validation-timeout: 5000
+      leak-detection-threshold: 60000
+      initialization-fail-timeout: -1
+      connection-test-query: SELECT 1 FROM DUAL
+      keepalive-time: 300000
+  jpa:
+    properties:
+      hibernate.dialect: org.hibernate.dialect.OracleDialect
+      hibernate.temp.use_jdbc_metadata_defaults: false
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+  show-sql: true
+server:
+  port: 8080
+  base-url: http://localhost:8080
+cors:
+  allowed-origins: http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174
+finkok:
+  enabled: true
+  username: nm9282672@gmail.com
+  password: N1C0LASm_
+  stamp:
+    url: https://demo-facturacion.finkok.com/servicios/soap/stamp
+  cancel:
+    url: https://demo-facturacion.finkok.com/servicios/soap/cancel
+  retentions:
+    url: https://demo-facturacion.finkok.com/servicios/soap/retentions
+
+# ============================================================================
+# PERFIL: DEV (dev) - Oracle en Docker en el servidor 72 (Tomcat usa este)
 # ============================================================================
 ---
 spring:
   config:
     activate:
       on-profile: dev
-  # Base de datos Oracle para desarrollo
+  # Base de datos Oracle para desarrollo en servidor (Docker)
   datasource:
-    url: jdbc:oracle:thin:@//localhost:1521/xepdb1
+    url: jdbc:oracle:thin:@//localhost:1521/XEPDB1
     username: nick
-    password: N1C0LASm
+    password: password123
     driver-class-name: oracle.jdbc.OracleDriver
     # Configuración del pool de conexiones (HikariCP)
     hikari:
@@ -137,6 +205,7 @@ spring:
 # Servidor para desarrollo local
 server:
   port: 8080
+  # Sin context-path en desarrollo (Spring Boot embebido)
   base-url: http://localhost:8080
 
 # URLs permitidas para CORS (desarrollo) - separadas por comas
@@ -191,11 +260,16 @@ spring:
 # Servidor para producción
 server:
   port: 8080
-  base-url: http://174.136.25.157:8080
+  servlet:
+    # Context path del WAR en Tomcat (debe coincidir con el nombre del WAR sin extensión)
+    # Si el WAR se llama facturacion-backend.war, el context-path será /facturacion-backend
+    context-path: /facturacion-backend
+  base-url: http://72.62.128.98:8080
 
 # URLs permitidas para CORS (producción) - separadas por comas
+# Como el frontend estará en el mismo servidor, permitir el mismo dominio
 cors:
-  allowed-origins: http://174.136.25.157:5173,http://174.136.25.157:5174,http://localhost:5173,http://localhost:5174
+  allowed-origins: http://72.62.128.98:8080,http://localhost:8080,http://localhost:5173,http://localhost:5174
 
 # Finkok en producción (puede usar demo o producción según necesidad)
 finkok:
@@ -204,6 +278,12 @@ finkok:
   password: N1C0LASm_
   stamp:
     url: https://demo-facturacion.finkok.com/servicios/soap/stamp
+  # Configuración de conexión
+  connection:
+    connect-timeout: 60000  # 60 segundos
+    read-timeout: 180000    # 180 segundos
+    use-ipv4-only: true     # Forzar IPv4
+    follow-redirects: true   # Seguir redirecciones
   cancel:
     url: https://demo-facturacion.finkok.com/servicios/soap/cancel
   retentions:

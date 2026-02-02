@@ -1,0 +1,43 @@
+================================================================================
+LOG - ERROR DE CONEXION FINKOK (TIMEOUT) - PARA CAPTURA
+================================================================================
+Solo se quitaron emojis y caracteres especiales. Contenido del backend.
+================================================================================
+
+2026-01-25T07:31:16.848Z  INFO  PacClient: === INICIANDO TIMBRADO CON FINKOK ===
+2026-01-25T07:31:16.848Z  INFO  PacClient: URL: https://demo-facturacion.finkok.com/servicios/soap/stamp, UUID: null, Tipo: INGRESO
+2026-01-25T07:31:17.557Z  INFO  PacClient: Enviando request SOAP a: https://demo-facturacion.finkok.com/servicios/soap/stamp
+2026-01-25T07:31:17.557Z  INFO  PacClient: Forzando uso de IPv4 solamente
+2026-01-25T07:31:17.675Z  INFO  PacClient: Conexion usando Apache HttpClient (sin proxy automatico)
+
+--- (transcurren ~60 segundos; la conexion espera y hace timeout) ---
+
+2026-01-25T07:32:17.859Z ERROR PacClient: ----------------------------------------------------------------------
+2026-01-25T07:32:17.859Z ERROR PacClient: ERROR DE CONEXION CON FINKOK
+2026-01-25T07:32:17.859Z ERROR PacClient: ----------------------------------------------------------------------
+2026-01-25T07:32:17.859Z ERROR PacClient: No se pudo establecer conexion con: https://demo-facturacion.finkok.com/servicios/soap/stamp
+2026-01-25T07:32:17.859Z ERROR PacClient: Error: Connect to https://demo-facturacion.finkok.com:443 [demo-facturacion.finkok.com/69.160.41.169] failed: Connect timed out
+2026-01-25T07:32:17.859Z ERROR PacClient:
+2026-01-25T07:32:17.859Z ERROR PacClient: POSIBLES CAUSAS:
+2026-01-25T07:32:17.859Z ERROR PacClient: 1. Firewall bloqueando conexiones HTTPS salientes desde el servidor
+2026-01-25T07:32:17.859Z ERROR PacClient: 2. Problemas de conectividad de red desde el servidor
+2026-01-25T07:32:17.859Z ERROR PacClient: 3. Finkok temporalmente no disponible
+2026-01-25T07:32:17.859Z ERROR PacClient: 4. Verificar conectividad de red
+2026-01-25T07:32:17.859Z ERROR PacClient:
+2026-01-25T07:32:17.859Z ERROR PacClient: SOLUCIONES:
+2026-01-25T07:32:17.859Z ERROR PacClient: 1. Verifica conectividad desde el servidor:
+2026-01-25T07:32:17.859Z ERROR PacClient:    curl -v https://demo-facturacion.finkok.com/servicios/soap/stamp
+2026-01-25T07:32:17.859Z ERROR PacClient: 2. Verifica reglas de firewall para permitir HTTPS saliente (puerto 443)
+2026-01-25T07:32:17.859Z ERROR PacClient: 3. Verificar firewall y reglas de red del servidor
+2026-01-25T07:32:17.859Z ERROR PacClient: 4. Verifica que el servidor tenga acceso a Internet
+2026-01-25T07:32:17.859Z ERROR PacClient: ----------------------------------------------------------------------
+
+Caused by: org.apache.hc.client5.http.ConnectTimeoutException: Connect to https://demo-facturacion.finkok.com:443 [demo-facturacion.finkok.com/69.160.41.169] failed: Connect timed out
+
+================================================================================
+RESUMEN PARA CAPTURA
+================================================================================
+- Donde se ve el bloqueo: lineas ERROR de PacClient (ERROR DE CONEXION CON FINKOK).
+- Mensaje clave: "Connect to ... demo-facturacion.finkok.com:443 ... failed: Connect timed out"
+- Causa indicada en log: firewall o red bloqueando salida al puerto 443 hacia Finkok.
+================================================================================
